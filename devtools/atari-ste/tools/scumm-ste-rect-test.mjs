@@ -24,7 +24,9 @@ for (const name of ['mint/ostruct.h', 'common/scummsys.h', 'common/path.h', 'com
 }
 const toolchain = process.env.MINT_BIN || `${repo}/../cross-mint/bin`;
 const compiler = atari ? `${toolchain}/m68k-atari-mintelf-g++` : (process.env.CXX || 'c++');
-const binary = `${out}/${atari ? 'RECT.TOS' : 'rect-test'}`;
+// resolve() keeps one separator style: Hatari splits the program path at the
+// last native separator, so "dir\sub/RECT.TOS" would start nothing on Windows.
+const binary = resolve(out, atari ? 'RECT.TOS' : 'rect-test');
 const args = ['-std=c++11', '-Os', '-g', '-I', out, '-I', repo, `${out}/atari-ste-scene.cpp`, `${out}/test.cpp`, '-o', binary];
 if (atari) args.push('-m68000', '-fomit-frame-pointer', '-fno-exceptions', '-Wl,--stack,256k', `${source}/atari-c2p-asm.S`);
 else args.push('-fsanitize=address,undefined', '-fno-omit-frame-pointer');
@@ -34,7 +36,9 @@ if (!atari) {
 } else {
 	const hatari = resolve(process.env.HATARI || `${repo}/../F030Arcade/third_party/hatari/build/src/hatari`);
 	const tos = resolve(process.env.TOS || `${repo}/../F030Arcade/third_party/tos/tos206de.img`);
-	const result = spawnSync(hatari, ['--configfile', '/dev/null', '--tos', tos, '--machine', 'ste',
+	// An empty configuration file, because Hatari cannot use /dev/null on Windows.
+	writeFileSync(`${out}/hatari.cfg`, '');
+	const result = spawnSync(hatari, ['--configfile', `${out}/hatari.cfg`, '--tos', tos, '--machine', 'ste',
 		'--monitor', 'rgb', '--memsize', '4', '--cpulevel', '0', '--frameskips', '0',
 		'--cpuclock', '8', '--cpu-exact', 'on', '--compatible', 'on', '--sound', 'off', '--natfeats', 'on',
 		'--fast-boot', 'on', '--confirm-quit', 'off', '--fast-forward', 'on', '--conout', '2',

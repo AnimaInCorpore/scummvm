@@ -31,8 +31,9 @@ const nm = resolve(process.env.NM || `${repo}/../cross-mint/bin/m68k-atari-minte
 const hd = `${out}/HD`, gameDir = `${hd}/SCUMMVM`, prg = `${gameDir}/SCUMMVM.PRG`;
 mkdirSync(gameDir, { recursive: true });
 copyFileSync(`${build}/scummvm.prg`, prg);
+// 'junction' needs no extra rights on Windows; other systems ignore the type.
 for (const name of ['MONKEY', 'ATLANTIS'])
-	if (!existsSync(`${gameDir}/${name}`)) symlinkSync(`${build}/HD/SCUMMVM/${name}`, `${gameDir}/${name}`);
+	if (!existsSync(`${gameDir}/${name}`)) symlinkSync(`${build}/HD/SCUMMVM/${name}`, `${gameDir}/${name}`, 'junction');
 let ini = readFileSync(`${build}/HD/SCUMMVM/SCUMMVM.INI`, 'utf8').replace('debuglevel=9', 'debuglevel=0');
 ini = ini.replace('[monkey]', '[monkey]\nboot_param=28\nste_benchmark=true\nste_benchmark_walk=false');
 writeFileSync(`${gameDir}/SCUMMVM.INI`, ini);
@@ -49,12 +50,13 @@ const source = addr('atari_ste_last_source'), palette = addr('atari_ste_last_pal
 const write = (name, lines) => writeFileSync(`${out}/${name}.ini`, lines.join('\n') + '\n');
 // Phase 3 is the start of a conversion, so the engine frame is complete.
 const atConversion = vbl => `b pc = '${marker}' && ('${state}+8').l = 3 && VBL > ${vbl} :once :trace`;
-write('boot', [`b GemdosOpcode = 0x4b && OsCallParam = 0 :once :file ${out}/loaded.ini`]);
-write('loaded', [`b pc = TEXT :once :file ${out}/start.ini`]);
+// :trace keeps the debugger from stopping for console input at these breakpoints.
+write('boot', [`b GemdosOpcode = 0x4b && OsCallParam = 0 :once :trace :file ${out}/loaded.ini`]);
+write('loaded', [`b pc = TEXT :once :trace :file ${out}/start.ini`]);
 write('start', [
 	`symbols ${out}/code-symbols.txt TEXT`,
 	`${atConversion(vbls[0])} :file ${out}/capture-0.ini`,
-	`b VBL = ${vbls.at(-1) + 5000} :once :file ${out}/timeout.ini`,
+	`b VBL = ${vbls.at(-1) + 5000} :once :trace :file ${out}/timeout.ini`,
 ]);
 vbls.forEach((vbl, k) => write(`capture-${k}`, [
 	'echo STE_CAPTURE',
@@ -67,13 +69,15 @@ vbls.forEach((vbl, k) => write(`capture-${k}`, [
 ]));
 write('timeout', ['echo STE_CAPTURE_TIMEOUT', `screenshot ${out}/timeout.png`, 'quit']);
 
-const args = ['--configfile', '/dev/null', '--tos', tos, '--harddrive', hd,
+const args = ['--configfile', `${out}/hatari.cfg`, '--tos', tos, '--harddrive', hd,
 	'--machine', 'ste', '--monitor', 'rgb', '--memsize', '4', '--cpulevel', '0', '--cpuclock', '8',
 	'--cpu-exact', 'on', '--compatible', 'on', '--sound', 'off', '--fast-boot', 'on',
 	'--confirm-quit', 'off', '--fast-forward', 'on', '--frameskips', '0', '--spec512', '1',
 	'--borders', 'off', '--statusbar', 'off', '--zoom', '1',
 	'--conout', '2', '--run-vbls', String(vbls.at(-1) + 5100), '--parse', `${out}/boot.ini`, '--auto', 'C:\\SCUMMVM\\SCUMMVM.PRG'];
 console.log(`Room 28 frame capture after VBLs ${vbls.join(',')}; ${out}`);
+// An empty configuration file, because Hatari cannot use /dev/null on Windows.
+writeFileSync(`${out}/hatari.cfg`, '');
 writeFileSync(`${out}/hatari.log`, '');
 const child = spawn(hatari, args, { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, SDL_VIDEODRIVER: 'dummy', SDL_AUDIODRIVER: 'dummy', SDL_RENDER_DRIVER: 'software' } });
 for (const stream of [child.stdout, child.stderr]) stream.on('data', data => appendFileSync(`${out}/hatari.log`, data));
