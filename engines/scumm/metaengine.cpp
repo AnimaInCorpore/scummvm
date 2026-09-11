@@ -478,7 +478,7 @@ Common::Error ScummMetaEngine::createInstance(OSystem *syst, Engine **engine,
 	// games. Keeping the generic constructor matrix out of this module removes
 	// every older, HE, and v7/v8 engine family from the resident image.
 	if (res.game.version != 5 || res.game.platform != Common::kPlatformDOS ||
-		(strcmp(res.game.gameid, "monkey") != 0 && strcmp(res.game.gameid, "indy4") != 0))
+		(strcmp(res.game.gameid, "monkey") != 0 && strcmp(res.game.gameid, "atlantis") != 0))
 		return Common::Error(Common::kUnsupportedGameidError);
 	*engine = new ScummEngine_v5(syst, res);
 #else
