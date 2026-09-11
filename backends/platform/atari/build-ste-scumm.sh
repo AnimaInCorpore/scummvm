@@ -3,18 +3,35 @@
 set -eu
 
 BUILD_DIR=${1:-build-ste-scumm-ste}
-TOOLS=/Users/saschaspringer/Work/cross-mint/bin
-NM="$TOOLS/m68k-atari-mintelf-nm"
-	AS="$TOOLS/m68k-atari-mintelf-as"
-	CXX="$TOOLS/m68k-atari-mintelf-g++"
+REPO=$(cd "$(dirname "$0")/../../.." && pwd)
 
-cd "$(dirname "$0")/../../../$BUILD_DIR"
+# Cross tools: $MINT_BIN, else ../cross-mint/bin next to this checkout (the
+# devtools/atari-ste default), else m68k-atari-mintelf-g++ from PATH.
+if [ -z "${MINT_BIN:-}" ]; then
+	if [ -x "$REPO/../cross-mint/bin/m68k-atari-mintelf-g++" ]; then
+		MINT_BIN="$REPO/../cross-mint/bin"
+	elif command -v m68k-atari-mintelf-g++ >/dev/null 2>&1; then
+		MINT_BIN=$(dirname "$(command -v m68k-atari-mintelf-g++)")
+	else
+		echo "m68k-atari-mintelf-g++ not found; set MINT_BIN" >&2
+		exit 1
+	fi
+fi
+NM="$MINT_BIN/m68k-atari-mintelf-nm"
+AS="$MINT_BIN/m68k-atari-mintelf-as"
+CXX="$MINT_BIN/m68k-atari-mintelf-g++"
+
+# Byte-order sorting keeps the symbol lists identical on every host.
+export LC_ALL=C
+
+cd "$REPO/$BUILD_DIR"
 
 ROOT_FILE=ste-plugin-roots.txt
 
+# xargs -s splits nm runs so no command line exceeds the 32 KB Windows limit.
 root_symbols() {
 	find engines/scumm base/detection -name '*.o' -print0 |
-		xargs -0 "$NM" -u |
+		xargs -0 -s 30000 "$NM" -u |
 		awk 'NF >= 2 && $1 == "U" { print $2 }' |
 		sort -u
 }
@@ -39,7 +56,7 @@ make_host_symbol_object() {
 		sort -k2,2 -u > "$main_values"
 	{
 		find engines/scumm base/detection -name '*.o' -print0 |
-			xargs -0 "$NM"
+			xargs -0 -s 30000 "$NM"
 		"$NM" backends/plugins/elf/version.o
 	} |
 		awk 'NF >= 3 && $2 != "U" && $(NF - 1) != "U" { print $NF }' |
@@ -60,12 +77,12 @@ make_host_symbol_object() {
 	printf '%s\n' "$host_object"
 }
 
+# gcc response files keep the long option and object lists off the command line.
 main_link() {
-	root_options=$(awk '{ printf "-Wl,--undefined=%s ", $0 }' "$ROOT_FILE")
-	root_options="${root_options% }"
+	awk '{ printf "-Wl,--undefined=%s\n", $0 }' "$ROOT_FILE" > ste-plugin-roots.rsp
 
 	"$CXX" -m68000 -Wl,--gc-sections -Wl,-X -Wl,--msuper-memory \
-	-Wl,--stack,256k $root_options \
+	-Wl,--stack,256k @ste-plugin-roots.rsp \
 	backends/platform/atari/osystem_atari.o \
 	backends/platform/atari/atari_ikbd.o \
 	backends/platform/atari/native_features.o \
@@ -97,7 +114,8 @@ plugin_objects() {
 link_plugin() {
 	target=$1
 	output=$2
-	set -- $(plugin_objects "$target")
+	objects="ste-plugin-$(basename "$output" .plg)-objects.rsp"
+	plugin_objects "$target" > "$objects"
 	"$CXX" -m68000 -Wl,--gc-sections -Wl,-s \
 		-Wl,--allow-multiple-definition \
 		-Wl,-Map,"$output.map" \
@@ -107,7 +125,7 @@ link_plugin() {
 		-Wl,--undefined=PLUGIN_getTypeVersion \
 		-Wl,--undefined=PLUGIN_getObject \
 		-Wl,--undefined=PLUGIN_finalize \
-		-nostartfiles "$@" \
+		-nostartfiles @"$objects" \
 		backends/plugins/elf/version.o \
 		"$host_object" \
 		-Wl,-q,--retain-symbols-file,../backends/plugins/elf/plugin.syms \
@@ -135,4 +153,4 @@ if ! cmp -s "$ROOT_FILE" "$used_symbols"; then
 	link_plugin plugins/detection.plg plugins/detection.plg
 fi
 
-"$TOOLS/m68k-atari-mintelf-size" scummvm.prg plugins/scumm.plg plugins/detection.plg
+"$MINT_BIN/m68k-atari-mintelf-size" scummvm.prg plugins/scumm.plg plugins/detection.plg
