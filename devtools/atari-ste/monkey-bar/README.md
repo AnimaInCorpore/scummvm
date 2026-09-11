@@ -99,9 +99,10 @@ lightness limits still have to be judged on a CRT or true 50 Hz display.
 The fixture actors use the room `CLUT`, while the running game sets part of
 the palette itself, so tables for the port are built from captured frames.
 `scumm-ste-frame-capture.mjs` breaks at the renderer marker after each
-requested VBL and saves the engine's finished 320×200 frame and live palette;
-`--capture` optimises on those frames, verb bar included, instead of the
-fixture scene:
+requested VBL and saves the engine's finished 320×200 frame and live palette
+(in other rooms, where the benchmark hooks do not run, at the start of the
+converter; see `--game`, `--boot-param` and `--room`); `--capture` optimises
+on those frames, verb bar included, instead of the fixture scene:
 
 ```sh
 node devtools/atari-ste/tools/scumm-ste-frame-capture.mjs --out devtools/atari-ste/monkey-bar/room28-capture

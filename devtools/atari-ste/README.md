@@ -45,6 +45,7 @@ Game data is never committed; keep it in the untracked `assets/` directory.
 
 ```sh
 node devtools/atari-ste/tools/scumm-ste-frame-capture.mjs --out devtools/atari-ste/monkey-bar/room28-capture
+node devtools/atari-ste/tools/scumm-ste-frame-capture.mjs --game atlantis --boot-param 9554 --room 64 --vbls 44000,44400,44800,45200,45600,46000,46400,46800 --out devtools/atari-ste/monkey-bar/atlantis-room64-capture
 node devtools/atari-ste/tools/monkey-flicker-compare.mjs --capture devtools/atari-ste/monkey-bar/room28-capture --split 144 --dl 0.1,0.15,0.2,0.25,0.3 --sheet-dl 0.2 --out devtools/atari-ste/monkey-bar/room28-capture/flicker-compare-split
 node devtools/atari-ste/tools/scumm-ste-room-profile.mjs --first 8 --last 40 --out devtools/atari-ste/monkey-bar/room-profile/walk-rerun
 node devtools/atari-ste/tools/timerb-test.mjs /tmp/timerb

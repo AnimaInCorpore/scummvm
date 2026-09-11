@@ -72,7 +72,10 @@ node devtools/atari-ste/tools/monkey-flicker-compare.mjs --capture devtools/atar
 ```
 
 The capture tool breaks at the renderer marker after each requested VBL and saves
-the engine's finished 320×200 frame and live palette. The evaluator writes
+the engine's finished 320×200 frame and live palette. The benchmark hooks behind
+that marker only run in room 28; for other rooms and games (`--game`,
+`--boot-param`, `--room`) it breaks at the entry of
+`AtariSteSceneRenderer::convert` and records the rooms entered. The evaluator writes
 `lut-pair16-dl*.bin` and `lut-dual16-dl*.bin`; copy them to `C:\SCUMMVM\MIX`
 under 8.3 names (`PAIR20.BIN`, `DUAL20.BIN`). Table layout: palette words, slot
 pairs per region, then the 768-byte VGA palette they were computed for; see
