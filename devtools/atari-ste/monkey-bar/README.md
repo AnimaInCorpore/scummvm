@@ -91,8 +91,9 @@ same box, where counter-phased checkerboards cancel.
 `flicker-metrics.json` holds the table and palettes, `contact-sheet.png`
 compares the strategies at `--sheet-dl`, and `lut-*.bin` files map the 256 VGA
 indices to palette slot pairs, followed by the VGA palette they were computed
-for. The Atari STE ScummVM backend plays them with `ste_mix_lut` and
-`ste_mix_pattern` in the `[scummvm]` section. The time average assumes a 50 Hz display; the
+for. The Atari STE ScummVM backend plays `MIX\PAIR20.BIN` by default;
+`ste_mix_lut` and `ste_mix_pattern` in the `[scummvm]` section choose another
+table and pattern. The time average assumes a 50 Hz display; the
 lightness limits still have to be judged on a CRT or true 50 Hz display.
 
 The fixture actors use the room `CLUT`, while the running game sets part of

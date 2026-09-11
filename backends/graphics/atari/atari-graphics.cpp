@@ -1157,21 +1157,29 @@ void AtariGraphicsManager::allocateSurfaces() {
 		_steSceneRenderer = new AtariSteSceneRenderer();
 		_steSceneRenderer->setSceneLines(lines);
 
-		// Temporal colour mixing instead of the per-line raster: a table from
+		// Temporal colour mixing is the default STE display: a table from
 		// devtools/atari-ste/tools/monkey-flicker-compare.mjs maps every
 		// source colour to a pair of entries of a fixed palette, and the VBL
-		// hook alternates the two fields of each buffer. Graphics are set up
-		// before a game domain is active, so the keys belong in [scummvm].
-		if (ConfMan.hasKey("ste_mix_lut")) {
-			const Common::String pattern = ConfMan.hasKey("ste_mix_pattern") ? ConfMan.get("ste_mix_pattern") : "checker";
+		// hook alternates the two fields of each buffer. Without ste_mix_lut
+		// the table is MIX\PAIR20.BIN next to the program; an empty ste_mix_lut,
+		// or a table that cannot be loaded, keeps the per-line raster. Graphics
+		// are set up before a game domain is active, so the keys belong in
+		// [scummvm].
+		ConfMan.registerDefault("ste_mix_lut", "MIX/PAIR20.BIN");
+		ConfMan.registerDefault("ste_mix_pattern", "checker");
+		const Common::Path mixLut = ConfMan.getPath("ste_mix_lut");
+		if (!mixLut.empty()) {
+			const Common::String pattern = ConfMan.get("ste_mix_pattern");
 			const AtariSteSceneRenderer::MixPattern mixPattern =
 				pattern == "alternate" ? AtariSteSceneRenderer::kMixAlternate
 				: pattern == "static" ? AtariSteSceneRenderer::kMixStatic
 				: AtariSteSceneRenderer::kMixChecker;
-			steMix = _steSceneRenderer->loadMix(ConfMan.getPath("ste_mix_lut"), mixPattern);
+			steMix = _steSceneRenderer->loadMix(mixLut, mixPattern);
 			if (steMix) {
 				atari_ste_raster_enable = 0;
 				atari_ste_mix_split = _steSceneRenderer->mixSplit() ? 1 : 0;
+			} else {
+				warning("STE mix: keeping the per-line raster");
 			}
 		}
 	}
