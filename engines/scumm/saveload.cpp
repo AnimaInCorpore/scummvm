@@ -2005,6 +2005,11 @@ void ScummEngine::saveLoadWithSerializer(Common::Serializer &s) {
 				"PC Speaker", "IBM PCjr/Tandy", "Creative Music System", "AdLib", "Roland MT-32/CM-32L"
 			};
 
+#ifdef ATARI_STE_GAME_ONLY
+			warning("Incompatible sound settings between the current configuration (%s, id %d) and this saved game (%s, id %d)",
+				currentSoundCard < ARRAYSIZE(soundCards) ? soundCards[currentSoundCard] : "invalid", currentSoundCard,
+				VAR(VAR_SOUNDCARD) < ARRAYSIZE(soundCards) ? soundCards[VAR(VAR_SOUNDCARD)] : "invalid", VAR(VAR_SOUNDCARD));
+#else
 			GUI::MessageDialog dialog(
 				Common::U32String::format(_("Warning: incompatible sound settings detected between the current configuration and this saved game.\n\n"
 					"Current music device: %s (id %d)\nSave file music device: %s (id %d)\n\n"
@@ -2014,6 +2019,7 @@ void ScummEngine::saveLoadWithSerializer(Common::Serializer &s) {
 					VAR(VAR_SOUNDCARD) < ARRAYSIZE(soundCards) ? soundCards[VAR(VAR_SOUNDCARD)] : "invalid", VAR(VAR_SOUNDCARD))
 			);
 			runDialog(dialog);
+#endif
 		}
 	}
 

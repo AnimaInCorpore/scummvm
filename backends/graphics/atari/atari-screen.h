@@ -58,7 +58,11 @@ private:
 struct Screen {
 	using DirtyRects = std::unordered_set<Common::Rect>;
 
-	Screen(bool tt, int width, int height, const Graphics::PixelFormat &format, const Palette *palette);
+	// steScheduleWords > 0 allocates the packed palette schedule the STE
+	// raster plays for this buffer (see atari-ste-raster.h).
+	// steMix adds the second field of an STE colour-mixing buffer.
+	Screen(bool tt, bool ste, int width, int height, const Graphics::PixelFormat &format, const Palette *palette, int steScheduleWords, bool steMix = false);
+	~Screen();
 
 	void reset(int width, int height, const Graphics::Surface &boundingSurf);
 	// must be called before any rectangle drawing
@@ -80,8 +84,17 @@ struct Screen {
 	int mode = -1;
 	const Common::ScopedPtr<AtariSurface> &offsettedSurf = _offsettedSurf;
 
+	uint16 *stePalettes() { return _stePalettes; }
+	const uint16 *stePalettes() const { return _stePalettes; }
+	// Renderer schedule generation the packed stream in stePalettes() holds.
+	uint32 stePaletteGeneration = 0;
+
+	// Second field of an STE colour-mixing buffer; null without mixing.
+	AtariSurface *mixSurf() { return _mixSurf.get(); }
+
 private:
 	static constexpr size_t ALIGN = 16;	// 16 bytes
+	static constexpr int kMixFieldBytes = 320 / 2 * 200;
 
 	enum SteTtRezValue {
 		kRezValueSTLow  = 0,	// 320x200@4bpp, ST palette
@@ -93,7 +106,11 @@ private:
 	};
 
 	bool _tt;
+	bool _ste;
 	Common::ScopedPtr<AtariSurface> _offsettedSurf;
+	uint16 *_stePalettes = nullptr;
+	byte *_mixPixels = nullptr;
+	Common::ScopedPtr<AtariSurface> _mixSurf;
 };
 
 #endif // BACKENDS_GRAPHICS_ATARI_SCREEN_H

@@ -147,7 +147,10 @@ void AtariSurface::create(int16 width, int16 height, const Graphics::PixelFormat
 	MemoryPool *oldPool = s_currentPool;
 	s_currentPool = &s_videoRamPool;
 
-	Graphics::ManagedSurface::create(width * (format == PIXELFORMAT_RGB121 ? 4 : 8) / 8, height, pixelFormat);
+	// RGB121 is stored as packed 4-bit pixels on the STE. Use the requested
+	// format here; the member still contains the previous surface format until
+	// ManagedSurface::create() has initialized it.
+	Graphics::ManagedSurface::create(width * (pixelFormat == PIXELFORMAT_RGB121 ? 4 : 8) / 8, height, pixelFormat);
 	w = width;
 
 	s_currentPool = oldPool;
@@ -316,7 +319,15 @@ void AtariSurfaceInit() {
 	}
 #endif	// USE_SUPERVIDEL
 
+#ifdef ATARI_STE_GAME_ONLY
+	// Mxalloc must reserve one contiguous block below the resident program.
+	// With the SCUMM engine and plugin loaded, 256 KiB is the largest block
+	// available on a 4 MiB STE. The STE surfaces below are packed tightly
+	// into this pool; do not fall back to normal-RAM pixel buffers.
+	s_videoRamPool.size = 256 * 1024;
+#else
 	s_videoRamPool.size = 2 * 1024 * 1024;	// allocate 2 MiB, leave the rest for SDMA / Blitter usage
+#endif
 	s_videoRamPool.base = s_videoRamPool.size > 0 ? Mxalloc(s_videoRamPool.size, MX_STRAM) : 0;
 #ifdef USE_SUPERVIDEL
 	if (g_hasSuperVidel && s_videoRamPool.base)

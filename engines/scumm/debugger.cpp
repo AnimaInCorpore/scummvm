@@ -19,6 +19,7 @@
  *
  */
 
+
 #include "common/debug-channels.h"
 #include "common/file.h"
 #include "common/str.h"
@@ -54,6 +55,10 @@ void debugC(int channel, const char *s, ...) {
 
 	debug("%s", buf);
 }
+
+// The 4 MiB Atari STE profile links no GUI, and GUI::Debugger is part of it.
+// Only debugC() above is needed there.
+#ifndef ATARI_STE_GAME_ONLY
 
 ScummDebugger::ScummDebugger(ScummEngine *s)
 	: GUI::Debugger() {
@@ -1413,5 +1418,7 @@ bool ScummDebugger::Cmd_ResetCursors(int argc, const char **argv) {
 	detach();
 	return false;
 }
+
+#endif // !ATARI_STE_GAME_ONLY
 
 } // End of namespace Scumm

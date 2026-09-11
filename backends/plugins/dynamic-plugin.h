@@ -22,8 +22,17 @@
 #ifndef BACKENDS_PLUGINS_DYNAMICPLUGIN_H
 #define BACKENDS_PLUGINS_DYNAMICPLUGIN_H
 
+#ifdef ATARI_STE_GAME_ONLY
+#define FORBIDDEN_SYMBOL_EXCEPTION_printf
+#endif
+
 #include "base/plugins.h"
 #include "common/textconsole.h"
+
+#ifdef ATARI_STE_GAME_ONLY
+#undef printf
+#include <stdio.h>
+#endif
 
 
 class DynamicPlugin : public Plugin {
@@ -43,6 +52,9 @@ public:
 	bool loadPlugin() override {
 		// Validate the plugin API version
 		IntFunc verFunc = (IntFunc)findSymbol("PLUGIN_getVersion");
+		#ifdef ATARI_STE_GAME_ONLY
+		printf("Atari plugin getVersion symbol %p\n", (void *)verFunc);
+		#endif
 		if (!verFunc) {
 			unloadPlugin();
 			return false;
@@ -55,6 +67,9 @@ public:
 
 		// Get the type of the plugin
 		IntFunc typeFunc = (IntFunc)findSymbol("PLUGIN_getType");
+		#ifdef ATARI_STE_GAME_ONLY
+		printf("Atari plugin version accepted\n");
+		#endif
 		if (!typeFunc) {
 			unloadPlugin();
 			return false;
@@ -68,6 +83,9 @@ public:
 
 		// Validate the plugin type API version
 		IntFunc typeVerFunc = (IntFunc)findSymbol("PLUGIN_getTypeVersion");
+		#ifdef ATARI_STE_GAME_ONLY
+		printf("Atari plugin type %d\n", _type);
+		#endif
 		if (!typeVerFunc) {
 			unloadPlugin();
 			return false;
@@ -80,6 +98,9 @@ public:
 
 		// Get the plugin's instantiator object
 		GetObjectFunc getObject = (GetObjectFunc)findSymbol("PLUGIN_getObject");
+		#ifdef ATARI_STE_GAME_ONLY
+		printf("Atari plugin type version accepted, object symbol %p\n", (void *)getObject);
+		#endif
 		if (!getObject) {
 			unloadPlugin();
 			return false;
@@ -87,6 +108,9 @@ public:
 
 		// Get the plugin object
 		_pluginObject = getObject();
+		#ifdef ATARI_STE_GAME_ONLY
+		printf("Atari plugin object created %p\n", (void *)_pluginObject);
+		#endif
 		if (!_pluginObject) {
 			warning("Couldn't get the plugin object");
 			unloadPlugin();

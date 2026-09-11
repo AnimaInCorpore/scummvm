@@ -21,12 +21,10 @@ MODULE_OBJS := \
 	midiplayer.o \
 	miles_adlib.o \
 	miles_midi.o \
-	mixer.o \
 	mpu401.o \
 	mt32gm.o \
 	musicplugin.o \
 	null.o \
-	rate.o \
 	sid.o \
 	ym2149.o \
 	timestamp.o \
@@ -73,6 +71,12 @@ MODULE_OBJS := \
 	softsynth/eas.o \
 	softsynth/pcspk.o \
 	softsynth/ay8912.o
+
+ifeq (,$(findstring -DATARI_STE_GAME_ONLY,$(SAVED_CXXFLAGS)))
+MODULE_OBJS += \
+	mixer.o \
+	rate.o
+endif
 
 ifdef USE_HMI_AUDIO
 MODULE_OBJS += \

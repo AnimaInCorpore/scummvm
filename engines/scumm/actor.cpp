@@ -2619,6 +2619,7 @@ void ActorHE::prepareDrawActorCostume(BaseCostumeRenderer *bcr) {
 
 	bcr->_skipLimbs = (_heSkipLimbs != 0);
 
+#ifndef ATARI_STE_GAME_ONLY
 	if (_vm->_game.heversion >= 80 && _heNoTalkAnimation == 0 && _animProgress == 0) {
 		if (_vm->getTalkingActor() == _number && !_vm->_string[0].no_talk_anim) {
 			int talkState = -1;
@@ -2636,6 +2637,7 @@ void ActorHE::prepareDrawActorCostume(BaseCostumeRenderer *bcr) {
 			setTalkCondition(1);
 		}
 	}
+#endif
 	_heNoTalkAnimation = 0;
 }
 

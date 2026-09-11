@@ -19,6 +19,9 @@
  *
  */
 
+// FIXME: Diagnostic output for the Atari STE plugin scan.
+#define FORBIDDEN_SYMBOL_EXCEPTION_printf
+
 #include "base/plugins.h"
 
 #include "common/func.h"
@@ -96,6 +99,7 @@ public:
 		#include "engines/detection_table.h"
 		#endif
 
+		#ifndef ATARI_STE_GAME_ONLY
 		// Music plugins
 		// TODO: Use defines to disable or enable each MIDI driver as a
 		// static/dynamic plugin, like it's done for the engines
@@ -168,6 +172,8 @@ public:
 		#endif
 		#if defined(USE_TIMIDITY)
 		LINK_PLUGIN(TIMIDITY)
+		#endif
+
 		#endif
 
 		// Scaler plugins
@@ -337,6 +343,8 @@ Common::String detectPluginName = "detection";
 		PluginList plugins(pluginProvider->getPlugins());
 
 		for (auto &curPlugin : plugins) {
+			if (pluginProvider->isFilePluginProvider())
+				printf("Atari plugin candidate '%s'\n", curPlugin->getFileName().toString(Common::Path::kNativeSeparator).c_str());
 			// This is a 'hack' based on the assumption that we have no sound
 			// file plugins. Currently this is the case. If it changes, we
 			// should find a fast way of detecting whether a plugin is a

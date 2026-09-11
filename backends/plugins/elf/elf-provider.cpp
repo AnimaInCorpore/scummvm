@@ -19,6 +19,9 @@
  *
  */
 
+// FIXME: Diagnostic output for the Atari STE plugin loader.
+#define FORBIDDEN_SYMBOL_EXCEPTION_printf
+
 #include "common/scummsys.h"
 
 #if defined(DYNAMIC_MODULES) && defined(USE_ELF_LOADER)
@@ -105,6 +108,7 @@ void ELFPlugin::trackSize() {
 
 bool ELFPlugin::loadPlugin() {
 	assert(!_dlHandle);
+	printf("Atari ELF loading '%s'\n", _filename.toString(Common::Path::kNativeSeparator).c_str());
 
 	DLObject *obj = makeDLObject();
 	if (obj->open(_filename)) {
@@ -115,24 +119,28 @@ bool ELFPlugin::loadPlugin() {
 	}
 
 	if (!_dlHandle) {
+		printf("Atari ELF open failed '%s'\n", _filename.toString(Common::Path::kNativeSeparator).c_str());
 		warning("elfloader: Failed loading plugin '%s'", _filename.toString(Common::Path::kNativeSeparator).c_str());
 		return false;
 	}
 
 	CharFunc buildDateFunc = (CharFunc)findSymbol("PLUGIN_getBuildDate");
 	if (!buildDateFunc) {
+		printf("Atari ELF missing build symbol '%s'\n", _filename.toString(Common::Path::kNativeSeparator).c_str());
 		unloadPlugin();
 		warning("elfloader: plugin '%s' is missing symbols", _filename.toString(Common::Path::kNativeSeparator).c_str());
 		return false;
 	}
 
 	if (strncmp(gScummVMPluginBuildDate, buildDateFunc(), strlen(gScummVMPluginBuildDate))) {
+		printf("Atari ELF build date mismatch '%s': host '%s', plugin '%s'\n", _filename.toString(Common::Path::kNativeSeparator).c_str(), gScummVMPluginBuildDate, buildDateFunc());
 		unloadPlugin();
 		warning("elfloader: plugin '%s' has a different build date", _filename.toString(Common::Path::kNativeSeparator).c_str());
 		return false;
 	}
 
 	bool ret = DynamicPlugin::loadPlugin();
+	printf("Atari ELF dynamic load '%s' -> %d\n", _filename.toString(Common::Path::kNativeSeparator).c_str(), ret ? 1 : 0);
 
 #ifdef ELF_LOADER_CXA_ATEXIT
 	if (ret) {

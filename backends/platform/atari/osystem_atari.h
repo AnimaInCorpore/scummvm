@@ -57,9 +57,11 @@ private:
 
 	bool _timerInitialized = false;
 
+#ifndef ATARI_STE_GAME_ONLY
 	int16 _vdi_handle;
 	int _vdi_width;
 	int _vdi_height;
+#endif
 };
 
 #endif

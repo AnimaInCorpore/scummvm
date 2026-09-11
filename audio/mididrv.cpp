@@ -89,6 +89,17 @@ Common::String MidiDriver::musicType2GUIO(uint32 musicType) {
 
 bool MidiDriver::_forceTypeMT32 = false;
 
+// The 4 MiB Atari STE profile links no GUI, so device fallbacks are reported
+// on the console instead of through a modal dialog.
+static void reportDeviceFallback(const Common::U32String &msg) {
+#ifdef ATARI_STE_GAME_ONLY
+	warning("%s", msg.encode().c_str());
+#else
+	GUI::MessageDialog dialog(msg);
+	dialog.runModal();
+#endif
+}
+
 MusicType MidiDriver::getMusicType(MidiDriver::DeviceHandle handle) {
 	if (_forceTypeMT32)
 		return MT_MT32;
@@ -231,8 +242,7 @@ MidiDriver::DeviceHandle MidiDriver::detectDevice(int flags) {
 		Common::U32String warningMsg = Common::U32String::format(
 			_("The selected audio device '%s' was not found (e.g. might be turned off or disconnected)."), failedDevStr.c_str())
 			+ Common::U32String(" ") + _("Attempting to fall back to the next available device...");
-		GUI::MessageDialog dialog(warningMsg);
-		dialog.runModal();
+		reportDeviceFallback(warningMsg);
 	}
 
 	MusicType tp = getMusicType(reslt);
@@ -245,8 +255,7 @@ MidiDriver::DeviceHandle MidiDriver::detectDevice(int flags) {
 			Common::U32String warningMsg = Common::U32String::format(
 				_("The selected audio device '%s' cannot be used. See log file for more information."), failedDevStr.c_str())
 				+ Common::U32String(" ") + _("Attempting to fall back to the next available device...");
-			GUI::MessageDialog dialog(warningMsg);
-			dialog.runModal();
+			reportDeviceFallback(warningMsg);
 		}
 	}
 
@@ -283,8 +292,7 @@ MidiDriver::DeviceHandle MidiDriver::detectDevice(int flags) {
 						Common::U32String warningMsg = Common::U32String::format(
 							_("The preferred audio device '%s' was not found (e.g. might be turned off or disconnected)."), devStr.c_str())
 							+ Common::U32String(" ") + _("Attempting to fall back to the next available device...");
-						GUI::MessageDialog dialog(warningMsg);
-						dialog.runModal();
+						reportDeviceFallback(warningMsg);
 					}
 				} else if (type != MT_AUTO) {
 					if (checkDevice(hdl, checkFlags, false)) {
@@ -300,8 +308,7 @@ MidiDriver::DeviceHandle MidiDriver::detectDevice(int flags) {
 							Common::U32String warningMsg = Common::U32String::format(
 								_("The preferred audio device '%s' cannot be used. See log file for more information."), getDeviceString(hdl, MidiDriver::kDeviceName).c_str())
 								+ Common::U32String(" ") + _("Attempting to fall back to the next available device...");
-							GUI::MessageDialog dialog(warningMsg);
-							dialog.runModal();
+							reportDeviceFallback(warningMsg);
 						}
 					}
 				}

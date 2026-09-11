@@ -80,23 +80,36 @@ static void defaultOutputFormatter(char *dst, const char *src, size_t dstSize) {
 	}
 }
 
+// The 4 MiB Atari STE profile links no GUI, so a modal notification degrades to
+// a console warning. Used by the call sites that only inform the player.
+static void notifyUser(const Common::U32String &msg) {
+#ifdef ATARI_STE_GAME_ONLY
+	warning("%s", msg.encode().c_str());
+#else
+	GUI::MessageDialog dialog(msg);
+	dialog.runModal();
+#endif
+}
+
 static bool defaultErrorHandler(const char *msg) {
 	bool handled = false;
 
 	// Unless this error -originated- within the debugger itself, we
 	// now invoke the debugger, if available / supported.
 	if (g_engine) {
-		GUI::Debugger *debugger = g_engine->getOrCreateDebugger();
-
 #if defined(USE_TASKBAR)
 		g_system->getTaskbarManager()->notifyError();
 #endif
+
+#ifndef ATARI_STE_GAME_ONLY
+		GUI::Debugger *debugger = g_engine->getOrCreateDebugger();
 
 		if (debugger && !debugger->isActive()) {
 			debugger->attach(msg);
 			debugger->onFrame();
 			handled = true;
 		}
+#endif
 
 
 #if defined(USE_TASKBAR)
@@ -290,6 +303,18 @@ void initCommonGFX(bool is3D) {
 // This is a proper and good way to show your appreciation for our hard work over these years.
 bool splash = false;
 
+// The 4 MiB Atari STE profile has no resident GUI. Touching GuiManager here
+// would build the whole theme engine (its default XML alone needs a 138 KiB
+// allocation) before the engine has even started, which the small heap cannot
+// satisfy. Without a launcher, the game is never started from the GUI anyway.
+static bool guiWasLaunched() {
+#ifdef ATARI_STE_GAME_ONLY
+	return false;
+#else
+	return GUI::GuiManager::instance()._launched;
+#endif
+}
+
 #include "logo_data.h"
 
 void splashScreen() {
@@ -384,44 +409,37 @@ static void warnTransactionFailures(OSystem::TransactionError gfxError, int widt
 	if (gfxError & OSystem::kTransactionFormatNotSupported) {
 		Common::U32String message = _("Could not initialize color format.");
 
-		GUI::MessageDialog dialog(message);
-		dialog.runModal();
+		notifyUser(message);
 	}
 
 	if (gfxError & OSystem::kTransactionModeSwitchFailed) {
 		Common::U32String message;
 		message = Common::U32String::format(_("Could not switch to video mode '%s'."), ConfMan.get("gfx_mode").c_str());
 
-		GUI::MessageDialog dialog(message);
-		dialog.runModal();
+		notifyUser(message);
 	}
 
 	if (gfxError & OSystem::kTransactionStretchModeSwitchFailed) {
 		Common::U32String message;
 		message = Common::U32String::format(_("Could not switch to stretch mode '%s'."), ConfMan.get("stretch_mode").c_str());
 
-		GUI::MessageDialog dialog(message);
-		dialog.runModal();
+		notifyUser(message);
 	}
 
 	if (gfxError & OSystem::kTransactionAspectRatioFailed) {
-		GUI::MessageDialog dialog(_("Could not apply aspect ratio setting."));
-		dialog.runModal();
+		notifyUser(_("Could not apply aspect ratio setting."));
 	}
 
 	if (gfxError & OSystem::kTransactionFullscreenFailed) {
-		GUI::MessageDialog dialog(_("Could not apply fullscreen setting."));
-		dialog.runModal();
+		notifyUser(_("Could not apply fullscreen setting."));
 	}
 
 	if (gfxError & OSystem::kTransactionFilteringFailed) {
-		GUI::MessageDialog dialog(_("Could not apply filtering setting."));
-		dialog.runModal();
+		notifyUser(_("Could not apply filtering setting."));
 	}
 
 	if (gfxError & OSystem::kTransactionShaderChangeFailed) {
-		GUI::MessageDialog dialog(_("Could not apply shader setting."));
-		dialog.runModal();
+		notifyUser(_("Could not apply shader setting."));
 	}
 }
 
@@ -448,7 +466,7 @@ int initGraphicsAny(const Graphics::ModeWithFormatList &modes, int start) {
 
 		gfxError = g_system->endGFXTransaction();
 
-		if (!splash && !GUI::GuiManager::instance()._launched)
+		if (!splash && !guiWasLaunched())
 			splashScreen();
 
 		if (gfxError == OSystem::kTransactionSuccess)
@@ -508,7 +526,7 @@ void initGraphics3d(int width, int height) {
 		g_system->initSize(width, height);
 	OSystem::TransactionError gfxError = g_system->endGFXTransaction();
 
-	if (!splash && !GUI::GuiManager::instance()._launched) {
+	if (!splash && !guiWasLaunched()) {
 		Common::Event event;
 		(void)g_system->getEventManager()->pollEvent(event);
 		splashScreen();
@@ -534,6 +552,11 @@ void GUIErrorMessage(const Common::U32String &msg, const char *url) {
 	g_system->beginGFXTransaction();
 		initCommonGFX(false);
 		g_system->initSize(320, 200);
+#ifdef ATARI_STE_GAME_ONLY
+	// No GUI in the 4 MiB STE profile: the console is the only error channel.
+	(void)url;
+	error("%s", msg.encode().c_str());
+#else
 	if (g_system->endGFXTransaction() == OSystem::kTransactionSuccess) {
 		if (url) {
 			GUI::MessageDialogWithURL dialog(msg, url);
@@ -545,6 +568,7 @@ void GUIErrorMessage(const Common::U32String &msg, const char *url) {
 	} else {
 		error("%s", msg.encode().c_str());
 	}
+#endif
 }
 
 void GUIErrorMessageFormat(const char *fmt, ...) {
@@ -592,13 +616,11 @@ bool Engine::isDataAndCDAudioReadFromSameCD() {
 	}
 
 	if (g_system->getAudioCDManager()->isDataAndCDAudioReadFromSameCD()) {
-		GUI::MessageDialog dialog(
-			_("You appear to be playing this game directly\n"
+		notifyUser(_("You appear to be playing this game directly\n"
 			"from the CD. This is known to cause problems,\n"
 			"and it is therefore recommended that you copy\n"
 			"the data files to your hard disk instead.\n"
 			"See the documentation (CD audio) for details."));
-		dialog.runModal();
 		return true;
 	}
 	return false;
@@ -615,13 +637,11 @@ void Engine::warnMissingExtractedCDAudio() {
 	// Display a modal informative dialogue for the case when:
 	// - The game has audio tracks,
 	// - and the tracks have not been ripped.
-	GUI::MessageDialog dialog(
-		_("This game has audio tracks on its CD. These\n"
+	notifyUser(_("This game has audio tracks on its CD. These\n"
 		"tracks need to be ripped from the CD using\n"
 		"an appropriate CD audio extracting tool in\n"
 		"order to listen to the game's music.\n"
 		"See the documentation (CD audio) for details."));
-	dialog.runModal();
 }
 
 void Engine::handleAutoSave() {
@@ -642,6 +662,10 @@ bool Engine::warnBeforeOverwritingAutosave() {
 		_targetName.c_str(), getAutosaveSlot());
 	if (!desc.isValid() || desc.isAutosave())
 		return true;
+#ifdef ATARI_STE_GAME_ONLY
+	// No GUI to ask with: keep the existing saved game and skip the autosave.
+	return false;
+#else
 	Common::U32StringArray altButtons;
 	altButtons.push_back(_("Delete"));
 	altButtons.push_back(_("Skip autosave"));
@@ -670,6 +694,7 @@ bool Engine::warnBeforeOverwritingAutosave() {
 	default: // Hitting Escape returns -1. On this case, don't save but do prompt again later.
 		return false;
 	}
+#endif
 }
 
 void Engine::saveAutosaveIfEnabled() {
@@ -815,6 +840,11 @@ void Engine::drawHotspots() {
 }
 
 void Engine::openMainMenuDialog() {
+#ifdef ATARI_STE_GAME_ONLY
+	// The 4 MiB STE profile has no resident global GUI. The SCUMM game UI
+	// remains available; this menu entry is intentionally a no-op.
+	return;
+#else
 	if (!_mainMenuDialog)
 		_mainMenuDialog = new MainMenuDialog(this);
 	Common::TextToSpeechManager *ttsMan = g_system->getTextToSpeechManager();
@@ -855,9 +885,16 @@ void Engine::openMainMenuDialog() {
 	g_system->applyBackendSettings();
 	applyGameSettings();
 	syncSoundSettings();
+#endif
 }
 
 bool Engine::warnUserAboutUnsupportedGame(Common::String msg) {
+#ifdef ATARI_STE_GAME_ONLY
+	// No GUI to prompt with; log the warning and continue.
+	if (!msg.empty())
+		warning("%s", msg.c_str());
+	return true;
+#else
 	if (ConfMan.getBool("enable_unsupported_game_warning")) {
 		Common::TextToSpeechManager *ttsMan = g_system->getTextToSpeechManager();
 		if (ttsMan != nullptr) {
@@ -878,9 +915,14 @@ bool Engine::warnUserAboutUnsupportedGame(Common::String msg) {
 		return status == GUI::kMessageOK;
 	}
 	return true;
+#endif
 }
 
 bool Engine::warnUserAboutUnsupportedAddOn(Common::String addOnName) {
+#ifdef ATARI_STE_GAME_ONLY
+	warning("Unsupported add-on '%s'", addOnName.c_str());
+	return true;
+#else
 	if (ConfMan.getBool("enable_unsupported_game_warning")) {
 		Common::TextToSpeechManager *ttsMan = g_system->getTextToSpeechManager();
 		if (ttsMan != nullptr) {
@@ -904,9 +946,13 @@ bool Engine::warnUserAboutUnsupportedAddOn(Common::String addOnName) {
 	}
 
 	return true;
+#endif
 }
 
 void Engine::warnUserAboutTestingMode() {
+#ifdef ATARI_STE_GAME_ONLY
+	warning("The game you are about to start is newly supported and is in testing mode");
+#else
 	if (ConfMan.getBool("enable_unsupported_game_warning")) {
 		Common::TextToSpeechManager *ttsMan = g_system->getTextToSpeechManager();
 		if (ttsMan != nullptr) {
@@ -921,9 +967,13 @@ void Engine::warnUserAboutTestingMode() {
 		if (ttsMan != nullptr)
 			ttsMan->popState();
 	}
+#endif
 }
 
 void Engine::errorAddingAddOnWithoutBaseGame(Common::String addOnName, Common::String gameId) {
+#ifdef ATARI_STE_GAME_ONLY
+	warning("The add-on '%s' cannot be run independently of '%s'", addOnName.c_str(), gameId.c_str());
+#else
 	Common::TextToSpeechManager *ttsMan = g_system->getTextToSpeechManager();
 	if (ttsMan != nullptr) {
 		ttsMan->pushState();
@@ -938,9 +988,13 @@ void Engine::errorAddingAddOnWithoutBaseGame(Common::String addOnName, Common::S
 
 	if (ttsMan != nullptr)
 		ttsMan->popState();
+#endif
 }
 
 void Engine::errorUnsupportedGame(Common::String extraMsg) {
+#ifdef ATARI_STE_GAME_ONLY
+	warning("This game is not supported%s%s", extraMsg.empty() ? "" : ": ", extraMsg.c_str());
+#else
 	Common::TextToSpeechManager *ttsMan = g_system->getTextToSpeechManager();
 	if (ttsMan != nullptr) {
 		ttsMan->pushState();
@@ -954,6 +1008,7 @@ void Engine::errorUnsupportedGame(Common::String extraMsg) {
 
 	if (ttsMan != nullptr)
 		ttsMan->popState();
+#endif
 }
 
 uint32 Engine::getTotalPlayTime() const {
@@ -1092,6 +1147,11 @@ bool Engine::canSaveGameStateCurrently(Common::U32String *msg) {
 }
 
 bool Engine::loadGameDialog() {
+#ifdef ATARI_STE_GAME_ONLY
+	// The save/load chooser is part of the GUI, which this profile does not link.
+	g_system->displayMessageOnOSD(_("Loading game is currently unavailable"));
+	return false;
+#else
 	if (!canLoadGameStateCurrently()) {
 		g_system->displayMessageOnOSD(_("Loading game is currently unavailable"));
 		return false;
@@ -1118,9 +1178,14 @@ bool Engine::loadGameDialog() {
 	}
 
 	return true;
+#endif
 }
 
 bool Engine::saveGameDialog() {
+#ifdef ATARI_STE_GAME_ONLY
+	g_system->displayMessageOnOSD(_("Saving game is currently unavailable"));
+	return false;
+#else
 	if (!canSaveGameStateCurrently()) {
 		g_system->displayMessageOnOSD(_("Saving game is currently unavailable"));
 		return false;
@@ -1150,6 +1215,7 @@ bool Engine::saveGameDialog() {
 	}
 
 	return true;
+#endif
 }
 
 void Engine::quitGame() {
@@ -1167,10 +1233,12 @@ bool Engine::shouldQuit() {
 }
 
 GUI::Debugger *Engine::getOrCreateDebugger() {
+#ifndef ATARI_STE_GAME_ONLY
 	if (!_debugger)
 		// Create a bare-bones debugger. This is useful for engines without their own
 		// debugger when an error occurs
 		_debugger = new GUI::Debugger();
+#endif
 
 	return _debugger;
 }
@@ -1296,8 +1364,7 @@ Common::ErrorCode Engine::updateAddOns(const MetaEngine *metaEngine) const {
 																	  subdirNode.getPath().toString(Common::Path::kNativeSeparator).c_str(),
 																	  ConfMan.getActiveDomainName().c_str());
 
-					GUI::MessageDialog alert(msg);
-					alert.runModal();
+					notifyUser(msg);
 				}
 
 				continue;
@@ -1323,11 +1390,17 @@ Common::ErrorCode Engine::updateAddOns(const MetaEngine *metaEngine) const {
 				Common::U32String msg = Common::U32String::format(msgFormat,
 																  subdirNode.getPath().toString(Common::Path::kNativeSeparator).c_str());
 
+#ifdef ATARI_STE_GAME_ONLY
+				// No chooser without a GUI; take the first candidate.
+				warning("%s", msg.encode().c_str());
+				idx = 0;
+#else
 				GUI::ChooserDialog dialog(msg);
 				dialog.setList(list);
 				idx = dialog.runModal();
 				if (idx < 0)
 					return Common::kUserCanceled;
+#endif
 			}
 
 			if (0 <= idx && idx < (int)detectedAddOns.size()) {
@@ -1339,8 +1412,10 @@ Common::ErrorCode Engine::updateAddOns(const MetaEngine *metaEngine) const {
 					debug("Detected an unknown variant of add-on '%s' (path: '%s')",
 						  selectedAddOn.gameId.c_str(),
 						  subdirNode.getPath().toString(Common::Path::kNativeSeparator).c_str());
+#ifndef ATARI_STE_GAME_ONLY
 					GUI::UnknownGameDialog dialog(selectedAddOn);
 					dialog.runModal();
+#endif
 					continue; // Do not create an entry for unknown variants
 				}
 

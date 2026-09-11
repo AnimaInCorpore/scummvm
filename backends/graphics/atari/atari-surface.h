@@ -46,7 +46,7 @@ public:
 	virtual void copyRectToSurface(const void *buffer, int srcPitch, int destX, int destY, int width, int height);
 	virtual void copyRectToSurface(const Graphics::Surface &srcSurface, int destX, int destY, const Common::Rect &subRect) {
 		assert(subRect.left % 16 == 0);
-		assert(srcSurface.format == format);
+		assert(srcSurface.format == format || (format == PIXELFORMAT_RGB121 && srcSurface.format == PIXELFORMAT_CLUT8));
 
 		copyRectToSurface(
 			srcSurface.getBasePtr(subRect.left, subRect.top), srcSurface.pitch,

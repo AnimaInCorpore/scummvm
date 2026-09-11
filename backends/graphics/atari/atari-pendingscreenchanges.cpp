@@ -35,7 +35,7 @@
 void PendingScreenChanges::queueAll() {
 	_changes |= kAll;
 
-	if (_manager->_tt)
+	if (_manager->_tt || _manager->_ste)
 		_changes &= ~kAspectRatioCorrection;
 }
 
@@ -83,11 +83,11 @@ void PendingScreenChanges::applyAfterVblLock(const Screen &screen) {
 			// therefore this function can be called multiple times per frame. In this case,
 			// EsetPalette() will set the colours immediately (oops) but VsetRGB() is fine:
 			// it will be set as soon as VBL is unlocked again.
-			if (_manager->_tt) {
-				EsetPalette(0, screen.palette->entries, screen.palette->tt);
-			} else {
-				VsetRGB(0, screen.palette->entries, screen.palette->falcon);
-			}
+				if (_manager->_tt) {
+					EsetPalette(0, screen.palette->entries, screen.palette->tt);
+				} else if (!_manager->_ste) {
+					VsetRGB(0, screen.palette->entries, screen.palette->falcon);
+				}
 		}
 
 		_changes &= ~(kVideoMode | kPalette);
@@ -139,8 +139,8 @@ void PendingScreenChanges::processVideoMode(const Screen &screen) {
 	// changing video mode implies an additional Vsync(): there's no way to change resolution
 	// and set new screen address (and/or shake offsets etc) in one go
 	if (screen.rez != -1) {
-		static uint16 black[256];
-		EsetPalette(0, screen.palette->entries, black);
+			static uint16 black[256];
+			EsetPalette(0, _manager->_ste ? 16 : screen.palette->entries, black);
 
 		// unfortunately this reinitializes VDI, too
 		Setscreen(SCR_NOCHANGE, SCR_NOCHANGE, screen.rez);

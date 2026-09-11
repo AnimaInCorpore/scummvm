@@ -850,8 +850,13 @@ void ScummEngine_v6::processKeyboard(Common::KeyState lastKeyHit) {
 		}
 	} else {
 		if (lastKeyHit.keycode == Common::KEYCODE_t && lastKeyHit.hasFlags(Common::KBD_CTRL)) {
+#ifdef ATARI_STE_GAME_ONLY
+			// No GUI in the 4 MiB STE profile: cycle the setting directly.
+			_voiceMode = (_voiceMode + 1) % 3;
+#else
 			SubtitleSettingsDialog dialog(this, _voiceMode);
 			_voiceMode = runDialog(dialog);
+#endif
 
 			switch (_voiceMode) {
 			case 0:
@@ -950,8 +955,12 @@ void ScummEngine_v3::processKeyboard(Common::KeyState lastKeyHit) {
 			updateIQPoints();
 
 			Common::sprintf_s(text, "IQ Points: Episode = %d, Series = %d", _scummVars[244], _scummVars[245]);
+#ifdef ATARI_STE_GAME_ONLY
+			warning("%s", text);
+#else
 			Indy3IQPointsDialog indy3IQPointsDialog(this, text);
 			runDialog(indy3IQPointsDialog);
+#endif
 		}
 	}
 }
@@ -1442,9 +1451,11 @@ void ScummEngine::processKeyboard(Common::KeyState lastKeyHit) {
 		else if (lastKeyHit.ascii == '[' && vol > 0)
 			vol--;
 
+#ifndef ATARI_STE_GAME_ONLY
 		// Display the music volume
 		ValueDisplayDialog dlg(_("Music volume: "), 0, 16, vol, ']', '[');
 		vol = runDialog(dlg);
+#endif
 
 		vol *= 16;
 		if (vol > Audio::Mixer::kMaxMixerVolume)
@@ -1459,9 +1470,11 @@ void ScummEngine::processKeyboard(Common::KeyState lastKeyHit) {
 		else if (lastKeyHit.ascii == '+' && _defaultTextSpeed < 9)
 			_defaultTextSpeed++;
 
+#ifndef ATARI_STE_GAME_ONLY
 		// Display the talk speed
 		ValueDisplayDialog dlg(_("Subtitle speed: "), 0, 9, _defaultTextSpeed, '+', '-');
 		_defaultTextSpeed = runDialog(dlg);
+#endif
 
 		// Save the new talkspeed value to ConfMan
 		setTalkSpeed(_defaultTextSpeed);

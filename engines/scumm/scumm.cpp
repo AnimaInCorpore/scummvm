@@ -19,12 +19,17 @@
  *
  */
 
+#ifdef ATARI_STE_GAME_ONLY
+#define FORBIDDEN_SYMBOL_EXCEPTION_printf
+#endif
+
 #include "common/config-manager.h"
 #include "common/compression/clickteam.h"
 #include "common/debug-channels.h"
 #include "common/macresman.h"
 #include "common/md5.h"
 #include "common/events.h"
+#include "backends/platform/atari/ste-benchmark.h"
 #include "common/str.h"
 #include "common/system.h"
 #include "common/translation.h"
@@ -323,10 +328,12 @@ ScummEngine::ScummEngine(OSystem *syst, const DetectorResult &dr)
 
 	if (_game.platform == Common::kPlatformFMTowns && _game.id != GID_LOOM && _game.version == 3)
 		if (ConfMan.getBool("aspect_ratio") && !ConfMan.getBool("trim_fmtowns_to_200_pixels")) {
+#ifndef ATARI_STE_GAME_ONLY
 			GUI::MessageDialog dialog(
 				_("You have enabled 'aspect ratio correction'. However, FM-TOWNS' natural resolution is 320x240, which doesn't allow aspect ratio correction.\n"
 				  "Aspect ratio correction can be achieved by trimming the resolution to 320x200, under 'engine' tab."));
 			dialog.runModal();
+#endif
 		}
 
 	switch (_renderMode) {
@@ -461,7 +468,10 @@ ScummEngine::ScummEngine(OSystem *syst, const DetectorResult &dr)
 
 	_isRTL = (_language == Common::HE_ISR && (_game.heversion == 0 || _game.heversion >= 72))
 			&& (_game.id == GID_MANIAC || (_game.version >= 4 && _game.version < 7)) && !(_game.features & GF_HE_NO_BIDI);
-#ifndef DISABLE_HELP
+// The 4 MiB STE profile has no resident GUI: building this dialog here would
+// pull in the whole theme engine before the game even starts, and
+// Engine::openMainMenuDialog() is a no-op in that build anyway.
+#if !defined(DISABLE_HELP) && !defined(ATARI_STE_GAME_ONLY)
 	// Create custom GMM dialog providing a help subdialog
 	assert(!_mainMenuDialog);
 	_mainMenuDialog = new ScummMenuDialog(this);
@@ -545,7 +555,9 @@ ScummEngine::~ScummEngine() {
 		delete _macScreen;
 	}
 
+#ifndef ATARI_STE_GAME_ONLY
 	delete _macGui;
+#endif
 
 	for (auto &it : _scriptOverrides)
 		delete it._value;
@@ -1001,7 +1013,42 @@ ScummEngine_v8::~ScummEngine_v8() {
 #pragma mark --- Initialization ---
 #pragma mark -
 
+#ifdef ATARI_STE_GAME_ONLY
+// Reports the largest block the allocator can still hand out. The 4 MiB STE
+// profile runs with roughly 1 MiB of heap behind a ~2.9 MiB resident image,
+// so knowing the headroom at each start-up step is the only way to tell an
+// out-of-memory abort apart from a real bug.
+static void steReportHeap(const char *where) {
+	// The volatile sink keeps GCC from folding away the malloc()/free() pair
+	// and assuming the allocation succeeded, which would make the probe report
+	// the search ceiling instead of the real headroom.
+	static char *volatile sink;
+	size_t lo = 0, hi = 4UL * 1024 * 1024;
+
+	while (lo + 1024 < hi) {
+		size_t mid = lo + (hi - lo) / 2;
+		char *p = (char *)malloc(mid);
+
+		sink = p;
+		if (p) {
+			p[0] = 0;
+			p[mid - 1] = 0;
+			free(p);
+			lo = mid;
+		} else {
+			hi = mid;
+		}
+	}
+
+	printf("Atari STE heap at %s: largest block %lu KiB\n", where, (unsigned long)(lo / 1024));
+}
+#endif
+
 Common::Error ScummEngine::init() {
+	#ifdef ATARI_STE_GAME_ONLY
+	printf("Atari STE SCUMM init\n");
+	steReportHeap("SCUMM init");
+	#endif
 
 	const Common::FSNode gameDataDir(ConfMan.getPath("path"));
 
@@ -1108,6 +1155,12 @@ Common::Error ScummEngine::init() {
 	// This is the case of the DoubleFine, NES, v0 and Mac versions of certain games.
 	// Note: All of these can also occur in 'extracted' form, in which case they
 	// are treated like any other SCUMM game.
+#ifdef ATARI_STE_GAME_ONLY
+	// The STE build only accepts the extracted DOS v5 data files used by
+	// Monkey Island and Fate of Atlantis. Avoid retaining the container and
+	// platform-specific file backends in the small-memory build.
+	_fileHandle = new ScummFile(this);
+#else
 	if (_filenamePattern.genMethod == kGenUnchanged) {
 		if (_game.features & GF_DOUBLEFINE_PAK) {
 			// Extra directories needed for the Mac SE/Remaster versions
@@ -1257,6 +1310,7 @@ Common::Error ScummEngine::init() {
 			_fileHandle = new ScummFile(this);
 		}
 	}
+#endif
 
 	// Steam Win and Mac versions share the same DOS data files. We show Windows or Mac
 	// for the platform the detector, but internally we force the platform to DOS, so that
@@ -1275,6 +1329,7 @@ Common::Error ScummEngine::init() {
 
 	Common::Path macResourceFile;
 
+#ifndef ATARI_STE_GAME_ONLY
 	if (_game.platform == Common::kPlatformMacintosh && _game.heversion == 0) {
 		Common::MacResManager resource;
 
@@ -1394,10 +1449,12 @@ Common::Error ScummEngine::init() {
 					return Common::Error(Common::kReadingFailed, Common::U32String::format(_("This game requires the '%s' Macintosh executable for its music and fonts."), gameName));
 				}
 
+#ifndef ATARI_STE_GAME_ONLY
 				GUI::MessageDialog dialog(Common::U32String::format(
 					_("Could not find the '%s' Macintosh executable to read resources from. %s will be disabled."),
 						gameName, (_game.id == GID_MONKEY2 || _game.version > 6) ? _s("The Mac GUI") : _s("The music and the Mac GUI")));
 				dialog.runModal();
+#endif
 			} else if (isUsingOriginalGUI() || _game.id == GID_INDY3 || _game.id == GID_LOOM) {
 				// FIXME: THIS IS A TEMPORARY WORKAROUND!
 				// The reason why we are initializing the Mac GUI even without original GUI active
@@ -1454,6 +1511,7 @@ Common::Error ScummEngine::init() {
 			}
 		}
 	}
+#endif
 
 	// Initialize backend
 	if (_renderMode == Common::kRenderHercA || _renderMode == Common::kRenderHercG) {
@@ -1532,6 +1590,10 @@ Common::Error ScummEngine::init() {
 	_outputPixelFormat = _system->getScreenFormat();
 
 	setupScumm(macResourceFile);
+	#ifdef ATARI_STE_GAME_ONLY
+	printf("Atari STE after setupScumm\n");
+	steReportHeap("after setupScumm");
+	#endif
 
 	if (_game.id == GID_REBEL1 || _game.id == GID_REBEL2) {
 		_setupIsComplete = true;
@@ -1539,17 +1601,32 @@ Common::Error ScummEngine::init() {
 	}
 
 	readIndexFile();
+	#ifdef ATARI_STE_GAME_ONLY
+	printf("Atari STE after readIndex\n");
+	steReportHeap("after readIndex");
+	#endif
 
+#ifndef ATARI_STE_GAME_ONLY
 	// Create the debugger now that _numVariables has been set
 	setDebugger(new ScummDebugger(this));
+#endif
 
 	Common::Keymapper *keymapper = _system->getEventManager()->getKeymapper();
 	_insaneKeymap = keymapper->getKeymap(insaneKeymapId);
 	if (_insaneKeymap)
 		_insaneKeymap->setEnabled(false);
 
+#ifdef ATARI_STE_GAME_ONLY
+	steReportHeap("before resetScumm");
+#endif
 	resetScumm();
+#ifdef ATARI_STE_GAME_ONLY
+	steReportHeap("after resetScumm");
+#endif
 	resetScummVars();
+#ifdef ATARI_STE_GAME_ONLY
+	steReportHeap("after resetScummVars");
+#endif
 
 	if (!_copyProtection && _game.id == GID_TENTACLE) {
 		VAR(124) = 1;
@@ -1598,7 +1675,7 @@ Common::Error ScummEngine::init() {
 		_internalGUIControls[i].doubleLinesFlag = false;
 	}
 
-#ifndef USE_FREETYPE2
+#if !defined(USE_FREETYPE2) && !defined(ATARI_STE_GAME_ONLY)
 	if (_game.id == GID_FUNSHOP) {
 		GUI::MessageDialog dialog(_(
 			"It appears your ScummVM version was not built with TrueType Fonts support.\n\n"
@@ -1616,6 +1693,9 @@ Common::Error ScummEngine::init() {
 }
 
 void ScummEngine::setupScumm(const Common::Path &macResourceFile) {
+	#ifdef ATARI_STE_GAME_ONLY
+	printf("Atari STE setupScumm begin\n");
+	#endif
 	// TODO: This may be the wrong place for it
 	// Enhancements used to be all or nothing, but now there are different
 	// types of them.
@@ -1662,6 +1742,7 @@ void ScummEngine::setupScumm(const Common::Path &macResourceFile) {
 		}
 	}
 
+	#ifndef ATARI_STE_GAME_ONLY
 	// On some systems it's not safe to run CD audio games from the CD.
 	if (_game.features & GF_AUDIOTRACKS && !Common::File::exists("CDDA.SOU")) {
 		uint track;
@@ -1688,27 +1769,44 @@ void ScummEngine::setupScumm(const Common::Path &macResourceFile) {
 		}
 		_system->getAudioCDManager()->open();
 	}
+	#endif
 
+	#ifndef ATARI_STE_GAME_ONLY
 	bool useReplacementAudioTracks = (_game.id == GID_LOOM && !(_game.features & GF_AUDIOTRACKS));
 
 	if (useReplacementAudioTracks) {
 		_system->getAudioCDManager()->open();
 	}
+	#else
+	bool useReplacementAudioTracks = false;
+	#endif
 
 	// Create the sound manager
+#ifdef ATARI_STE_GAME_ONLY
+	_sound = new Sound(this, _mixer, false);
+#else
 	if (_game.heversion > 0)
 		_sound = new SoundHE(this, _mixer, &_resourceAccessMutex);
 	else
-		_sound = new Sound(this, _mixer, useReplacementAudioTracks);
+	_sound = new Sound(this, _mixer, useReplacementAudioTracks);
+#endif
+	#ifdef ATARI_STE_GAME_ONLY
+	printf("Atari STE sound object ready\n");
+	#endif
 
+	#ifndef ATARI_STE_GAME_ONLY
 	// Setup the music engine
 	setupMusic(_game.midi);
+	#endif
 
 	// Load localization data, if present
 	loadLanguageBundle();
 
 	// Create the charset renderer
 	setupCharsetRenderer(macFontFile);
+	#ifdef ATARI_STE_GAME_ONLY
+	printf("Atari STE charset ready\n");
+	#endif
 
 	// Create and clear the text surface
 	_textSurface.create(_screenWidth * _textSurfaceMultiplier, _screenHeight * _textSurfaceMultiplier, Graphics::PixelFormat::createFormatCLUT8());
@@ -1716,6 +1814,9 @@ void ScummEngine::setupScumm(const Common::Path &macResourceFile) {
 
 	// Create the costume renderer
 	setupCostumeRenderer();
+	#ifdef ATARI_STE_GAME_ONLY
+	printf("Atari STE costume ready\n");
+	#endif
 
 	// Load game from specified slot, if any
 	if (ConfMan.hasKey("save_slot")) {
@@ -1724,12 +1825,14 @@ void ScummEngine::setupScumm(const Common::Path &macResourceFile) {
 		// In case we run the Loom FM-Towns version and have no boot parameter
 		// nor start save game supplied we will show our own custom difficulty
 		// selection dialog, since the original does not have any.
+#ifndef ATARI_STE_GAME_ONLY
 		LoomTownsDifficultyDialog difficultyDialog;
 		runDialog(difficultyDialog);
 
 		int difficulty = difficultyDialog.getSelectedDifficulty();
 		if (difficulty != -1)
 			_bootParam = difficulty;
+#endif
 	}
 
 	_res->allocResTypeData(rtBuffer, 0, 10, kDynamicResTypeMode);
@@ -2057,10 +2160,12 @@ void ScummEngine::resetScumm() {
 		_macScreen->fillRect(Common::Rect(_macScreen->w, _macScreen->h), 0);
 	}
 
+#ifndef ATARI_STE_GAME_ONLY
 	if (_macGui) {
 		_macGui->clearTextArea();
 		_macGui->reset();
 	}
+#endif
 
 	if ((_game.id == GID_MANIAC) && (_game.platform == Common::kPlatformC64)) {
 		initScreens(9, 145); // The main virtual screen is offset lower by one pixel
@@ -2368,6 +2473,12 @@ void ScummEngine_v100he::resetScumm() {
 #endif
 
 void ScummEngine::setupMusic(int midi) {
+#ifdef ATARI_STE_GAME_ONLY
+	(void)midi;
+	_native_mt32 = false;
+	_sound->_musicType = MDT_NONE;
+	return;
+#else
 	MidiDriver::DeviceHandle dev = MidiDriver::detectDevice(midi);
 	_native_mt32 = ((MidiDriver::getMusicType(dev) == MT_MT32) || ConfMan.getBool("native_mt32"));
 
@@ -2626,6 +2737,7 @@ void ScummEngine::setupMusic(int midi) {
 		g_system->getAudioCDManager()->setVolume(Audio::Mixer::kMaxChannelVolume);
 		g_system->getAudioCDManager()->setBalance(0);
 	}
+#endif
 }
 
 void ScummEngine::syncSoundSettings() {
@@ -2778,9 +2890,11 @@ Common::Error ScummEngine::go() {
 	// If requested, load a save game instead of running the boot script
 	if (_saveLoadFlag != 2 || !loadState(_saveLoadSlot, _saveTemporaryState)) {
 		_saveLoadFlag = 0;
+		#ifndef ATARI_STE_GAME_ONLY
 		if (_game.platform == Common::kPlatformNES && _game.id == GID_MANIAC && !(_game.features & GF_DEMO)) {
 			playNESTitleScreens();
 		}
+		#endif
 		runBootscript();
 	} else {
 		_loadFromLauncher = true; // The only purpose of this is triggering the IQ points update for INDY3/4
@@ -2922,12 +3036,14 @@ Common::Error ScummEngine::go() {
 			// chance to update the screen. That way, it can draw
 			// things over the regular graphics, if needed.
 
+#ifndef ATARI_STE_GAME_ONLY
 			if (_macGui)
 				_macGui->update(delta);
 
 			if (_game.heversion >= 60) {
 				((SoundHE *)_sound)->feedMixer();
 			}
+#endif
 
 			if (VAR_LAST_FRAME_SCUMM_TIME != 0xFF)
 				VAR(VAR_LAST_FRAME_SCUMM_TIME) = _system->getMillis() - _lastWaitTime;
@@ -2970,8 +3086,10 @@ void ScummEngine::waitForTimer(int quarterFrames, bool freezeMacGui) {
 		towns_updateGfx();
 #endif
 
+#ifndef ATARI_STE_GAME_ONLY
 		if (_macGui && !freezeMacGui)
 			_macGui->updateWindowManager();
+#endif
 
 		_system->updateScreen();
 		cur = _system->getMillis();
@@ -3130,6 +3248,36 @@ void ScummEngine_v0::scummLoop(int delta) {
 }
 
 void ScummEngine::scummLoop(int delta) {
+#ifdef ATARI_STE_GAME_ONLY
+	static const bool steBenchmark = ConfMan.hasKey("ste_benchmark") && ConfMan.getBool("ste_benchmark");
+	if (steBenchmark && _currentRoom == 28) {
+		auto &b = atari_ste_bench_state;
+		b.enabled = 1;
+		++b.frame;
+		b.room = _currentRoom;
+		b.engineActive = 1;
+		b.conversions = b.pixels = b.rebuilds = b.mapMisses = 0;
+		b.ego = VAR(VAR_EGO);
+		Actor *ego = derefActor(b.ego, "STE room benchmark");
+		if (b.frame >= 8 && _userPut && !ego->_moving &&
+			ConfMan.hasKey("ste_benchmark_walk") && ConfMan.getBool("ste_benchmark_walk")) {
+			static bool right = true;
+			ego->startWalkActor(camera._cur.x + (right ? 64 : -64), ego->getRealPos().y, -1);
+			right = !right;
+		}
+		b.x = ego->getRealPos().x;
+		b.y = ego->getRealPos().y;
+		b.moving = ego->_moving;
+		b.cameraX = camera._cur.x;
+		b.userPut = _userPut;
+		b.sceneHeight = _virtscr[kMainVirtScreen].h;
+		b.visibleActors = 0;
+		for (int i = 1; i < _numActors; ++i)
+			if (_actors[i]->_visible && _actors[i]->isInCurrentRoom())
+				++b.visibleActors;
+		atari_ste_bench_mark(1);
+	}
+#endif
 	// Notify the script about how much time has passed, in jiffies
 	if (VAR_TIMER != 0xFF)
 		VAR(VAR_TIMER) = delta;
@@ -3247,9 +3395,11 @@ load_game:
 		_fullRedraw = true;
 	}
 
+	#ifndef ATARI_STE_GAME_ONLY
 	if (_game.heversion >= 80) {
 		((SoundHE *)_sound)->handleSoundFrame();
 	}
+	#endif
 
 	if (_game.version < 7 || isFTDOSDemo) {
 		runAllScripts();
@@ -3288,7 +3438,7 @@ load_game:
 		goto load_game;
 	}
 
-#ifndef DISABLE_TOWNS_DUAL_LAYER_MODE
+#if !defined(DISABLE_TOWNS_DUAL_LAYER_MODE) && !defined(ATARI_STE_GAME_ONLY)
 	towns_processPalCycleField();
 #endif
 
@@ -3355,6 +3505,12 @@ load_game:
 
 	/* show or hide mouse */
 	CursorMan.showMouse(_cursor.state > 0);
+#ifdef ATARI_STE_GAME_ONLY
+	if (atari_ste_bench_state.enabled) {
+		atari_ste_bench_state.engineActive = 0;
+		atari_ste_bench_mark(2);
+	}
+#endif
 }
 
 #ifdef ENABLE_HE
@@ -3475,14 +3631,22 @@ void ScummEngine::scummLoop_handleSaveLoad() {
 		if (!success) {
 			Common::U32String buf = Common::U32String::format(errMsg, filename.c_str());
 
+#ifdef ATARI_STE_GAME_ONLY
+			warning("%s", buf.encode().c_str());
+#else
 			GUI::MessageDialog dialog(buf);
 			runDialog(dialog);
+#endif
 		} else if (_saveLoadFlag == 1 && _saveLoadSlot != 0 && !_saveTemporaryState && !isUsingOriginalGUI()) {
 			// Display "Save successful" message, except for auto saves
 			Common::U32String buf = Common::U32String::format(_("Successfully saved game in file:\n\n%s"), filename.c_str());
 
+#ifdef ATARI_STE_GAME_ONLY
+			debug(1, "%s", buf.encode().c_str());
+#else
 			GUI::TimedMessageDialog dialog(buf, 1500);
 			runDialog(dialog);
+#endif
 		}
 
 		if (success && _saveLoadFlag != 1)
@@ -4403,8 +4567,12 @@ bool ScummEngine::startManiac() {
 		return true;
 	} else {
 		Common::U32String buf = _("Usually, Maniac Mansion would start now. But for that to work, the game files for Maniac Mansion have to be in the 'Maniac' directory inside the Tentacle game directory, and the game has to be added to ScummVM.");
+#ifdef ATARI_STE_GAME_ONLY
+		warning("%s", buf.encode().c_str());
+#else
 		GUI::MessageDialog dialog(buf);
 		runDialog(dialog);
+#endif
 		return false;
 	}
 }
@@ -4453,6 +4621,28 @@ void ScummEngine_v7::pauseEngineIntern(bool pause) {
 }
 #endif
 
+#ifdef ATARI_STE_GAME_ONLY
+// The 4 MiB STE profile links no GUI. The games covered by this profile drive
+// their own in-game interface (see gfx_gui.cpp), so these ScummVM-side dialogs
+// degrade to console messages or to acting on the request directly.
+void ScummEngine::messageDialog(const Common::U32String &message) {
+	warning("%s", message.encode().c_str());
+}
+
+void ScummEngine::pauseDialog() {
+}
+
+void ScummEngine::versionDialog() {
+}
+
+void ScummEngine::confirmExitDialog() {
+	quitGame();
+}
+
+void ScummEngine::confirmRestartDialog() {
+	restart();
+}
+#else
 void ScummEngine::messageDialog(const Common::U32String &message) {
 	if (!_messageDialog)
 		_messageDialog = new InfoDialog(this, message);
@@ -4487,6 +4677,7 @@ void ScummEngine::confirmRestartDialog() {
 		restart();
 	}
 }
+#endif
 
 char ScummEngine::displayMessage(const char *message, ...) {
 	char buf[STRINGBUFLEN];
@@ -4496,8 +4687,13 @@ char ScummEngine::displayMessage(const char *message, ...) {
 	vsnprintf(buf, STRINGBUFLEN, message, va);
 	va_end(va);
 
+#ifdef ATARI_STE_GAME_ONLY
+	warning("%s", buf);
+	return 0;
+#else
 	GUI::MessageDialog dialog(buf);
 	return runDialog(dialog);
+#endif
 }
 
 bool ScummEngine::displayMessageYesNo(const char *message, ...) {
@@ -4508,8 +4704,13 @@ bool ScummEngine::displayMessageYesNo(const char *message, ...) {
 	vsnprintf(buf, STRINGBUFLEN, message, va);
 	va_end(va);
 
+#ifdef ATARI_STE_GAME_ONLY
+	warning("%s", buf);
+	return true;
+#else
 	GUI::MessageDialog dialog(buf, _("Yes"), _("No"));
 	return runDialog(dialog) == GUI::kMessageOK;
+#endif
 }
 
 bool ScummEngine::displayMessageOKQuit(const char *message, ...) {
@@ -4520,8 +4721,13 @@ bool ScummEngine::displayMessageOKQuit(const char *message, ...) {
 	vsnprintf(buf, STRINGBUFLEN, message, va);
 	va_end(va);
 
+#ifdef ATARI_STE_GAME_ONLY
+	warning("%s", buf);
+	return true;
+#else
 	GUI::MessageDialog dialog(buf, _("OK"), _("Quit"));
 	return runDialog(dialog) == GUI::kMessageOK;
+#endif
 }
 
 #if defined(ENABLE_HE) && defined(USE_ENET)

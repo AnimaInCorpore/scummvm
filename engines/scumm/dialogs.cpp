@@ -201,6 +201,8 @@ static const ResString string_map_table_v6[] = {
 
 #pragma mark -
 
+#ifndef ATARI_STE_GAME_ONLY
+
 #ifndef DISABLE_HELP
 
 class HelpDialog : public ScummDialog {
@@ -377,6 +379,8 @@ void HelpDialog::handleCommand(GUI::CommandSender *sender, uint32 cmd, uint32 da
 
 #endif
 
+#endif // !ATARI_STE_GAME_ONLY
+
 #pragma mark -
 
 static bool isCJKLanguage(Common::Language lang) {
@@ -390,6 +394,25 @@ static bool isCJKLanguage(Common::Language lang) {
 		return false;
 	}
 }
+
+#ifdef ATARI_STE_GAME_ONLY
+
+InfoDialog::InfoDialog(ScummEngine *scumm, int res) : _vm(scumm) {
+	_message = queryResString(res);
+
+	if (scumm->_game.version < 3)
+		_message.trim();
+}
+
+InfoDialog::InfoDialog(ScummEngine *scumm, const U32String &message) : _vm(scumm) {
+	_message = message;
+}
+
+void InfoDialog::setInfoText(const U32String &message) {
+	_message = message;
+}
+
+#else
 
 InfoDialog::InfoDialog(ScummEngine *scumm, int res)
 : ScummDialog(0, 0, 0, 0), _vm(scumm), _style(GUI::ThemeEngine::kFontStyleBold) { // dummy x and w
@@ -440,6 +463,8 @@ void InfoDialog::reflowLayout() {
 
 	_text->setSize(_w, _h);
 }
+
+#endif // ATARI_STE_GAME_ONLY
 
 const char *InfoDialog::getPlainEngineString(int stringno, bool forceHardcodedString) {
 	const char *result = nullptr;
@@ -853,6 +878,8 @@ const ResString &InfoDialog::getStaticResString(Common::Language lang, int strin
 }
 
 #pragma mark -
+
+#ifndef ATARI_STE_GAME_ONLY
 
 PauseDialog::PauseDialog(ScummEngine *scumm, int res)
 	: InfoDialog(scumm, res) {
@@ -2018,5 +2045,7 @@ void HENetworkGameOptionsWidget::handleCommand(GUI::CommandSender *sender, uint3
 	}
 }
 #endif
+
+#endif // !ATARI_STE_GAME_ONLY
 
 } // End of namespace Scumm
