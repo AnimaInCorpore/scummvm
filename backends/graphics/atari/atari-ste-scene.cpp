@@ -495,8 +495,6 @@ bool AtariSteSceneRenderer::loadMix(const Common::Path &path, MixPattern pattern
 	// A checkerboard needs both colours of a pair in the palette of each
 	// field, which two different palettes do not provide.
 	_mixPattern = _mixDual ? kMixAlternate : pattern;
-	if (_mixDual && pattern != kMixAlternate)
-		warning("STE mix: two palettes can only alternate per field");
 	_mixTablesValid = false;
 	_mixEnabled = true;
 

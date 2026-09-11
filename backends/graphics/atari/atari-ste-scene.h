@@ -59,10 +59,12 @@ public:
 		kMixAlternate,	// first colour in field 0, second in field 1
 		kMixStatic		// (x + y) parity picks the colour in both fields
 	};
-	// False, with a warning, when the table cannot be used.
+	// False, with a warning, when the table cannot be used. Two-palette
+	// tables always alternate, whatever the pattern.
 	bool loadMix(const Common::Path &path, MixPattern pattern);
 	bool mixEnabled() const { return _mixEnabled; }
 	bool mixSplit() const { return _mixSplit; }
+	bool mixDual() const { return _mixDual; }
 	// Same dirty-rectangle and schedule contract as convert(). The schedule
 	// receives 64 words: field 0's room and verb-bar palettes, then field 1's.
 	void convertMix(const Graphics::Surface &source, AtariSurface &field0, AtariSurface &field1,

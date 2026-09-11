@@ -35,19 +35,20 @@ alone costs 6.25M cycles per frame, 7.8× a whole 10 fps frame.
 ## Using it in the port
 
 Mixing is the port's default display. Without configuration it loads
-`MIX\PAIR20.BIN` from the current directory (the program's folder when started
-from the desktop) with the checkerboard pattern. To choose another table or
-pattern, set them in `[scummvm]` of `SCUMMVM.INI` (the graphics manager reads
-configuration before the game section is active):
+`MIX\DUAL20.BIN` from the current directory (the program's folder when started
+from the desktop), whose two palettes alternate every field. To choose another
+table or pattern, set them in `[scummvm]` of `SCUMMVM.INI` (the graphics manager
+reads configuration before the game section is active):
 
 ```ini
 ste_mix_lut=C:\SCUMMVM\MIX\PAIR20.BIN
 ste_mix_pattern=checker
 ```
 
-`alternate` and `static` are the other patterns; two-palette tables always
-alternate. An empty `ste_mix_lut`, or a table that cannot be loaded, keeps the
-per-line raster.
+One-palette tables use the checkerboard unless `ste_mix_pattern` is `alternate`
+or `static`. Two-palette tables always alternate; any other pattern set for them
+logs a warning. An empty `ste_mix_lut`, or a table that cannot be loaded, keeps
+the per-line raster.
 
 Changed files in `scummvm-ste-scene/backends`: `graphics/atari/atari-ste-scene.*`
 (table loading, fallback and two-field conversion), `atari-ste-raster.*` (field
