@@ -17,6 +17,10 @@ other half steals voices, which is by definition not the faithful target. Mean
 demand while music sounds is 12.70 of the MT-32's 32 partials; the Falcon
 supplies 3-5 exact or 5-8 approximate.
 
+**27.2% of that demand is PCM partials**, which on this port run on the 68030
+with a budget of two, against a demand of about 3.5. Both pools are over
+budget and a slot in one cannot pay for a slot in the other.
+
 The PCM ROM remains an absolute obstacle rather than a budget one, but this
 game leans on the rhythm part far less than expected - 6.5% of playing time -
 which changes where that obstacle sits on the critical path.
@@ -324,6 +328,49 @@ They bracket the answer at two to three partials per note.
   and coverage up by about two points - small, but the corrected figures are
   the ones above.
 
+### PCM is 27% of the demand, not 6.5%
+
+The rhythm part is active only 6.5% of the time, but LA timbres read PCM attack
+transients in melodic partials too, and this game does so heavily.
+[`tools/foa-mt32-pcm.py`](../tools/foa-mt32-pcm.py) reads the control ROM's
+group A and B timbre maps, takes each timbre's `partialMute` and its two
+partial-structure values, and applies Munt's `PartialStruct` table (`Part.cpp`)
+to decide which partial of a pair reads PCM.
+
+| Quantity | Value |
+| --- | ---: |
+| Programs using at least one PCM partial | **84 of 128** |
+| PCM partials per melodic note | **0.73** |
+| **PCM share of melodic partial demand** | **27.2%** |
+| Melodic note-seconds on a PCM-using timbre | **55.0%** |
+
+Cross-validated against `mt32-partials --probe`, which measures partial counts
+by playing a note: **127 of 128** programs agree on both count and name. The
+one exception is program 67, `Elec Bass2`, where the ROM marks two partials
+sounding and the probe measures one - consistent with a partial whose TVA
+gives it no level at the probed key and velocity, not with a parsing error.
+
+This is the answer to the question that was left open, and it is the
+unfavourable one. **The PCM ROM obstacle is on the critical path for most of
+the music, not for the 6.5% the rhythm part occupies.** The top timbre in the
+game (`Str Sect 3`, 28.1% of note-seconds) is PCM-free, but the next three -
+`Fr Horn 1`, `Fantasy`, `AcouPiano1` - are not.
+
+### Both pools are over budget, and they cannot trade
+
+Applying the 27.2% split to the measured mean of 12.70 partials while music
+sounds:
+
+| Pool | Demand | Falcon supply | Over by |
+| --- | ---: | ---: | ---: |
+| LA synth partials (DSP56001) | ~9.2 | 3-5 exact, 5-8 approximate | ~1.2-3x |
+| PCM partials (68030) | ~3.5 | **2** | ~1.7x |
+
+`la32-budget.md` is explicit that "a partial slot in one pool cannot pay for a
+partial in the other". So the two shortfalls compound rather than average: a
+design that solved the DSP side entirely would still be short on PCM for this
+game's music, and vice versa.
+
 ## Requirements, then
 
 For a faithful implementation on the stock 16 MHz / 14 MB / DSP56001 Falcon:
@@ -358,19 +405,13 @@ Evidence item 2 in
 is now satisfied for the music: the game's partial demand is measured, not
 projected. What remains:
 
-- **Whether melodic partials read PCM waves.** This decides whether the PCM ROM
-  obstacle sits on 6.5% of the music (the rhythm part alone) or most of it.
-  Munt's public API exposes partial *state* but not partial *waveform source*,
-  so this needs either a small patch to the vendored Munt or parsing the
-  control ROM's timbre tables through `ControlROMMap`. It is the last question
-  that needs neither a Falcon nor hardware.
 - **Concurrent load**, evidence item 3: game logic, graphics and CD speech
   running against the synthesiser. Nothing here touches it.
 - **Verification on physical hardware**, evidence item 4.
 
 ## What this document does not establish
 
-- Any statement about total PCM demand beyond the rhythm part.
+
 - Anything about concurrent load: these are the music's demands in isolation,
   with no game logic, graphics, CD speech or sound effects running.
 - **Concurrent cues.** iMUSE has 8 players and 32 parts

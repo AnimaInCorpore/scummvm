@@ -140,8 +140,10 @@ measurement reproducible via
 Headline, now measured rather than projected: the game costs **2.24 LA
 partials per note** and a mean of 12.70 of the MT-32's 32 partials while music
 sounds, so the best measured Falcon budget (8 approximate partials) covers
-**50.1%** of playing time without stealing voices. The rhythm part, which is
-the PCM-partial path, is active only 6.5% of the time.
+**50.1%** of playing time without stealing voices. And 27.2% of that demand is PCM partials, against a host budget of two -
+so both pools are over budget, and a slot in one cannot pay for a slot in the
+other. The rhythm part is active only 6.5% of the time, but melodic timbres
+read PCM too.
 
 Measured with [`tools/mt32-partials`](tools/mt32-partials/) against Munt and an
 MT-32 control v1.07 + PCM ROM pair.
