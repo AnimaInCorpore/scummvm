@@ -27,9 +27,9 @@
 #include <mint/osbind.h>
 #include <mint/ostruct.h>
 // https://github.com/mikrosk/usound
-// Use usound_compat.h until SDL 1.2 + uSound have been upgraded in the build image.
-// Replace with #include <usound.h> once ihe image ships usound.h >= 2; it will #error in such case.
-#include "usound_compat.h"
+// This build image ships usound.h >= 2, against which usound_compat.h #errors
+// by design. The shim stays in the tree for images still on uSound v1.
+#include <usound.h>
 
 #include "common/config-manager.h"
 #include "common/debug.h"
