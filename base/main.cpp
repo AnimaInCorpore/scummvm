@@ -100,6 +100,12 @@
 
 #include "gui/dump-all-dialogs.h"
 
+#ifdef ATARI_FALCON_GAME_ONLY
+// The Falcon build always starts its single target from the command line, so
+// the launcher and everything it drags in (game list, add/edit/remove game,
+// the browser, About, global options) is dead weight. Keeping the function
+// out of this module is what lets the linker leave those objects behind.
+#else
 static bool launcherDialog() {
 
 	// Discard any command line options. Those that affect the graphics
@@ -121,6 +127,7 @@ static bool launcherDialog() {
 	} while (noQuit && nullptr == ConfMan.getActiveDomain());
 	return status;
 }
+#endif // ATARI_FALCON_GAME_ONLY
 
 static Common::Error identifyGame(const Common::String &debugLevels, const Plugin **detectionPlugin, DetectedGame &game, const void **descriptor) {
 	assert(detectionPlugin);
@@ -715,9 +722,15 @@ extern "C" int scummvm_main(int argc, const char * const argv[]) {
 	CloudMan.syncSaves();
 #endif
 
+#ifndef ATARI_FALCON_GAME_ONLY
+	// GUI::dumpAllDialogs() is a theme-debugging feature that instantiates every
+	// dialog there is, so referencing it at all drags the launcher, the global
+	// options, the browsers and the game editor into the image. The Falcon
+	// game-only build leaves it out.
 	if (ConfMan.hasKey("dump_all_dialogs")) {
 		GUI::dumpAllDialogs();
 	}
+#endif
 
 // Print out CPU extension info
 // Separate block to keep the stack clean
@@ -752,8 +765,15 @@ extern "C" int scummvm_main(int argc, const char * const argv[]) {
 	}
 
 	// Unless a game was specified, show the launcher dialog
+#ifdef ATARI_FALCON_GAME_ONLY
+	if (nullptr == ConfMan.getActiveDomain()) {
+		warning("This build starts one target from the command line only");
+		return 1;
+	}
+#else
 	if (nullptr == ConfMan.getActiveDomain() && !ConfMan.hasKey("dump_all_dialogs"))
 		launcherDialog();
+#endif
 
 	// FIXME: We're now looping the launcher. This, of course, doesn't
 	// work as well as it should. In theory everything should be destroyed
@@ -929,7 +949,12 @@ extern "C" int scummvm_main(int argc, const char * const argv[]) {
 				OSystem_PS3::spawnProcess(PREFIX "/scummvm.self", nullptr);
 			}
 #endif
+#ifdef ATARI_FALCON_GAME_ONLY
+			// Nothing to return to; leaving the loop quits.
+			break;
+#else
 			launcherDialog();
+#endif
 		}
 	}
 #ifdef USE_SDL_NET
