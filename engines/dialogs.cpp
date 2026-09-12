@@ -71,7 +71,9 @@ MainMenuDialog::MainMenuDialog(Engine *engine)
 	new GUI::ButtonWidget(this, "GlobalMenu.Load", _("~L~oad"), Common::U32String(), kLoadCmd);
 	new GUI::ButtonWidget(this, "GlobalMenu.Save", _("~S~ave"), Common::U32String(), kSaveCmd);
 
+#ifndef ATARI_FALCON_GAME_ONLY
 	new GUI::ButtonWidget(this, "GlobalMenu.Options", _("~O~ptions"), Common::U32String(), kOptionsCmd);
+#endif
 
 	// The help button is disabled by default.
 	// To enable "Help", an engine needs to use a subclass of MainMenuDialog
@@ -82,6 +84,7 @@ MainMenuDialog::MainMenuDialog(Engine *engine)
 
 	new GUI::ButtonWidget(this, "GlobalMenu.MainHelp", _("~H~elp"), Common::U32String(), kMainHelpCmd);
 
+#ifndef ATARI_FALCON_GAME_ONLY
 	new GUI::ButtonWidget(this, "GlobalMenu.About", _("~A~bout"), Common::U32String(), kAboutCmd);
 
 	if (g_gui.getGUIWidth() > 320)
@@ -89,17 +92,22 @@ MainMenuDialog::MainMenuDialog(Engine *engine)
 	else
 		_returnToLauncherButton = new GUI::ButtonWidget(this, "GlobalMenu.ReturnToLauncher", _c("~R~eturn to Launcher", "lowres"), Common::U32String(), kLauncherCmd);
 	_returnToLauncherButton->setEnabled(_engine->hasFeature(Engine::kSupportsReturnToLauncher));
+#endif // !ATARI_FALCON_GAME_ONLY
 
 	if (!g_system->hasFeature(OSystem::kFeatureNoQuit) && (!(ConfMan.getBool("gui_return_to_launcher_at_exit")) || !_engine->hasFeature(Engine::kSupportsReturnToLauncher)))
 		new GUI::ButtonWidget(this, "GlobalMenu.Quit", _("~Q~uit"), Common::U32String(), kQuitCmd);
 
+#ifndef ATARI_FALCON_GAME_ONLY
 	_aboutDialog = new GUI::AboutDialog(true);
+#endif
 	_loadDialog = new GUI::SaveLoadChooser(false);
 	_saveDialog = new GUI::SaveLoadChooser(true);
 }
 
 MainMenuDialog::~MainMenuDialog() {
+#ifndef ATARI_FALCON_GAME_ONLY
 	delete _aboutDialog;
+#endif
 	delete _loadDialog;
 	delete _saveDialog;
 }
@@ -115,14 +123,18 @@ void MainMenuDialog::handleCommand(GUI::CommandSender *sender, uint32 cmd, uint3
 	case kSaveCmd:
 		save();
 		break;
+#ifndef ATARI_FALCON_GAME_ONLY
 	case kOptionsCmd: {
 		GUI::ConfigDialog configDialog;
 		configDialog.runModal();
 		break;
 	}
+#endif
+#ifndef ATARI_FALCON_GAME_ONLY
 	case kAboutCmd:
 		_aboutDialog->runModal();
 		break;
+#endif
 	case kHelpCmd: {
 		GUI::MessageDialog dialog(
 					_("Sorry, this engine does not currently provide in-game help. "
@@ -136,6 +148,7 @@ void MainMenuDialog::handleCommand(GUI::CommandSender *sender, uint32 cmd, uint3
 		dlg.runModal();
 		}
 		break;
+#ifndef ATARI_FALCON_GAME_ONLY
 	case kLauncherCmd: {
 		Common::Event eventReturnToLauncher;
 		eventReturnToLauncher.type = Common::EVENT_RETURN_TO_LAUNCHER;
@@ -143,6 +156,7 @@ void MainMenuDialog::handleCommand(GUI::CommandSender *sender, uint32 cmd, uint3
 		close();
 		}
 		break;
+#endif
 	case kQuitCmd: {
 		Common::Event eventQ;
 		eventQ.type = Common::EVENT_QUIT;
@@ -160,10 +174,12 @@ void MainMenuDialog::reflowLayout() {
 	// Update labels when it might be needed
 	// FIXME: it might be better to declare GUI::StaticTextWidget::setLabel() virtual
 	// and to reimplement it in GUI::ButtonWidget to handle the hotkey.
+#ifndef ATARI_FALCON_GAME_ONLY
 	if (g_gui.getGUIWidth() > 320)
 		_returnToLauncherButton->setLabel(_returnToLauncherButton->cleanupHotkey(_("~R~eturn to Launcher")));
 	else
 		_returnToLauncherButton->setLabel(_returnToLauncherButton->cleanupHotkey(_c("~R~eturn to Launcher", "lowres")));
+#endif
 
 #ifndef DISABLE_FANCY_THEMES
 	if (g_gui.xmlEval()->getVar("Globals.ShowGlobalMenuLogo", 0) == 1 && g_gui.theme()->supportsImages()) {
@@ -291,6 +307,7 @@ namespace GUI {
 // These changes will achieve two things at once: Allow us to get rid of using
 //  "" as value for the domain, and in fact provide a somewhat better user
 // experience at the same time.
+#ifndef ATARI_FALCON_GAME_ONLY
 ConfigDialog::ConfigDialog() :
 		GUI::OptionsDialog("", "GlobalConfig"),
 		_engineOptions(nullptr) {
@@ -420,6 +437,7 @@ void ConfigDialog::apply() {
 
 	OptionsDialog::apply();
 }
+#endif // !ATARI_FALCON_GAME_ONLY
 
 ExtraGuiOptionsWidget::ExtraGuiOptionsWidget(GuiObject *containerBoss, const Common::String &name, const Common::String &domain, const ExtraGuiOptions &options) :
 		OptionsContainerWidget(containerBoss, name, "ExtraGuiOptionsDialog", domain),

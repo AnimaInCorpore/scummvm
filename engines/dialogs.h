@@ -78,6 +78,7 @@ protected:
 
 namespace GUI {
 
+#ifndef ATARI_FALCON_GAME_ONLY
 class ConfigDialog : public OptionsDialog {
 public:
 	ConfigDialog();
@@ -90,6 +91,7 @@ public:
 private:
 	OptionsContainerWidget *_engineOptions;
 };
+#endif // !ATARI_FALCON_GAME_ONLY
 
 class ExtraGuiOptionsWidget : public OptionsContainerWidget {
 public:
