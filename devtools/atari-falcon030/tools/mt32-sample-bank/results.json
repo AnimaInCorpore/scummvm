@@ -1,0 +1,460 @@
+{
+  "date": "2026-09-12",
+  "scope": "Calibrated Hatari render-to-RAM experiment; no physical hardware or ScummVM integration",
+  "tool_sha256": {
+    "hatari": "5fed63f2621390379793b9c92de7574ef020637246fbd1945e896daecbc453a1"
+  },
+  "bank": {
+    "rate": 24584.9609375,
+    "pcm_bytes": 2036044,
+    "entries": 18,
+    "comparisons": [
+      {
+        "id": "p050-k048-v064-long",
+        "source": "p050-k048-v064-long",
+        "held_out": false,
+        "spectral_error_db": 2.7600061928063244,
+        "envelope_error_db": 1.5161357837477252
+      },
+      {
+        "id": "p050-k048-v100-long",
+        "source": "p050-k048-v100-long",
+        "held_out": false,
+        "spectral_error_db": 2.860234370243647,
+        "envelope_error_db": 1.5108374636306365
+      },
+      {
+        "id": "p050-k060-v064-long",
+        "source": "p050-k060-v064-long",
+        "held_out": false,
+        "spectral_error_db": 4.257801015757898,
+        "envelope_error_db": 1.4716647134486616
+      },
+      {
+        "id": "p050-k060-v100-long",
+        "source": "p050-k060-v100-long",
+        "held_out": false,
+        "spectral_error_db": 4.199024181552637,
+        "envelope_error_db": 1.45550187837456
+      },
+      {
+        "id": "p050-k072-v064-long",
+        "source": "p050-k072-v064-long",
+        "held_out": false,
+        "spectral_error_db": 4.329986238159464,
+        "envelope_error_db": 3.522884296306806
+      },
+      {
+        "id": "p050-k072-v100-long",
+        "source": "p050-k072-v100-long",
+        "held_out": false,
+        "spectral_error_db": 3.2425817497776803,
+        "envelope_error_db": 1.1045343736571476
+      },
+      {
+        "id": "p050-k067-v080-long",
+        "source": "p050-k072-v064-long",
+        "held_out": true,
+        "spectral_error_db": 7.079466108949373,
+        "envelope_error_db": 4.04100782281448
+      },
+      {
+        "id": "p050-k060-v100-early",
+        "source": "p050-k060-v100-long",
+        "held_out": true,
+        "spectral_error_db": 3.426947747006738,
+        "envelope_error_db": 3.7429701756721094
+      },
+      {
+        "id": "p092-k048-v064-long",
+        "source": "p092-k048-v064-long",
+        "held_out": false,
+        "spectral_error_db": 3.8662560656457474,
+        "envelope_error_db": 2.2558515117308318
+      },
+      {
+        "id": "p092-k048-v100-long",
+        "source": "p092-k048-v100-long",
+        "held_out": false,
+        "spectral_error_db": 3.707718250590537,
+        "envelope_error_db": 1.9066413022653106
+      },
+      {
+        "id": "p092-k060-v064-long",
+        "source": "p092-k060-v064-long",
+        "held_out": false,
+        "spectral_error_db": 2.008578160150536,
+        "envelope_error_db": 0.76432257736027
+      },
+      {
+        "id": "p092-k060-v100-long",
+        "source": "p092-k060-v100-long",
+        "held_out": false,
+        "spectral_error_db": 2.129680012170922,
+        "envelope_error_db": 0.516735943661897
+      },
+      {
+        "id": "p092-k072-v064-long",
+        "source": "p092-k072-v064-long",
+        "held_out": false,
+        "spectral_error_db": 4.663360083051136,
+        "envelope_error_db": 5.905284560773472
+      },
+      {
+        "id": "p092-k072-v100-long",
+        "source": "p092-k072-v100-long",
+        "held_out": false,
+        "spectral_error_db": 4.092868711777847,
+        "envelope_error_db": 4.315592651170913
+      },
+      {
+        "id": "p092-k067-v080-long",
+        "source": "p092-k072-v064-long",
+        "held_out": true,
+        "spectral_error_db": 11.912507150367322,
+        "envelope_error_db": 6.137533194214109
+      },
+      {
+        "id": "p092-k060-v100-early",
+        "source": "p092-k060-v100-long",
+        "held_out": true,
+        "spectral_error_db": 1.7675739546471188,
+        "envelope_error_db": 0.9460836979711811
+      },
+      {
+        "id": "p032-k048-v064-long",
+        "source": "p032-k048-v064-long",
+        "held_out": false,
+        "spectral_error_db": 4.2611887166840905,
+        "envelope_error_db": 0.983671350782314
+      },
+      {
+        "id": "p032-k048-v100-long",
+        "source": "p032-k048-v100-long",
+        "held_out": false,
+        "spectral_error_db": 4.172775561706218,
+        "envelope_error_db": 1.0446487968853133
+      },
+      {
+        "id": "p032-k060-v064-long",
+        "source": "p032-k060-v064-long",
+        "held_out": false,
+        "spectral_error_db": 5.463482513483979,
+        "envelope_error_db": 2.8958310695669085
+      },
+      {
+        "id": "p032-k060-v100-long",
+        "source": "p032-k060-v100-long",
+        "held_out": false,
+        "spectral_error_db": 4.692941084500141,
+        "envelope_error_db": 1.7252432439891945
+      },
+      {
+        "id": "p032-k072-v064-long",
+        "source": "p032-k072-v064-long",
+        "held_out": false,
+        "spectral_error_db": 5.745475482522177,
+        "envelope_error_db": 2.394158640364821
+      },
+      {
+        "id": "p032-k072-v100-long",
+        "source": "p032-k072-v100-long",
+        "held_out": false,
+        "spectral_error_db": 5.77290643829952,
+        "envelope_error_db": 2.14575300555164
+      },
+      {
+        "id": "p032-k067-v080-long",
+        "source": "p032-k072-v064-long",
+        "held_out": true,
+        "spectral_error_db": 7.038611635821508,
+        "envelope_error_db": 3.008147061361777
+      },
+      {
+        "id": "p032-k060-v100-early",
+        "source": "p032-k060-v100-long",
+        "held_out": true,
+        "spectral_error_db": 4.561003261024923,
+        "envelope_error_db": 1.857042697497765
+      }
+    ]
+  },
+  "cases": [
+    {
+      "case": "bench-16-attack-chunked",
+      "measurements": {
+        "voices": 16,
+        "blocks": 8,
+        "frames": 4096,
+        "loop_wrap_test": false,
+        "chunked": true,
+        "packed12": false,
+        "quantization_snr_db": [],
+        "cpu_hz": 16042494,
+        "cpu_cycles": 4077740,
+        "elapsed_ms": 254.18366994558326,
+        "block_ms": 31.772958743197908,
+        "deadline_ms": 20.82573982125124,
+        "fraction_of_deadline": 1.5256581046295308,
+        "dsp_instruction_cycles": 4077692.0,
+        "dsp_profile_hz": 32084988,
+        "exact_stereo_words": 8192,
+        "input_sample_reads": 65536,
+        "host_words_per_block": 9248,
+        "omissions": [
+          "SSI/DAC",
+          "ScummVM",
+          "speech",
+          "pitch interpolation",
+          "control envelopes",
+          "reverb",
+          "voice allocation"
+        ],
+        "output_download_ms_per_block": 1.8077613119256895
+      },
+      "sha256": {
+        "MIX.TOS": "ed9019599b405fe7d4256f1e1128008222e9efa322c6aed0ee41da0cffd2140f",
+        "MIX.ASM": "bd6b06824c9e85697803b42f83a39916f0b041298218e1e8235fff7babd1b005",
+        "config.inc": "3cd5aeabd101d4e2113f4b8bace0638f38ac88319d8c7548afd2a4da97c524bd",
+        "config.i": "0b9d42251e6c9db53ac4b4c07f32d2a761ee80603e915beebd1a52f8db890c9f",
+        "bank.i": "7f2b249a490008977bcff025c4e75cd22c3e9739c21897f9aa6e027443c695e6",
+        "cpu.txt": "91ea36c47e74bbbf6dbb96731d831acbc002b6e608d3680a7c2ac048af735745",
+        "dsp.txt": "9aec839db966aa5e3dccec2891332b5cba0e28f1e82f5ce4bbab07843bf496b2"
+      }
+    },
+    {
+      "case": "bench-32-attack",
+      "measurements": {
+        "voices": 32,
+        "blocks": 8,
+        "frames": 4096,
+        "loop_wrap_test": false,
+        "chunked": false,
+        "packed12": false,
+        "quantization_snr_db": [],
+        "cpu_hz": 16042494,
+        "cpu_cycles": 9487286,
+        "elapsed_ms": 591.3847310773499,
+        "block_ms": 73.92309138466874,
+        "deadline_ms": 20.82573982125124,
+        "fraction_of_deadline": 3.5496021759205543,
+        "dsp_instruction_cycles": 9487164.0,
+        "dsp_profile_hz": 32084988,
+        "exact_stereo_words": 8192,
+        "input_sample_reads": 131072,
+        "host_words_per_block": 17472,
+        "omissions": [
+          "SSI/DAC",
+          "ScummVM",
+          "speech",
+          "pitch interpolation",
+          "control envelopes",
+          "reverb",
+          "voice allocation"
+        ],
+        "output_download_ms_per_block": 1.8028368905732488
+      },
+      "sha256": {
+        "MIX.TOS": "5145cd7ba117e626f6bf7056dadfa9f0b2dffebeead18516f0aaf31f2d4ce4f6",
+        "MIX.ASM": "bd6b06824c9e85697803b42f83a39916f0b041298218e1e8235fff7babd1b005",
+        "config.inc": "1a1823fc666e65d6c6f74e7e853164d5b3421e9606549152c63f27d3188672b8",
+        "config.i": "008d3d985640f779e6f940a7c2c7b569815856937908508e515d60656f3def18",
+        "bank.i": "7f7f648a7d0674a49b251d213511f8df8ecfc5b39200c4df2ba136ad6d0a253c",
+        "cpu.txt": "ba419f32dc47164f3504a013012d6be5ab8faab75b37f86779a712c918c8b2ea",
+        "dsp.txt": "97315a8027cd2f24b105ebdc78cfedc99ad83d4f4f5f9bb60d08501237bb32c3"
+      }
+    },
+    {
+      "case": "bench-32-attack-chunked",
+      "measurements": {
+        "voices": 32,
+        "blocks": 8,
+        "frames": 4096,
+        "loop_wrap_test": false,
+        "chunked": true,
+        "packed12": false,
+        "quantization_snr_db": [],
+        "cpu_hz": 16042494,
+        "cpu_cycles": 7872502,
+        "elapsed_ms": 490.7280626067244,
+        "block_ms": 61.34100782584055,
+        "output_download_ms_per_block": 1.8101300209306608,
+        "deadline_ms": 20.82573982125124,
+        "fraction_of_deadline": 2.9454419555960385,
+        "dsp_instruction_cycles": 7872372.0,
+        "dsp_profile_hz": 32084988,
+        "exact_stereo_words": 8192,
+        "input_sample_reads": 131072,
+        "host_words_per_block": 17472,
+        "omissions": [
+          "SSI/DAC",
+          "ScummVM",
+          "speech",
+          "pitch interpolation",
+          "control envelopes",
+          "reverb",
+          "voice allocation"
+        ]
+      },
+      "sha256": {
+        "MIX.TOS": "b89c083f02d53a5ffb423f4c03875f1c3d77fa31f41e565d0c258601538bed05",
+        "MIX.ASM": "bd6b06824c9e85697803b42f83a39916f0b041298218e1e8235fff7babd1b005",
+        "config.inc": "1a1823fc666e65d6c6f74e7e853164d5b3421e9606549152c63f27d3188672b8",
+        "config.i": "8383dc58e946e741e4a787231109771914166d7bc0aeb3f2dd6ccb23d28402ab",
+        "bank.i": "7f7f648a7d0674a49b251d213511f8df8ecfc5b39200c4df2ba136ad6d0a253c",
+        "cpu.txt": "7740650e0c457757979eeefc095481554c76ec3ccfe375e814e62552b327028d",
+        "dsp.txt": "4729ccdebc48c1851be0bd9007899ed8f7aeb99ba82eaed87b04fd7fa33add37"
+      }
+    },
+    {
+      "case": "bench-32-attack-chunked-12bit",
+      "measurements": {
+        "voices": 32,
+        "blocks": 8,
+        "frames": 4096,
+        "loop_wrap_test": false,
+        "chunked": true,
+        "packed12": true,
+        "quantization_snr_db": [
+          70.64815420837971,
+          70.65801744166185,
+          70.21982916796837,
+          70.26021683651992,
+          70.14663476173054,
+          70.5402711015838,
+          71.76801002031573,
+          71.91574275534627,
+          71.47706887654087,
+          71.8306178812768,
+          70.09974532448247,
+          70.94232428017965,
+          70.59819652255074,
+          70.51772536941228,
+          70.14034862696795,
+          70.68024996706059,
+          70.11702083454304,
+          70.26540840793662,
+          70.64815420837971,
+          70.65801744166185,
+          70.21982916796837,
+          70.26021683651992,
+          70.14663476173054,
+          70.5402711015838,
+          71.76801002031573,
+          71.91574275534627,
+          71.47706887654087,
+          71.8306178812768,
+          70.09974532448247,
+          70.94232428017965,
+          70.59819652255074,
+          70.51772536941228
+        ],
+        "cpu_hz": 16042494,
+        "cpu_cycles": 3938632,
+        "elapsed_ms": 245.5124496228579,
+        "block_ms": 30.689056202857238,
+        "deadline_ms": 20.82573982125124,
+        "fraction_of_deadline": 1.4736118124140376,
+        "dsp_instruction_cycles": 3938560.0,
+        "dsp_profile_hz": 32084988,
+        "exact_stereo_words": 8192,
+        "input_sample_reads": 65536,
+        "host_words_per_block": 9280,
+        "omissions": [
+          "SSI/DAC",
+          "ScummVM",
+          "speech",
+          "pitch interpolation",
+          "control envelopes",
+          "reverb",
+          "voice allocation"
+        ],
+        "output_download_ms_per_block": 1.8071691346744465
+      },
+      "sha256": {
+        "MIX.TOS": "78d96c4d5e3d5ce0c9d4a127c4255dfc3c670560e49c2869d0a33cb316b8579a",
+        "MIX.ASM": "bd6b06824c9e85697803b42f83a39916f0b041298218e1e8235fff7babd1b005",
+        "config.inc": "d36b330500692a5556e7828bfc9be559a7d607e8463bbef0f712ffa7d3619470",
+        "config.i": "0c54a3978f7c74f9493bb0154bd8825a42e4085b9e13843e200b418cc7e6f187",
+        "bank.i": "4ac25fa77ef67314a24b0e71b9135e6283593e64ed0758835d0d9b9d041a77c9",
+        "cpu.txt": "c9b66831cdbea7d40af94281bb4c62a9d6f3f6869efe5e2b2760b3fdecf99206",
+        "dsp.txt": "d7483139149c98baac3fd82f3682f7ec2040a2a8c9f73deca88b4cf453fdf65e"
+      }
+    },
+    {
+      "case": "bench-32-wrap-chunked-12bit",
+      "measurements": {
+        "voices": 32,
+        "blocks": 64,
+        "frames": 32768,
+        "loop_wrap_test": true,
+        "chunked": true,
+        "packed12": true,
+        "quantization_snr_db": [
+          70.64815420837971,
+          70.65801744166185,
+          70.21982916796837,
+          70.26021683651992,
+          70.14663476173054,
+          70.5402711015838,
+          71.76801002031573,
+          71.91574275534627,
+          71.47706887654087,
+          71.8306178812768,
+          70.09974532448247,
+          70.94232428017965,
+          70.59819652255074,
+          70.51772536941228,
+          70.14034862696795,
+          70.68024996706059,
+          70.11702083454304,
+          70.26540840793662,
+          70.64815420837971,
+          70.65801744166185,
+          70.21982916796837,
+          70.26021683651992,
+          70.14663476173054,
+          70.5402711015838,
+          71.76801002031573,
+          71.91574275534627,
+          71.47706887654087,
+          71.8306178812768,
+          70.09974532448247,
+          70.94232428017965,
+          70.59819652255074,
+          70.51772536941228
+        ],
+        "cpu_hz": 16042494,
+        "cpu_cycles": 30787599,
+        "elapsed_ms": 1919.1279734933983,
+        "block_ms": 29.986374585834348,
+        "deadline_ms": 20.82573982125124,
+        "fraction_of_deadline": 1.4398707965819926,
+        "dsp_instruction_cycles": 30787133.0,
+        "dsp_profile_hz": 32084988,
+        "exact_stereo_words": 65536,
+        "input_sample_reads": 524288,
+        "host_words_per_block": 9280,
+        "omissions": [
+          "SSI/DAC",
+          "ScummVM",
+          "speech",
+          "pitch interpolation",
+          "control envelopes",
+          "reverb",
+          "voice allocation"
+        ],
+        "output_download_ms_per_block": 1.807432108124834
+      },
+      "sha256": {
+        "MIX.TOS": "fe28718edf9a1fa5a6144f42df37bd9fe4847724f7c5a377395a5cd4de42f572",
+        "MIX.ASM": "bd6b06824c9e85697803b42f83a39916f0b041298218e1e8235fff7babd1b005",
+        "config.inc": "d36b330500692a5556e7828bfc9be559a7d607e8463bbef0f712ffa7d3619470",
+        "config.i": "f63d8ae895115d303f72ba133018a9999f0e4b5c221fbd9884c35342d515eea2",
+        "bank.i": "020e02331eac92505cc8a9d5764f0cdc5b73133b2735ebc9ad117497b4c65eb0",
+        "cpu.txt": "9871e9d691b3987169f5f5e8437c7c516ac3e1f9b3d98df4d5fa0e1e26c21ebf",
+        "dsp.txt": "dd9fa283b951ac0b5b9da35ff14bf26268e89908b8e9adc0a08bde93d1721697"
+      }
+    }
+  ]
+}
