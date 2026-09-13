@@ -35,11 +35,14 @@
 #define MAX_HZ_SHAKE 16 // Falcon only
 #define MAX_V_SHAKE  16
 
+class OSystem_Atari;
+
 class AtariGraphicsManager final : public GraphicsManager, Common::EventObserver {
 	friend class PendingScreenChanges;
+	OSystem_Atari *_system;
 
 public:
-	AtariGraphicsManager();
+	explicit AtariGraphicsManager(OSystem_Atari *system);
 	virtual ~AtariGraphicsManager();
 
 	bool hasFeature(OSystem::Feature f) const override;

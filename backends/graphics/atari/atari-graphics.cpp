@@ -30,6 +30,7 @@
 
 #include "backends/keymapper/action.h"
 #include "backends/keymapper/keymap.h"
+#include "backends/platform/atari/osystem_atari.h"
 #include "common/config-manager.h"
 #include "common/debug.h"
 #include "common/textconsole.h"
@@ -196,8 +197,8 @@ void AtariGraphicsShutdown() {
 #endif
 }
 
-AtariGraphicsManager::AtariGraphicsManager()
-	: _pendingScreenChanges(this) {
+AtariGraphicsManager::AtariGraphicsManager(OSystem_Atari *system)
+	: _system(system), _pendingScreenChanges(this) {
 	debug("AtariGraphicsManager()");
 
 	enum {
@@ -568,6 +569,7 @@ void AtariGraphicsManager::grabPalette(byte *colors, uint start, uint num) const
 
 void AtariGraphicsManager::copyRectToScreen(const void *buf, int pitch, int x, int y, int w, int h) {
 	//debug("copyRectToScreen: %d, %d, %d(%d), %d", x, y, w, pitch, h);
+	_system->updateAudio();
 
 	Graphics::Surface &dstSurface = *lockScreen();
 
@@ -634,6 +636,7 @@ void AtariGraphicsManager::fillScreen(const Common::Rect &r, uint32 col) {
 
 void AtariGraphicsManager::updateScreen() {
 	//debug("updateScreen");
+	_system->updateAudio();
 
 	// avoid falling into the debugger (screen may not not initialized yet)
 	Common::setErrorHandler(nullptr);
@@ -715,6 +718,7 @@ void AtariGraphicsManager::updateScreen() {
 		s_shrinkVidelVisibleArea = _pendingScreenChanges.shrinkVidelVisibleArea().first;
 
 	set_sysvar_to_short(vblsem, 1);  // unlock vbl
+	_system->updateAudio();
 
 	//debug("end of updateScreen");
 }

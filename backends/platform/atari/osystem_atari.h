@@ -51,6 +51,7 @@ public:
 	Common::Path getDefaultConfigFileName() override;
 
 	void update();
+	void updateAudio();
 
 private:
 	long _startTime;

@@ -334,7 +334,7 @@ void OSystem_Atari::initBackend() {
 	_eventManager = new DefaultEventManager(makeKeyboardRepeatingEventSource(atariEventSource));
 
 	// AtariGraphicsManager needs _eventManager ready
-	AtariGraphicsManager *atariGraphicsManager = new AtariGraphicsManager();
+	AtariGraphicsManager *atariGraphicsManager = new AtariGraphicsManager(this);
 	_graphicsManager = atariGraphicsManager;
 
 	atariEventSource->setGraphicsManager(atariGraphicsManager);
@@ -551,7 +551,19 @@ void OSystem_Atari::update() {
 			activeDomain->getValOrDefault("gameid").c_str());
 	}
 
-	((AtariMixerManager *)_mixerManager)->update();
+	updateAudio();
+}
+
+void OSystem_Atari::updateAudio() {
+	// Graphics work can exceed one DMA period on a stock 030. Allow it to
+	// service audio without running engine timer callbacks during rendering.
+	// Graphics also runs before mixer initialization and during shutdown.
+	static bool inAudio = false;
+	if (_mixerManager && !inAudio) {
+		inAudio = true;
+		((AtariMixerManager *)_mixerManager)->update();
+		inAudio = false;
+	}
 }
 
 OSystem *OSystem_Atari_create() {
