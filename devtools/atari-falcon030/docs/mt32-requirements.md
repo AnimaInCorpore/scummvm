@@ -1,29 +1,39 @@
 # Faithful MT-32 for Fate of Atlantis on a stock Falcon: the requirements
 
-What a faithful on-machine MT-32 has to do for *this game*, what the game
-actually asks for, and what the measured Falcon budget supplies.
+Historical live-synthesis requirements and offline resource-demand analysis.
+The [polyphony assessment](mt32-polyphony-options.md) corrects the earlier
+capacity and CPU-headroom claims. The current fidelity-first work is the
+[post-iMUSE reference and PCM playback experiment](../tools/foa-faithful-music/README.md).
 
-Supply figures are cited from the F030MT32 project
-(`/Users/saschaspringer/Work/F030MT32/docs/`), which measured them. Demand
-figures are measured here from the game's own data by
+Component costs are cited from the F030MT32 project
+(`/Users/saschaspringer/Work/F030MT32/docs/`); complete renderer capacities are
+planning estimates, not achieved live polyphony. Resource demand is analyzed by
 [`tools/foa-mt32-demand.py`](../tools/foa-mt32-demand.py). Anything neither
 measured nor cited is marked unverified.
 
 ## The short answer
 
-**Measured, not projected: this game costs 2.24 LA partials per note, and the
-best measured Falcon configuration covers 50.1% of its playing time.** The
-other half steals voices, which is by definition not the faithful target. Mean
-demand while music sounds is 12.70 of the MT-32's 32 partials; the Falcon
-supplies 3-5 exact or 5-8 approximate.
+**The offline cue analysis estimates 2.24 LA partials per note. Aggregate
+demand is at most eight partials for 50.1% of the rendered time, including
+silence. This is not measured Falcon playback coverage.** Mean demand while
+music sounds in that analysis is 12.70 of the MT-32's 32 partials. The quoted
+3–5 exact or 5–8 approximate Falcon synth partials are component-based
+estimates; there is no demonstrated complete live renderer at those counts.
 
 **27.2% of that demand is PCM partials**, which on this port run on the 68030
 with a budget of two, against a demand of about 3.5. Both pools are over
 budget and a slot in one cannot pay for a slot in the other.
 
-The PCM ROM remains an absolute obstacle rather than a budget one, but this
-game leans on the rhythm part far less than expected - 6.5% of playing time -
-which changes where that obstacle sits on the critical path.
+An MT-32 control v1.07 and PCM ROM pair is now available locally and was used
+for the Munt analysis. ROM availability is no longer a blocker in this
+workspace; DSP addressability and transfer costs remain constraints for live
+synthesis. Rhythm is active in 6.5% of the analyzed resource time.
+
+These resource measurements do not cover live iMUSE state. The raw cue export
+does not implement all part setup, hooks, jumps, fades or overlapping players;
+it must not be used as a faithful soundtrack renderer. Capture after the real
+iMUSE and MT-32 driver instead. The new reference tool does this for one
+opening sequence, with complete 32-partial Munt synthesis and reverb.
 
 ## What "faithful" requires
 
@@ -122,11 +132,10 @@ host side.
 
 ### The rhythm part
 
-The rhythm part is **silent 93.5%** of the time, active 6.5%, and averages
+In the raw resource analysis the rhythm part is **silent 93.5%** of the time, active 6.5%, and averages
 1.61 notes when active.
 
-That is a useful result, because rhythm notes are PCM partials and the PCM ROM
-is the one obstacle the budget document calls absolute. **Caveat:** LA timbres
+That is a useful result, because rhythm notes are PCM partials. **Caveat:** LA timbres
 use PCM attack transients in melodic partials too, so 6.5% bounds *rhythm*
 PCM demand, not total PCM demand. Which factory patches use PCM partials
 cannot be known without the control ROM.
@@ -213,10 +222,8 @@ Program 50 alone is 27.6%, then 92 (12.0%), 32 (10.0%), 0 (5.5%) and 36
 (4.5%). 68 programs appear in total.
 
 This matters for the open partials-per-note question: it is really a question
-about **ten to twenty timbres**, not 128. Once a control ROM is available, the
-weighted average follows from those timbres' partial-mute fields, and a port
-that wanted to hand-optimise a few kernels would know which ones. Patch names
-also live in the control ROM, so the programs cannot be named here.
+about **ten to twenty timbres**, not 128. The now-available control ROM supplies
+the partial-mute fields and patch names used in the probe results below.
 
 ## What the Falcon supplies
 
@@ -230,7 +237,7 @@ From [`la32-budget.md`](/Users/saschaspringer/Work/F030MT32/docs/la32-budget.md)
 | Reverb + transport | 83 + 14.81 = 97.81 |
 | **Left for partials and controls** | **391.59** |
 
-Floored homogeneous partial counts:
+Floored homogeneous partial counts projected from measured component costs:
 
 | Kernel | Settled square | Settled saw | Moving square | Moving saw |
 | --- | ---: | ---: | ---: | ---: |
@@ -243,10 +250,10 @@ cannot pay for a slot in the other. That document's own summary: **3-5 exact
 or 5-8 approximate synth partials plus up to 2 PCM**, or "roughly 2-4 typical
 notes".
 
-## The gap: measured
+## Offline demand compared with projected capacity
 
-The conversion is no longer a hypothesis. Munt, control ROM v1.07 plus the
-MT-32 PCM ROM, over all 210 cues:
+Munt, control ROM v1.07 plus the MT-32 PCM ROM, over all 210 raw exported
+cues. These are demand-harness results, subject to the iMUSE omissions above:
 
 | Quantity | Value |
 | --- | ---: |
@@ -257,8 +264,9 @@ MT-32 PCM ROM, over all 210 cues:
 | Peak partials / peak notes | 32 / 24 |
 | Munt itself at the 32-partial ceiling | 0.4% of the time |
 
-Share of playing time that fits each measured Falcon budget, i.e. where nothing
-is stolen:
+Share of total rendered time, including silence, below each aggregate
+partial-count threshold. This does not test separate PCM/synth pools,
+scheduling or voice stealing in a Falcon renderer:
 
 | Partial budget | Coverage |
 | --- | ---: |
@@ -269,11 +277,10 @@ is stolen:
 | 7 (approximate, settled saw) | 45.2% |
 | **8 (approximate, settled square)** | **50.1%** |
 
-**The best measured Falcon configuration covers just under half the game's
-music.** The other half steals voices, which is by definition not the faithful
-target. The original hardware is not at 100% either - it sits at its own
-ceiling 0.4% of the time on this material - but 0.4% and 50% are different
-kinds of statement.
+**50.1% is an offline threshold statistic, not achieved Falcon coverage.**
+Likewise, Munt reaching 32 active partials for 0.4% of the render does not
+by itself count stolen notes. Faithful playback includes the original
+32-partial allocation behavior, including any stealing the MT-32 would do.
 
 ### Per-timbre costs
 
@@ -351,15 +358,16 @@ sounding and the probe measures one - consistent with a partial whose TVA
 gives it no level at the probed key and velocity, not with a parsing error.
 
 This is the answer to the question that was left open, and it is the
-unfavourable one. **The PCM ROM obstacle is on the critical path for most of
-the music, not for the 6.5% the rhythm part occupies.** The top timbre in the
+unfavourable one for live synthesis. **PCM access matters for melodic music
+as well as rhythm.** The top timbre in the
 game (`Str Sect 3`, 28.1% of note-seconds) is PCM-free, but the next three -
 `Fr Horn 1`, `Fantasy`, `AcouPiano1` - are not.
 
 ### Both pools are over budget, and they cannot trade
 
-Applying the 27.2% split to the measured mean of 12.70 partials while music
-sounds:
+As a rough planning calculation, applying the 27.2% melodic timbre split
+to the 12.70 aggregate mean gives the following. This mixes two weightings
+and includes neither actual per-pool peaks nor a measured live capacity:
 
 | Pool | Demand | Falcon supply | Over by |
 | --- | ---: | ---: | ---: |
@@ -391,19 +399,19 @@ For a faithful implementation on the stock 16 MHz / 14 MB / DSP56001 Falcon:
    (`audio/softsynth/mt32.cpp` is the shape to preserve) and share that owner.
    Two sound-owning programs is not an integration.
 5. **Host budget for the game itself.** The stripped Falcon ScummVM build
-   leaves roughly 9.3 MB of the 14 MB free, but memory is not the constraint -
-   cycles are, and the game, its graphics and CD speech have not been profiled
-   against a running synthesiser.
+   leaves roughly 9.3 MB arithmetically for heap, resources and buffers;
+   memory high-water is unmeasured. The game, its graphics and CD speech
+   have not been profiled against a running synthesiser.
 6. **The rhythm part is cheap here.** At 6.5% activity and 1.61 mean notes,
-   two PCM partials cover the rhythm part almost always. This is the one place
-   the measured demand lands comfortably inside the measured supply.
+   two PCM partials exceed that mean in the resource analysis. This is not
+   a worst-case guarantee and the two-partial supply remains a planning figure.
 
 ## What is still open
 
 Evidence item 2 in
 [`scummvm-target.md`](/Users/saschaspringer/Work/F030MT32/docs/scummvm-target.md)
-is now satisfied for the music: the game's partial demand is measured, not
-projected. What remains:
+has useful offline resource measurements, but actual post-iMUSE demand,
+overlapping players and interactive state still need coverage. What remains:
 
 - **Concurrent load**, evidence item 3: game logic, graphics and CD speech
   running against the synthesiser. Nothing here touches it.
@@ -417,8 +425,9 @@ projected. What remains:
 - **Concurrent cues.** iMUSE has 8 players and 32 parts
   (`imuse_internal.h:468`), so music and sound effects can sound together and
   compete for the device's 9 parts. Every polyphony figure here is measured
-  per cue in isolation and is therefore a **lower bound** on what the device
-  sees in play. 50 of the 210 resources are under 5 s and 84 use two parts or
+  per cue in isolation. Because live iMUSE can also mute parts, jump and stop
+  cues, these statistics are not a rigorous lower bound on live demand.
+  50 of the 210 resources are under 5 s and 84 use two parts or
   fewer, which is the shape of stingers and effects rather than music, so
   overlap is likely rather than hypothetical.
 - Anything measured on physical hardware.
@@ -435,6 +444,8 @@ make
 make run ROMS=/path/to/roms
 ```
 
-Its cue export and parsing are verified without a ROM
-(`--check-cues`: 210 cues, 176,500 events, OK). Its synthesis half has not
-been run, because no ROM is available in this environment.
+Its cue export and parsing were verified without a ROM
+(`--check-cues`: 210 cues, 176,500 events, OK). Its synthesis half was then
+run with the local ROM pair, producing the historical statistics above.
+Use the new post-iMUSE capture tool for reference audio; this harness does
+not implement the complete sequencer semantics.

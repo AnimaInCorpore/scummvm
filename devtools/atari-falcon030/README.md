@@ -3,8 +3,9 @@
 A **game-only** ScummVM build aimed at a **stock Falcon030: 16 MHz 68030 +
 68882, 32 MHz DSP56001, 14 MB RAM**, running the DOS CD version of
 **Indiana Jones and the Fate of Atlantis** — and nothing else. The single-game
-restriction is deliberate: on-machine MT-32 synthesis is the expensive half of
-this target, so the ScummVM half gives up everything it can.
+restriction leaves room for the game and faithful music playback. Current
+music work investigates precomputed MT-32 audio with interactive iMUSE
+control; complete live MT-32 synthesis remains beyond the measured budget.
 
 Build with `backends/platform/atari/build-falcon030.sh` (output in
 `build-falcon030/`). Branch `falcon030-port`, worktree
@@ -132,21 +133,44 @@ that this toolchain does not have.
 
 ## MT-32 on the same machine
 
+**Current direction: faithful Fate of Atlantis music.** The
+[reference and PCM playback experiment](tools/foa-faithful-music/README.md)
+captures the opening after the real iMUSE/MT-32 driver and renders it offline
+with Munt's full 32-partial pool, reverb and analog-output model. A ten-second
+49.17 kHz stereo PCM excerpt passes a complete byte comparison through
+emulated Falcon DMA playback/record. This is a preloaded standalone transport
+test; streaming, interactive transitions, speech and physical hardware remain
+unverified. No new music backend is enabled in the game build.
+
+The [resident sample prototype](tools/mt32-sample-bank/RESIDENT.md) passes
+32 sounding voices through emulated Falcon SSI, including a burst of 16
+recorded attacks. Larger attack loads fail. It includes listening comparisons,
+exact output checks and measured limits; it is not yet a ScummVM MIDI backend.
+The [earlier full-sample experiment](tools/mt32-sample-bank/RESULTS.md) measured
+roughly doubled streaming throughput with prepacking, but missed the deadline.
+
+The [polyphony options assessment](docs/mt32-polyphony-options.md) evaluates
+the requested 2x improvement and recommends a sample-based 32-voice development
+target. Faithful 2x live emulation and 32 voices alongside the game remain
+unverified. The assessment also audits the supplied CPU-headroom report.
+
 Requirements, the game's measured demand and the gap are in
 [`docs/mt32-requirements.md`](docs/mt32-requirements.md), with the demand
 measurement reproducible via
 [`tools/foa-mt32-demand.py`](tools/foa-mt32-demand.py).
 
-Headline, now measured rather than projected: the game costs **2.24 LA
-partials per note** and a mean of 12.70 of the MT-32's 32 partials while music
-sounds, so the best measured Falcon budget (8 approximate partials) covers
-**50.1%** of playing time without stealing voices. And 27.2% of that demand is PCM partials, against a host budget of two -
-so both pools are over budget, and a slot in one cannot pay for a slot in the
-other. The rhythm part is active only 6.5% of the time, but melodic timbres
-read PCM too.
+The offline resource analysis averages **2.24 LA partials per note** and
+12.70 of the MT-32's 32 partials while music sounds. Aggregate demand is at most eight partials for
+**50.1% of rendered time, including silence**. This is a demand threshold,
+not measured live playback coverage. Eight approximate DSP partials and two
+CPU PCM partials are planning figures from component costs. PCM accounts for
+27.2% of partial demand; spare capacity in one processor does not automatically
+cover the other. The rhythm part is active only 6.5% of the time, but melodic
+timbres read PCM too.
 
 Measured with [`tools/mt32-partials`](tools/mt32-partials/) against Munt and an
-MT-32 control v1.07 + PCM ROM pair.
+MT-32 control v1.07 + PCM ROM pair. The raw cue export omits live iMUSE
+semantics; these figures are not a reference rendition of interactive play.
 
 ## MT-32 emulation: not yet feasible
 
