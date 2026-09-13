@@ -260,7 +260,37 @@ template<st_volume_t volL, st_volume_t volR, typename st_sample_t, MixMode mixMo
 int RateConverter_Impl<inStereo, outStereo, reverseStereo>::copyConvert(AudioStream &input, st_sample_t *outBuffer, st_size_t numSamples, st_volume_t volL_val, st_volume_t volR_val) {
 	PRINT_OUTPUT_RATE;
 
-	return commonConvert<volL, volR, st_sample_t, mixMode>(input, outBuffer, numSamples, volL_val, volR_val, 1);
+	// Equal rates need neither repeat groups nor pending output frames. Keep
+	// this hot loop separate: commonConvert's runtime repeat count prevents
+	// some compilers from reducing it to a single pass over the input.
+	st_size_t remaining = numSamples;
+	while (remaining) {
+		if (_bufferSize < (inStereo ? 2 : 1)) {
+			_bufferPos = _buffer;
+			_bufferSize = input.readBuffer(_buffer, ARRAYSIZE(_buffer));
+			if (_bufferSize < (inStereo ? 2 : 1)) {
+				_bufferSize = 0;
+				break;
+			}
+		}
+
+		const st_size_t count = MIN<st_size_t>(remaining, _bufferSize / (inStereo ? 2 : 1));
+		const int16 *src = _bufferPos;
+		_bufferPos += count * (inStereo ? 2 : 1);
+		_bufferSize -= count * (inStereo ? 2 : 1);
+		remaining -= count;
+		if (volL | volR) {
+			for (st_size_t i = 0; i < count; ++i) {
+				const int16 inL = src[0];
+				const int16 inR = inStereo ? src[1] : src[0];
+				src += (inStereo ? 2 : 1);
+				writeFrame<volL, volR, st_sample_t, mixMode>(outBuffer, inL, inR, volL_val, volR_val);
+			}
+		} else {
+			outBuffer += count * (outStereo ? 2 : 1);
+		}
+	}
+	return numSamples - remaining;
 }
 
 template<bool inStereo, bool outStereo, bool reverseStereo>

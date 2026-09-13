@@ -31,6 +31,62 @@ private:
 
 class RateTestSuite : public CxxTest::TestSuite {
 public:
+	// Exercise cached input across uneven callbacks, signed samples, volume
+	// changes and EOF. The first callback deliberately leaves most of a read
+	// in the converter; muting must still consume that input.
+	void test_copy_partitioned_signed_eof() {
+		class FiniteStream : public Audio::AudioStream {
+		public:
+			FiniteStream(bool stereo) : _stereo(stereo), _pos(0) {}
+			int readBuffer(int16 *buffer, int count) override {
+				count = MIN(count, 1030 * (_stereo ? 2 : 1) - _pos);
+				for (int i = 0; i < count; ++i, ++_pos)
+					buffer[i] = sample(_pos);
+				return count;
+			}
+			static int16 sample(int pos) { return (pos % 2) ? -30000 + pos : 30000 - pos; }
+			bool isStereo() const override { return _stereo; }
+			int getRate() const override { return 49170; }
+			bool endOfData() const override { return _pos == 1030 * (_stereo ? 2 : 1); }
+			bool _stereo;
+			int _pos;
+		};
+		const int requests[] = { 3, 513, 17, 509, 1 };
+		const int volumes[][2] = { {256, 256}, {128, 256}, {0, 0}, {256, 0}, {0, 256} };
+		for (int inStereo = 0; inStereo < 2; ++inStereo) {
+			for (int outStereo = 0; outStereo < 2; ++outStereo) {
+				for (int reverse = 0; reverse <= (inStereo && outStereo); ++reverse) {
+					FiniteStream input(inStereo);
+					Audio::RateConverter *converter = Audio::makeRateConverter(49170, 49170, inStereo, outStereo, reverse);
+					int position = 0;
+					for (int call = 0; call < 5; ++call) {
+						int32 out[1026];
+						for (int i = 0; i < 1026; ++i)
+							out[i] = 40000; // Preserve 32-bit accumulation above PCM16 range.
+						const int frames = MIN(requests[call], 1030 - position);
+						TS_ASSERT_EQUALS(converter->convert(input, (byte *)out, sizeof(int32), requests[call],
+							volumes[call][0], volumes[call][1], Audio::MIX_ADD), frames);
+						for (int i = 0; i < frames; ++i) {
+							const int left = FiniteStream::sample((position + i) * (inStereo ? 2 : 1)) * volumes[call][0] / 256;
+							const int right = FiniteStream::sample((position + i) * (inStereo ? 2 : 1) + inStereo) * volumes[call][1] / 256;
+							if (outStereo) {
+								TS_ASSERT_EQUALS(out[2 * i + reverse], 40000 + left);
+								TS_ASSERT_EQUALS(out[2 * i + (reverse ^ 1)], 40000 + right);
+							} else {
+								TS_ASSERT_EQUALS(out[i], 40000 + (left + right) / 2);
+							}
+						}
+						for (int i = frames * (outStereo ? 2 : 1); i < 1026; ++i)
+							TS_ASSERT_EQUALS(out[i], 40000);
+						position += frames;
+					}
+					TS_ASSERT(!converter->needsDraining());
+					delete converter;
+				}
+			}
+		}
+	}
+
 	/**
 	 * When the output rate is an exact multiple of the input rate, every input
 	 * frame is written out `factor` times in a row. A request whose frame count
@@ -148,6 +204,21 @@ public:
 		for (int i = 0; i < 10; ++i)
 			TS_ASSERT_EQUALS(out[i], (int16)(i + 1));
 
+		delete converter;
+	}
+
+	void test_copy_clamped_reversed_stereo() {
+		CountingAudioStream input(49170, true);
+		Audio::RateConverter *converter = Audio::makeRateConverter(49170, 49170, true, true, true);
+		int16 out[600 * 2];
+		for (int i = 0; i < 1200; ++i)
+			out[i] = 32000;
+		TS_ASSERT_EQUALS(converter->convert(input, (byte *)out, sizeof(int16), 600,
+			128, 256, Audio::MIX_CLAMPED_ADD), 600);
+		for (int frame = 0; frame < 600; ++frame) {
+			TS_ASSERT_EQUALS(out[frame * 2], MIN(32767, 32000 + frame * 2 + 2));
+			TS_ASSERT_EQUALS(out[frame * 2 + 1], MIN(32767, 32000 + (frame * 2 + 1) / 2));
+		}
 		delete converter;
 	}
 };
