@@ -131,6 +131,33 @@ Lite package, which uses the same `-m68030`. A build that runs on a Falcon
 without the coprocessor would need `-msoft-float` and a soft-float multilib
 that this toolchain does not have.
 
+## AdLib/OPL on the DSP
+
+A separate [OPL3 investigation](docs/opl3-feasibility.md) assesses rendering
+the game's original AdLib arrangement on the DSP56001, reusing F030MXDRV's
+FM architecture. It is a source audit, a reproduction of that project's
+YM2151 timing measurements, a capture of the game's own register stream, and
+a synthesis kernel measured on an emulated Falcon. Nothing has run on
+hardware.
+
+The [capture harness](tools/foa-opl3/README.md) records the register writes
+ScummVM's real AdLib driver makes while Atlantis runs, in a separate headless
+executable on a virtual clock, with repeated runs byte identical. It measures
+burst sizes, callback alignment and keyed-voice occupancy. It renders no audio
+and reaches no OPL emulator. The normal Falcon build is unchanged.
+
+The same directory holds a two-operator OPL synthesis kernel, bit exact
+against Nuked-OPL3 over parameter sweeps and the captured stream, its
+DSP56001 transliteration, and a benchmark on an emulated Falcon. The DSP
+kernel reproduces the reference word for word at nine and eighteen channels.
+
+**It does not fit.** Synthesis alone costs 1,025 instruction cycles per frame
+for Atlantis's own nine-channel arrangement, 209% of the 32.780 kHz budget,
+with the envelope generator, LFO, register decoding, SSI and transport all
+still absent. An exact OPL renderer on this DSP is measured as out of reach;
+an approximate one, along the lines F030MXDRV took for the YM2151, is the
+remaining option and needs its own quality gate.
+
 ## MT-32 on the same machine
 
 **Current direction: faithful Fate of Atlantis music.** The
