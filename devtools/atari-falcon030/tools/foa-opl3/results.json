@@ -1,0 +1,157 @@
+{
+  "date": "2026-09-16",
+  "gate": "Repeated virtual-clock Atlantis capture of post-AdLib-driver OPL writes",
+  "scummvm_commit": "4b73ae3393592cef284070df1fd831aa1e07463a",
+  "scummvm_worktree_dirty": true,
+  "source_sha256": {
+    "trace-opl.cpp": "e6a17f54b8f2b85cd7c3b4e1d97706e74043504031f6c48557c99e62cf923918",
+    "opl.mk": "d6642db1fb31aaddb32e7e101478d23ae0ecb59476ca42c8c674b8f4a21fc4f3",
+    "build-capture.sh": "c76760c70a77d6ab219f96d43e50f48b94da5ce06e36ae4b6301cec8db2a8c8d",
+    "capture-opl.py": "b4d80c4dba182bbd109978432c6177a0b58049eb80c6d1aa4e75ce2037264901",
+    "analyze-opl.py": "7e546d1f12e3a4e02a1894ef53e5f88839be6b6e5aebdd0b1b3d0379261cea3f",
+    "test-analyze-opl.py": "97b3ac3da3b22d525b004bb3617413f045f00a0849b221cdc53821b4bbca2159",
+    "capture-gate.py": "13a7fd7f30ece1876d8706668adaaac86b876bb8ac381ffad7990eb0b19ce13e"
+  },
+  "binary_sha256": "6c7582c9792e4a6dd9271201b37b00d728cf62e754b034db24d9dd93105c3afb",
+  "game_sha256": {
+    "ATLANTIS.000": "72913003d61fffaa614795f12b33d9f2ef3bdcebb155cc5a53fc93b88e57c3bb",
+    "ATLANTIS.001": "8381ba5a2eee3ed887a42d63794f7c6f1b4bbf809c928a4223f95ee3646a7baf"
+  },
+  "capture_ms": 60000,
+  "runs": 2,
+  "repeated_runs_byte_identical": true,
+  "trace_sha256": "883bae533b8338fb9ca9714216412705853f52248b75ff970f8f4ddc666a893f",
+  "clock": "virtual, advancing at explicit backend waits",
+  "sound_starts": [
+    150,
+    21,
+    22,
+    29,
+    30
+  ],
+  "scripted_user_input": null,
+  "speech_muted": true,
+  "analysis": {
+    "scope": "One recorded run of the real game, iMUSE and AdLib driver; no synthesis, no audio",
+    "header": [
+      "# Post-AdLib-driver OPL register writes",
+      "# opl_type 0 capture_ms 60000",
+      "# T <us> tick | W <us> <ctx> <reg> <val> | I <us> <event>",
+      "# Capture limit; later writes are harness-generated shutdown",
+      "# writes 12247 ticks 15002",
+      "# end"
+    ],
+    "writes": 12247,
+    "callback_ticks": 15002,
+    "callback_period_us": 4000,
+    "callback_periods_off_grid": 0,
+    "trace_span_us": 60019000,
+    "writes_per_second": 204.05,
+    "write_context": {
+      "driver_callback": 12234,
+      "engine_thread": 13
+    },
+    "secondary_bank_writes": 0,
+    "register_classes": {
+      "keyon_block_fnum_high": 1997,
+      "ksl_tl": 1722,
+      "fnum_low": 1674,
+      "attack_decay": 1601,
+      "sustain_release": 1598,
+      "am_vib_eg_ksr_mult": 1476,
+      "waveform_select": 1461,
+      "feedback_connection": 716,
+      "chip_control": 2
+    },
+    "writes_with_bits_the_opl2_ignores": {
+      "waveform_select": 849
+    },
+    "distinct_registers": 119,
+    "distinct_register_values": 1581,
+    "peak_writes_in_window": {
+      "1ms": 129,
+      "4ms": 129,
+      "10ms": 138,
+      "20ms": 138,
+      "100ms": 147,
+      "1000ms": 489
+    },
+    "writes_in_busiest_callback": 129,
+    "callbacks_with_writes": 1748,
+    "longest_gap_between_writes_us": 984000,
+    "keyed_channels": {
+      "peak": 9,
+      "peak_sampled_at_callbacks": 9,
+      "mean_at_callbacks": 4.571,
+      "callback_histogram": {
+        "0": 1106,
+        "1": 309,
+        "2": 2753,
+        "3": 1312,
+        "4": 1531,
+        "5": 2376,
+        "6": 1432,
+        "7": 2181,
+        "8": 1063,
+        "9": 939
+      },
+      "key_on_edges": 992,
+      "key_off_edges": 992,
+      "retriggers_without_release": 13
+    },
+    "waveform_select_raw_values": {
+      "0x00": 309,
+      "0x01": 109,
+      "0x02": 162,
+      "0x03": 32,
+      "0x0c": 49,
+      "0x14": 235,
+      "0x22": 49,
+      "0x26": 2,
+      "0x40": 272,
+      "0x4e": 2,
+      "0x7c": 139,
+      "0x7e": 101
+    },
+    "waveform_select_effective": {
+      "0": 1004,
+      "1": 109,
+      "2": 316,
+      "3": 32
+    },
+    "feedback_values": {
+      "0": 85,
+      "2": 2,
+      "4": 16,
+      "5": 234,
+      "6": 218,
+      "7": 161
+    },
+    "connection_values": {
+      "0": 711,
+      "1": 5
+    },
+    "operator_flag_writes": {
+      "tremolo": 313,
+      "vibrato": 408,
+      "sustaining": 1306,
+      "key_scale_rate": 226
+    },
+    "rhythm_register_writes": 0,
+    "markers": [
+      "init",
+      "start 250 Hz",
+      "stop",
+      "close"
+    ],
+    "shutdown_writes": 0,
+    "audio_compared": false,
+    "dsp_cost_measured": false
+  },
+  "not_established": [
+    "No audio was rendered or compared against an OPL reference",
+    "No DSP kernel exists, so no synthesis or transport cost was measured",
+    "One unattended opening sequence only; no player input and no other scenes",
+    "Sam & Max OPL3 data was not available, so its layered path is unmeasured"
+  ]
+}

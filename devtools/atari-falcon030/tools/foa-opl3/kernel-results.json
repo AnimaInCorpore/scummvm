@@ -1,0 +1,44 @@
+{
+  "date": "2026-09-16",
+  "gate": "DSP-shaped OPL kernel against Nuked-OPL3, sample for sample",
+  "scummvm_commit": "4b73ae3393592cef284070df1fd831aa1e07463a",
+  "scummvm_worktree_dirty": true,
+  "source_sha256": {
+    "opl-kernel.h": "ccfb0a922d71981e728be957240b789a99ce1abb28ef1053ec701e8d5cf5759d",
+    "kernel-test.cpp": "89ac18c2c57cdcf1762fa4f5dbd546a4799c5fe7c9adca20f50ab742bd213fa6",
+    "generate-tables.py": "f6f9d6b8847dfdd1f77153f3394bf032bfc4f76a71569ceb61be78ee8136694e",
+    "kernel.mk": "5d823577815b270d9a80a22099248ff66aff577fbed1bfb80e06d127c85260ef",
+    "kernel-gate.py": "90f4375c3c8dc105afdf2f5fad2ef333332e0defcac44554e8df43a7e9abc902"
+  },
+  "trace_sha256": "883bae533b8338fb9ca9714216412705853f52248b75ff970f8f4ddc666a893f",
+  "reference": "Nuked-OPL3 (ScummVM tree)",
+  "samples_compared": 4189988,
+  "register_writes": 47846,
+  "mismatches": 0,
+  "bit_exact": true,
+  "cases": [
+    "waveform range",
+    "pitch: every multiplier, key-scale rate, block and f-number spread",
+    "envelope: every attack/decay pair and every sustain/release pair, both envelope types",
+    "level: every key-scale level against total levels and blocks",
+    "timbre: all waveforms, both connections, every feedback depth, OPL2 and OPL3",
+    "modulation: tremolo and vibrato, shallow and deep, over a full LFO period",
+    "polyphony: 9 and 18 channels with key cycling and mid-note patch reloads",
+    "the captured Atlantis register stream replayed at its recorded times"
+  ],
+  "rom_words": {
+    "log_sine": 256,
+    "exponential": 256,
+    "note": "The eight 1,024-entry waveform tables a desktop build uses are reconstructed from these two, so the whole ROM is 512 words"
+  },
+  "scope": {
+    "two_operator_melodic_channels": true,
+    "four_operator_mode": false,
+    "rhythm_mode": false
+  },
+  "not_established": [
+    "No DSP assembly was measured; this is the host reference the kernel is written from",
+    "No synthesis, transport or deadline cost was timed on a Falcon or in emulation",
+    "Equality holds at the chip's native 49,716 Hz; no output-rate conversion is modelled"
+  ]
+}

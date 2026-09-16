@@ -1,0 +1,10 @@
+build/
+__pycache__/
+# Vendored assembler binaries and generated DSP build products.
+dsp/*.EXE
+dsp/*.CLD
+dsp/*.LOD
+dsp/*.LST
+dsp/BUILD.BAT
+dsp/ioequ.inc
+dsp/opl_boot.i

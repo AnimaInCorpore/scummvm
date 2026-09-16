@@ -1,0 +1,80 @@
+{
+  "date": "2026-09-16",
+  "gate": "OPL synthesis on the emulated Falcon DSP56001: exactness and cycle cost",
+  "scummvm_commit": "4b73ae3393592cef284070df1fd831aa1e07463a",
+  "scummvm_worktree_dirty": true,
+  "source_sha256": {
+    "dsp/opl.asm": "a18d04b4306cd3dbc3ba02fbc50168234c24fec332c69b1c5c1898aac17e2227",
+    "m68k/oplbench.s": "52d09371c48c11e0d549bc315894ab871a9ad621855098cf16878f83adaa60d3",
+    "dsp-fixture.cpp": "e1623f1434b8e363c6a6bc3ae6f4652e52d6340087a1252c4d4aee8ff3493fc7",
+    "opl-kernel.h": "ccfb0a922d71981e728be957240b789a99ce1abb28ef1053ec701e8d5cf5759d",
+    "bench-gate.py": "435256831bfbbcc0bad387594dc6a69eb3529b25da272a1c7460e991fc535a54"
+  },
+  "dsp_program_words": 495,
+  "dsp_program_word_limit": 512,
+  "reference": "opl-kernel.h, itself bit exact against Nuked-OPL3",
+  "cases": [
+    {
+      "channels": 9,
+      "operators": 18,
+      "frames": 1024,
+      "waveforms_resident": 4,
+      "left_delayed_carriers": 3,
+      "frame_words_compared": 2048,
+      "mismatches_against_host_kernel": 0,
+      "bit_exact": true,
+      "instructions_per_frame": 974.0,
+      "instruction_cycles_per_frame": 1025.0,
+      "instruction_cycles_per_operator": 56.94,
+      "budget_use_percent": {
+        "24.585 kHz": 157.1,
+        "32.780 kHz": 209.4,
+        "49.170 kHz": 314.2
+      }
+    },
+    {
+      "channels": 18,
+      "operators": 36,
+      "frames": 1024,
+      "waveforms_resident": 8,
+      "left_delayed_carriers": 12,
+      "frame_words_compared": 2048,
+      "mismatches_against_host_kernel": 0,
+      "bit_exact": true,
+      "instructions_per_frame": 1911.0,
+      "instruction_cycles_per_frame": 1983.0,
+      "instruction_cycles_per_operator": 55.08,
+      "budget_use_percent": {
+        "24.585 kHz": 303.9,
+        "32.780 kHz": 405.2,
+        "49.170 kHz": 607.8
+      }
+    }
+  ],
+  "budget_basis": {
+    "oscillator_hz": 32084988,
+    "clocks_per_instruction_cycle": 2,
+    "note": "Budgets are Hatari's calibrated 16 MIPS figure, one kernel sample per output frame"
+  },
+  "implemented": [
+    "phase generation with the chip's f-number and block scaling",
+    "all eight waveforms through resident tables",
+    "operator feedback",
+    "frequency modulation and additive connection",
+    "the chip's one-frame output pipeline delay on both mixes",
+    "sixteen-bit output saturation"
+  ],
+  "not_implemented": [
+    "the envelope generator: envelope output is held constant, so these figures exclude it entirely",
+    "tremolo and vibrato",
+    "four-operator mode",
+    "rhythm mode",
+    "register decoding on the DSP",
+    "SSI output and host transport"
+  ],
+  "not_established": [
+    "No hardware run: every cycle figure is Hatari's model, which charges Falcon external memory zero wait states and which its own documentation calls instruction-wise correct rather than cycle accurate",
+    "No audio was auditioned and no output-rate conversion is modelled",
+    "The kernel is not optimized; the loop uses no parallel X/Y moves"
+  ]
+}
