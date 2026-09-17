@@ -2,16 +2,24 @@
 
 2026-09-13. Target: unaccelerated Falcon030, 16 MHz, 14 MB, internal audio.
 
-**Precompute complete MT-32 audio offline, then play PCM on the Falcon.**
+**Historical reference/transport experiment, not the selected runtime design.**
+As of 2026-09-14, the active direction is the
+[FCM1 compiled MIDI/iMUSE and instrument-data prototype](../foa-compiled-music/README.md),
+with live synthesis and no prerendered notes or songs. The tools below remain
+available for reference comparisons and audio-transport diagnostics.
+
+This experiment precomputes complete MT-32 audio offline, then plays PCM on
+the Falcon.
 This preserves the reference model's evolving timbres, pitch modulation,
 partial allocation and reverb without synthesizing them during play. It
 changes the runtime problem from many partials to one stereo stream.
 It does not yet solve the game's interactive soundtrack.
 
-The experiment now has a real post-iMUSE reference and a successful
-standalone DMA playback test in calibrated Hatari. **The Falcon ScummVM
-build does not yet play this music.** No production game/backend source was
-changed to enable a replacement soundtrack.
+The experiment has a real post-iMUSE reference, a successful standalone DMA
+test, and an [opt-in in-game streaming probe](IN-GAME.md) in calibrated Hatari.
+The probe plays full-rate stereo alongside actual speech and actor movement
+through ScummVM's mixer. **The normal Falcon build does not yet select or
+play replacement iMUSE music.** The in-game test is a linear recording.
 
 [Listen to the comparison](listen.html) after reproducing the generated
 assets. [results.json](results.json) records the measurements and provenance.
@@ -135,6 +143,12 @@ and compare complete WAV files. `render-trace` rejects incomplete or invalid
 traces and returns failure if the synth is still active after the tail.
 
 ## The next acceptance test
+
+The [in-game streaming gate](IN-GAME.md) passes one scripted room test with
+16,384-frame DMA halves. It needs about 40% of the CPU for mixing/conversion
+and up to two blocks (666 ms) of queued audio latency. Smaller halves failed
+the waveform check; counters alone are insufficient. Real disk timing and
+other scenes remain unmeasured.
 
 Build a bounded in-game prototype of the observed **21 → 22 + 29 + 30**
 transition. iMUSE must remain the timing authority. Precompute its audio

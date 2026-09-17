@@ -1,0 +1,56 @@
+{
+  "checkpoint": "2026-09-14",
+  "format": "FCM1",
+  "profile": "mt32-control-1.07-pcm-mt32",
+  "munt_revision": "6e7c01fba7e1d50c8fa705834889fd0eac136075",
+  "package_bytes": 2719834,
+  "package_sha256": "f13e62aee731a45be38af2ad3e06a906b62b4569de7ab5034e70a3515dc3a7b2",
+  "compiler_sha256": "78a7589406fd35b90ff296a43ff914f209387b47c7d1d2c28cdc8f04f02286f6",
+  "bank_dump_sha256": "24e2fcd7f2bf3a99b71ac9c2f0cc3c1ba6be498cd66a02adfb0825812b941105",
+  "game_sha256": {
+    "ATLANTIS.000": "72913003d61fffaa614795f12b33d9f2ef3bdcebb155cc5a53fc93b88e57c3bb",
+    "ATLANTIS.001": "8381ba5a2eee3ed887a42d63794f7c6f1b4bbf809c928a4223f95ee3646a7baf"
+  },
+  "score": {
+    "indexed_cues": 204,
+    "tracks": 257,
+    "events": 172501,
+    "midi_format": 2,
+    "native_imuse_events": 3417,
+    "custom_timbre_events": 69,
+    "unique_custom_timbres": 52,
+    "source_rol_payload_bytes": 780602,
+    "compiled_score_bytes": 2112000,
+    "largest_compiled_cue_bytes": 69263,
+    "independent_source_event_comparison_passed": true,
+    "native_consumer_passed": true,
+    "instruction_fnv1a": "d9bd540d"
+  },
+  "bank": {
+    "timbres": 210,
+    "custom_definitions_changed_by_normalization": 2,
+    "distinct_partial_parameters": 557,
+    "distinct_velocity_curves": 76,
+    "velocity_values_checked": 71296,
+    "independent_reconstruction_and_constants_passed": true,
+    "original_logarithmic_rom_words": 262144,
+    "rendered_audio_bytes": 0
+  },
+  "tests": {
+    "unit_tests_passed": 11,
+    "ramp_target_increment_pairs": 65536,
+    "ramp_reference_sample_steps": 85387454,
+    "ramp_differential_passed": true,
+    "target_flags": "-m68030 -msoft-float -O2 -ffreestanding -fno-exceptions -fno-rtti",
+    "target_probe_text_bytes": 534,
+    "target_probe_unresolved_symbols": 0,
+    "target_execution_tested": false
+  },
+  "limitations": {
+    "whole_imuse_execution_equivalence_tested": false,
+    "live_waveform_renderer_implemented": false,
+    "game_backend_integrated": false,
+    "falcon_performance_measured": false,
+    "full_game_without_fpu_verified": false
+  }
+}

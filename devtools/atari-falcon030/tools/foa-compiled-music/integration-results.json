@@ -1,0 +1,50 @@
+{
+  "checkpoint": "2026-09-14",
+  "target": "Faithful-sounding soundtrack and MIDI/iMUSE effects; no prerendered music or instruments",
+  "package_sha256": "f13e62aee731a45be38af2ad3e06a906b62b4569de7ab5034e70a3515dc3a7b2",
+  "parser": {
+    "cues": 204,
+    "tracks": 257,
+    "driver_and_state_comparisons": 4349341,
+    "delivered_bytes": 2556638,
+    "max_parser_storage_bytes": 70682,
+    "binary_sha256": "1a2810204dd7bce60d782db8d41c1cb85f82a7cba6841f1b949c43b189aa8a8f",
+    "scenarios": ["linear", "event-firing jump", "failed-jump rollback", "jump to start", "pause/resume", "track change", "unload"],
+    "malformed_input_checks_passed": true,
+    "passed": true
+  },
+  "real_imuse": {
+    "clock": "virtual clock, advancing at explicit backend waits",
+    "capture_ms": 60000,
+    "runs_per_parser": 2,
+    "events": 2305,
+    "sysex": 171,
+    "fcm_parser_cues_verified": [150, 21, 22, 29, 30],
+    "trace_sha256": "3218f59905c2b7ea38637873d886a882f6ff8884f35c44412648228b50ff3524",
+    "binary_sha256": "4cf7a83690fa2957ac753f22d5c6a5b6b223ce8928024982e541f76a200bed88",
+    "all_four_traces_byte_identical": true,
+    "queued_fade_and_overlapping_players": true,
+    "speech_muted": true,
+    "scripted_user_input": null,
+    "passed": true
+  },
+  "falcon_compile": {
+    "adapter_and_modified_imuse_sources_passed": true,
+    "adapter_object_text_bytes": 7444,
+    "real_time_execution_tested": false
+  },
+  "storage": {
+    "shared_score_bytes": 2112000,
+    "original_game_resources_still_loaded": true,
+    "total_game_heap_measured": false
+  },
+  "limitations": {
+    "audio_rendered": false,
+    "internal_live_waveform_renderer_implemented": false,
+    "audible_fidelity_tested": false,
+    "all_in_game_effect_triggers_exercised": false,
+    "save_load_tested": false,
+    "falcon_deadlines_measured": false,
+    "full_game_without_fpu_verified": false
+  }
+}

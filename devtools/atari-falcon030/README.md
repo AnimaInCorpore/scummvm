@@ -1,21 +1,65 @@
 # Atari Falcon030 target (stock 14 MB machine)
 
-A **game-only** ScummVM build aimed at a **stock Falcon030: 16 MHz 68030 +
-68882, 32 MHz DSP56001, 14 MB RAM**, running the DOS version of
+A **game-only** ScummVM build aimed at an **unaccelerated Falcon030: 16 MHz
+68030, 32 MHz DSP56001, 14 MB RAM**. The current game executable also assumes
+the optional **68882**. It runs the DOS version of
 **Indiana Jones and the Fate of Atlantis**, the game every measurement here
 was made with, and since 2026-09-17 also the three other DOS games on the
 same AdLib driver the DSP synthesizes for: **The Secret of Monkey Island**
 (its v5 editions), **Monkey Island 2** and **Day of the Tentacle**. All four
 run their openings on the emulated Falcon with the same transport figures
 (`tools/foa-opl3/game-results*.json`). The narrow profile leaves room for
-the game and faithful music playback. Current
-music work investigates precomputed MT-32 audio with interactive iMUSE
-control; complete live MT-32 synthesis remains beyond the measured budget.
+the game and faithful music playback.
+Current music work compiles MIDI/iMUSE and MT-32 data for live synthesis,
+without prerendered music. Complete live synthesis still has to meet the
+Falcon's measured budget; a new format alone does not establish feasibility.
 
 Build with `backends/platform/atari/build-falcon030.sh` (output in
 `build-falcon030/`). Branch `falcon030-port`, worktree
 `/Users/saschaspringer/Work/scummvm-falcon030`, sibling to the STE port on
 `ste-port` / `scummvm-ste-scene`.
+
+## Latest checkpoint: 2026-09-15
+
+The [FCM1 compiler/control prototype](tools/foa-compiled-music/README.md)
+preserves all 172,501 events in 204 indexed music resources and 257 tracks,
+including 3,417 native iMUSE operations and 52 distinct custom timbres. Its
+2.72 MB package contains score instructions, specialized instrument data and
+original logarithmic ROM waves, with no rendered audio. Independent score
+and bank checks pass. An integer ramp matches Munt over 85 million sample
+steps; the small runtime probe compiles for a 68030 without an FPU.
+
+An [opt-in real iMUSE adapter](tools/foa-compiled-music/INTEGRATION.md) now
+passes 4.35 million parser comparisons over all indexed resources. Two runs
+of each parser also produce identical 2,305-event post-iMUSE traces in the
+60-second virtual-clock opening, including its fade and overlapping players.
+This covers soundtrack and MIDI-effect resource delivery, not every in-game
+effect trigger. It is not an internal waveform renderer or a Falcon performance
+result. Live synthesis, listening comparisons, save/load regression and
+combined game/audio timing remain. The normal game configuration is unchanged.
+
+A supplemental [live renderer](tools/foa-compiled-music/LIVE-RENDERER.md) now
+generates one factory ROM-wave partial on the Falcon CPU. Its exact resampler
+reduces measured resampling cost by 33.8%, while 300 note cases still match
+Munt. Both the 20-second small-buffer and 60-second larger-buffer game runs
+miss audio deadlines. Full synthesis and live iMUSE-to-synth routing remain
+unfinished; this is an opt-in diagnostic, not the production music device.
+
+## Historical PCM transport checkpoint: 2026-09-13
+
+The [opt-in in-game PCM probe](tools/foa-faithful-music/IN-GAME.md) now streams
+49.17 kHz stereo music alongside actual speech and movement for one minute
+in calibrated 16 MHz / 14 MB Hatari. With 16,384-frame DMA halves it reports
+zero stops and missing PCM, a 30 ms minimum mix-finish margin, and continuous
+music in the captured waveform. Mixing takes about 40% of the CPU; maximum
+queued latency is about 666 ms. Smaller halves still fail the waveform gate.
+
+The normal executable builds with the faster equal-rate mixer path and
+additional audio servicing during graphics work. Replacement music remains
+opt-in diagnostic code: iMUSE transition control, whole-game coverage and
+real Falcon disk/audio tests are still outstanding. The older size/config
+measurements below describe earlier builds; see the checkpoint for current
+in-game memory and performance measurements.
 
 ## Prerequisite carried over from master
 
@@ -173,14 +217,18 @@ hardware. See the same directory's README for every figure.
 
 ## MT-32 on the same machine
 
-**Current direction: faithful Fate of Atlantis music.** The
-[reference and PCM playback experiment](tools/foa-faithful-music/README.md)
-captures the opening after the real iMUSE/MT-32 driver and renders it offline
-with Munt's full 32-partial pool, reverb and analog-output model. A ten-second
-49.17 kHz stereo PCM excerpt passes a complete byte comparison through
-emulated Falcon DMA playback/record. This is a preloaded standalone transport
-test; streaming, interactive transitions, speech and physical hardware remain
-unverified. No new music backend is enabled in the game build.
+**Current direction: compiled MIDI/iMUSE and MT-32 data, synthesized live.**
+The [FCM1 prototype](tools/foa-compiled-music/README.md) preserves interactive
+score instructions and specializes instrument/control data without recording
+notes or songs. Its opt-in adapter feeds the real iMUSE player and existing
+MIDI device; it does not synthesize audio internally. It documents what remains
+to implement and measure. No new music path is enabled by default.
+
+The older [reference and PCM playback experiment](tools/foa-faithful-music/README.md)
+captures real post-iMUSE output and provides Munt reference audio and Falcon
+transport diagnostics. It is retained as a test tool, not the selected
+soundtrack representation. See the historical checkpoint above for its
+bounded in-game streaming result.
 
 The [resident sample prototype](tools/mt32-sample-bank/RESIDENT.md) passes
 32 sounding voices through emulated Falcon SSI, including a burst of 16
@@ -189,17 +237,22 @@ exact output checks and measured limits; it is not yet a ScummVM MIDI backend.
 The [earlier full-sample experiment](tools/mt32-sample-bank/RESULTS.md) measured
 roughly doubled streaming throughput with prepacking, but missed the deadline.
 
-The [polyphony options assessment](docs/mt32-polyphony-options.md) evaluates
-the requested 2x improvement and recommends a sample-based 32-voice development
-target. Faithful 2x live emulation and 32 voices alongside the game remain
-unverified. The assessment also audits the supplied CPU-headroom report.
+The historical [polyphony options assessment](docs/mt32-polyphony-options.md)
+evaluates a 2x improvement and a sample-based 32-voice alternative, which is
+not the selected approach. Faithful 2x live emulation and 32 partials alongside
+the game remain unverified. It also audits the supplied CPU-headroom report.
 
 Requirements, the game's measured demand and the gap are in
 [`docs/mt32-requirements.md`](docs/mt32-requirements.md), with the demand
 measurement reproducible via
 [`tools/foa-mt32-demand.py`](tools/foa-mt32-demand.py).
 
-The offline resource analysis averages **2.24 LA partials per note** and
+Historical caveat: the old resource scanner used physical ordinals, truncated
+ROL payloads and missed custom timbres. FCM1 corrects the extraction. The
+following old demand figures need recomputation through real iMUSE and are
+not valid whole-game fidelity or capacity estimates.
+
+That offline resource analysis averaged **2.24 LA partials per note** and
 12.70 of the MT-32's 32 partials while music sounds. Aggregate demand is at most eight partials for
 **50.1% of rendered time, including silence**. This is a demand threshold,
 not measured live playback coverage. Eight approximate DSP partials and two
@@ -212,7 +265,7 @@ Measured with [`tools/mt32-partials`](tools/mt32-partials/) against Munt and an
 MT-32 control v1.07 + PCM ROM pair. The raw cue export omits live iMUSE
 semantics; these figures are not a reference rendition of interactive play.
 
-## MT-32 emulation: not yet feasible
+## Existing MT-32 synthesis kernels: still over budget
 
 The goal of synthesising the game's MT-32 music on the same Falcon is tracked
 in `/Users/saschaspringer/Work/F030MT32/docs/scummvm-target.md`. That document

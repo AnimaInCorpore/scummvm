@@ -1129,7 +1129,17 @@ bool AtariGraphicsManager::updateScreenInternal(Screen *dstScreen, const Graphic
 
 	if (srcSurface) {
 		for (auto it = dirtyRects.begin(); it != dirtyRects.end(); ++it) {
+#ifdef ATARI_FALCON_GAME_ONLY
+			// Bound the interval without audio servicing during chunky-to-
+			// planar conversion. Each batch preserves the dirty x extent.
+			for (int top = it->top; top < it->bottom; top += 16) {
+				Common::Rect batch(it->left, top, it->right, MIN<int>(top + 16, it->bottom));
+				dstSurface.copyRectToSurface(*srcSurface, batch.left, batch.top, batch);
+				_system->updateAudio();
+			}
+#else
 			dstSurface.copyRectToSurface(*srcSurface, it->left, it->top, *it);
+#endif
 		}
 		updated |= !dirtyRects.empty();
 	} else if (drawCursor) {

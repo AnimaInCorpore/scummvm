@@ -43,6 +43,7 @@ class  Player;
 struct Part;
 class  IMuseInternal;
 class  IMuseSysex_Scumm;
+class FCMScore;
 
 
 
@@ -184,7 +185,8 @@ protected:
 		kParserTypeNone = 0,
 		kParserTypeRO,
 		kParserTypeXMI,
-		kParserTypeSMF
+		kParserTypeSMF,
+		kParserTypeFCM
 	};
 
 	MidiDriver *_midi;
@@ -417,6 +419,7 @@ class IMuseInternal : public IMuse {
 
 protected:
 	ScummEngine *_vm;
+	FCMScore *_fcmScore;
 	const bool _native_mt32;
 	const bool _newSystem;
 	const bool _dynamicChanAllocation;

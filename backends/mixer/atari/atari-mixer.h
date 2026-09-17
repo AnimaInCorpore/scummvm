@@ -58,6 +58,9 @@ private:
 
 	int _atariSampleBufferSize = 0;
 	byte *_atariSampleBuffer = nullptr;
+#ifdef ATARI_FALCON_GAME_ONLY
+	byte *_queuedDmaBuffer = nullptr;
+#endif
 #ifdef ATARI_DSP_OPL
 	// The DSP owns the codec and synthesizes the AdLib voices; its
 	// interrupt produces the periods (backends/platform/atari/atari-dsp.h).

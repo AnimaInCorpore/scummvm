@@ -22,9 +22,11 @@
 
 
 #include "common/util.h"
+#include "common/config-manager.h"
 #include "engines/engine.h"
 
 #include "scumm/imuse/imuse_internal.h"
+#include "scumm/imuse/imuse_fcm.h"
 #include "scumm/scumm.h"
 
 #include "audio/midiparser.h"
@@ -183,7 +185,28 @@ int Player::start_seq_sound(int sound, bool reset_vars) {
 	if (ptr == nullptr)
 		return -1;
 
-	if (!memcmp(ptr, "RO", 2)) {
+	uint32 parserBytes = 0;
+	const byte *parserData = ptr;
+	if (_se->_fcmScore && _isMT32) {
+		if (!_se->_vm || _se->_vm->_game.id != GID_INDY4 ||
+		    _se->_vm->_game.platform != Common::kPlatformDOS || !_se->_native_mt32)
+			error("FCM1 score playback requires DOS Atlantis and an MT-32 device");
+		if (!_se->_fcmScore->isLoaded() && !_se->_fcmScore->open(ConfMan.getPath("foa_fcm_score")))
+			error("Cannot open or validate FCM1 score package");
+		parserData = _se->_fcmScore->cue(sound, parserBytes);
+		const byte *mdhd = _se->findStartOfSound(sound, IMuseInternal::kMDhd);
+		if (!parserData || parserBytes < 24 || !mdhd || memcmp(parserData + 8, mdhd, 16) ||
+		    memcmp(ptr, "MThd\0\0\0\6", 8) || READ_BE_UINT16(parserData) != READ_BE_UINT16(ptr + 8) ||
+		    READ_BE_UINT16(parserData + 2) != READ_BE_UINT16(ptr + 12) ||
+		    READ_BE_UINT16(parserData + 4) != READ_BE_UINT16(ptr + 10))
+			error("FCM1 cue %d is absent or does not match the original resource header", sound);
+		if (_parserType != kParserTypeFCM) {
+			delete _parser;
+			_parser = new MidiParser_FCM();
+			_parserType = kParserTypeFCM;
+		}
+		debugC(DEBUG_IMUSE, "FCM1: cue %d, %u bytes", sound, parserBytes);
+	} else if (!memcmp(ptr, "RO", 2)) {
 		// Old style 'RO' resource
 		if (_parserType != kParserTypeRO) {
 			delete _parser;
@@ -208,7 +231,11 @@ int Player::start_seq_sound(int sound, bool reset_vars) {
 
 	_parser->setMidiDriver(this);
 	_parser->property(MidiParser::mpSmartJump, 1);
-	_parser->loadMusic(ptr, 0);
+	if (!_parser->loadMusic(parserData, parserBytes)) {
+		if (_parserType == kParserTypeFCM)
+			error("FCM1 cue %d failed validation", sound);
+		return -1;
+	}
 	_parser->setTrack(_track_index);
 
 	ptr = _se->findStartOfSound(sound, IMuseInternal::kMDhd);

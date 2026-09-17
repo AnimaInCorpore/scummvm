@@ -35,6 +35,10 @@
 #include "common/debug.h"
 #include "common/textconsole.h"
 
+#ifdef ATARI_PCM_PROBE
+#include "backends/mixer/atari/atari-pcm-probe.h"
+#endif
+
 #ifdef ATARI_DSP_OPL
 #include "audio/mixer_intern.h"
 #include "backends/platform/atari/atari-dsp.h"
@@ -75,16 +79,72 @@ static volatile uint32 s_updatePulse;
 static volatile bool s_dmaWrapped;
 static volatile bool s_isrStoppedDma;
 
+#ifdef ATARI_FALCON_GAME_ONLY
+// Zeroed whole frames that DMA loops while update() is starved. The ISR
+// switches to them instead of stopping DMA: an immediate stop can land between
+// the two words of a stereo frame, and Hatari's crossbar keeps that left/right
+// phase across the restart, swapping the channels for the rest of the run.
+// A buffer change applies at the next frame boundary, which keeps the phase.
+// Whether a physical Falcon also keeps the phase is unverified.
+static byte *s_silenceStart, *s_silenceEnd;
+
+// update() and the ISR both write the playback frame registers. Timer A is
+// masked while the XBIOS calls run; masking (IMRA) rather than disabling
+// (IERA) keeps a pending wrap latched. The MFP is supervisor-only.
+static byte *s_queueStart, *s_queueEnd;
+static bool s_queueStartDma, s_queueAccepted;
+
+static long queuePlayBufferSuper() {
+	volatile byte *const imra = (volatile byte *)0xFFFFFA13L;
+	*imra &= ~(1 << 5);
+	// Never queue audio behind the ISR's silence; the next update()
+	// restarts from the stopped state.
+	s_queueAccepted = s_queueStartDma || !s_isrStoppedDma;
+	if (s_queueAccepted) {
+		Setbuffer(SR_PLAY, s_queueStart, s_queueEnd);
+		if (s_queueStartDma)
+			Buffoper(SB_PLA_ENA | SB_PLA_RPT);
+	}
+	*imra |= (1 << 5);
+	return 0;
+}
+
+static bool queuePlayBuffer(byte *start, byte *end, bool startDma) {
+	s_queueStart = start;
+	s_queueEnd = end;
+	s_queueStartDma = startDma;
+	Supexec(queuePlayBufferSuper);
+	return s_queueAccepted;
+}
+#endif
+
 static void __attribute__((interrupt)) timerA(void) {
 	static uint32 s_lastPulseSeen;
 
 	if (s_updatePulse == s_lastPulseSeen) {
+#ifdef ATARI_FALCON_GAME_ONLY
+		// update() didn't run since the previous wrap: loop silence from the
+		// next frame boundary. update() restarts as if DMA had stopped.
+		volatile byte *const dma = (volatile byte *)0xFFFF8900L;
+		dma[0x01] &= 0x7f;	// select the playback frame registers
+		dma[0x03] = (uint32)s_silenceStart >> 16;
+		dma[0x05] = (uint32)s_silenceStart >> 8;
+		dma[0x07] = (uint32)s_silenceStart;
+		dma[0x0f] = (uint32)s_silenceEnd >> 16;
+		dma[0x11] = (uint32)s_silenceEnd >> 8;
+		dma[0x13] = (uint32)s_silenceEnd;
+#else
 		// update() didn't run since the previous wrap: stop the playback
 		*((volatile byte *)0xFFFF8901L) = 0;
+#endif
 		s_isrStoppedDma = true;
 	} else {
 		s_dmaWrapped = true;
 	}
+#ifdef ATARI_PCM_PROBE
+	if (s_pcmProbe)
+		s_pcmProbe->irq(s_updatePulse == s_lastPulseSeen);
+#endif
 	s_lastPulseSeen = s_updatePulse;
 
 	// clear in-service bit
@@ -135,6 +195,14 @@ AtariMixerManager::~AtariMixerManager() {
 	}
 	delete[] _dspPcmRing;
 	_dspPcmRing = nullptr;
+#endif
+
+#ifdef ATARI_PCM_PROBE
+	if (s_pcmProbe) {
+		s_pcmProbe->report();
+		delete s_pcmProbe;
+		s_pcmProbe = nullptr;
+	}
 #endif
 
 	if (_atariSampleBuffer)
@@ -303,11 +371,22 @@ void AtariMixerManager::init() {
 	debug("audio buffer size: %d", _samples);
 
 	_atariSampleBufferSize = obtained.size * 2;	// two buffers
+#ifdef ATARI_FALCON_GAME_ONLY
+	// Followed by a quarter of a half of zeroed whole frames for starvation.
+	uint32 silenceBytes = MAX<uint32>(4, (obtained.size / 4) & ~3);
+	_atariSampleBuffer = (byte *)Mxalloc(_atariSampleBufferSize + silenceBytes, MX_STRAM);
+#else
 	_atariSampleBuffer = (byte *)Mxalloc(_atariSampleBufferSize, MX_STRAM);
+#endif
 	if (!_atariSampleBuffer) {
 		_atariSampleBufferSize = 0;
 		error("Failed to allocate memory in ST RAM");
 	}
+#ifdef ATARI_FALCON_GAME_ONLY
+	s_silenceStart = _atariSampleBuffer + _atariSampleBufferSize;
+	s_silenceEnd = s_silenceStart + silenceBytes;
+	memset(s_silenceStart, 0, silenceBytes);
+#endif
 
 	Setinterrupt(SI_TIMERA, SI_PLAY);
 	Xbtimer(XB_TIMERA, 1<<3, 1, timerA);	// event count mode, count to '1'
@@ -323,6 +402,18 @@ void AtariMixerManager::init() {
 
 	_mixer = new Audio::MixerImpl(_outputRate, _outputChannels == 2, _samples, 4, false);
 	_mixer->setReady(true);
+
+#ifdef ATARI_PCM_PROBE
+	ConfMan.registerDefault("pcm_probe_resident", false);
+	ConfMan.registerDefault("pcm_probe_delay_ms", 20000);
+	ConfMan.registerDefault("pcm_probe_duration_ms", 60000);
+	ConfMan.registerDefault("pcm_probe_buffer_bytes", 262144);
+	ConfMan.registerDefault("pcm_probe_chunk_bytes", 32768);
+	ConfMan.registerDefault("pcm_probe_click_x", -1);
+	ConfMan.registerDefault("pcm_probe_click_y", -1);
+	if (ConfMan.hasKey("pcm_probe_file"))
+		s_pcmProbe = new AtariPcmProbe(_mixer, _atariSampleBufferSize);
+#endif
 
 	resumeAudio();
 }
@@ -380,6 +471,10 @@ void AtariMixerManager::update() {
 #endif
 
 	s_updatePulse++;
+#ifdef ATARI_PCM_PROBE
+	if (s_pcmProbe)
+		s_pcmProbe->updatePulse();
+#endif
 
 	// Translate ISR's starvation signal into a state transition. Done
 	// here so that update() is the only writer of s_playbackState.
@@ -396,30 +491,65 @@ void AtariMixerManager::update() {
 
 	if (s_playbackState == kPlaybackStopped) {
 		memset(_atariSampleBuffer, 0, _atariSampleBufferSize);
+#ifdef ATARI_FALCON_GAME_ONLY
+		_queuedDmaBuffer = atariSampleBuffer1stHalf;
+		// After starvation DMA is still looping silence; the new half is
+		// queued behind it and the position check below waits for it.
+		queuePlayBuffer(atariSampleBuffer1stHalf, atariSampleBuffer2ndHalf, true);
+#else
 		Setbuffer(SR_PLAY, atariSampleBuffer1stHalf, atariSampleBuffer2ndHalf);
 		Buffoper(SB_PLA_ENA | SB_PLA_RPT);
+#endif
 		s_playbackState = kPlay1stHalf;
-		// Buffoper's 0->ENA transition can fire a spurious SI_PLAY which
-		// would set s_dmaWrapped here. The resulting extra state toggle
-		// is benign — it just shuffles which physical half holds the next
-		// mix. Audio output is continuous either way.
+		// Buffoper's 0->ENA transition can also fire SI_PLAY. On Falcon,
+		// read the actual DMA position below instead of counting this as
+		// a completed buffer.
 		needsMix = true;
 	}
 
 	if (s_dmaWrapped) {
 		s_dmaWrapped = false;
+#ifndef ATARI_FALCON_GAME_ONLY
 		if (s_playbackState == kPlay1stHalf)
 			s_playbackState = kPlay2ndHalf;
 		else if (s_playbackState == kPlay2ndHalf)
 			s_playbackState = kPlay1stHalf;
+#endif
 		needsMix = true;
 	}
 
-	if (!needsMix)
-		return;
+#ifdef ATARI_FALCON_GAME_ONLY
+	byte *buf = nullptr;
+	if (needsMix) {
+		SndBufPtr pointers;
+		Buffptr(&pointers);
+		byte *playing = (byte *)pointers.play;
+		byte *playingHalf = playing >= atariSampleBuffer1stHalf && playing < atariSampleBufferEnd
+			? (playing < atariSampleBuffer2ndHalf ? atariSampleBuffer1stHalf : atariSampleBuffer2ndHalf)
+			: nullptr;
+		// A wrap during the previous mix (or the startup interrupt) can
+		// leave another notification pending. Do not overwrite the queued
+		// half before DMA has actually started reading it.
+		needsMix = playingHalf && playingHalf == _queuedDmaBuffer;
+		if (needsMix)
+			buf = playingHalf == atariSampleBuffer1stHalf ? atariSampleBuffer2ndHalf : atariSampleBuffer1stHalf;
+	}
+#endif
 
-	// Mix into the half DMA is NOT currently playing, and Setbuffer to
-	// it so DMA wraps there at the next frame boundary.
+	if (!needsMix) {
+#ifdef ATARI_PCM_PROBE
+		if (s_pcmProbe)
+			s_pcmProbe->service();
+#endif
+		return;
+	}
+
+#ifdef ATARI_PCM_PROBE
+	uint32 probeMixBegin = g_system->getMillis();
+#endif
+
+#ifndef ATARI_FALCON_GAME_ONLY
+	// Legacy backend: queue the next half before mixing.
 	byte *buf;
 	if (s_playbackState == kPlay1stHalf) {
 		buf = atariSampleBuffer2ndHalf;
@@ -428,8 +558,14 @@ void AtariMixerManager::update() {
 		buf = atariSampleBuffer1stHalf;
 		Setbuffer(SR_PLAY, atariSampleBuffer1stHalf, atariSampleBuffer2ndHalf);
 	}
+#endif
 
 	int processed = _mixer->mixCallback(_sampleBuffer, _sampleBufferSize);
+
+#ifdef ATARI_PCM_PROBE
+	if (s_pcmProbe)
+		s_pcmProbe->dmaPosition(buf, _atariSampleBufferSize / 2, true);
+#endif
 
 	// WARNING: loopCount, src and dst are modified by the asm code
 	int loopCount = processed * _outputChannels;
@@ -521,7 +657,27 @@ void AtariMixerManager::update() {
 		}
 	}
 
+#ifdef ATARI_PCM_PROBE
+	if (s_pcmProbe)
+		s_pcmProbe->dmaPosition(buf, _atariSampleBufferSize / 2, false);
+#endif
+
+#ifdef ATARI_FALCON_GAME_ONLY
+	// Until conversion is complete DMA continues to loop the old half.
+	// A missed deadline can repeat completed audio, but cannot expose a
+	// partially written buffer. The probe's waveform/deadline gate still
+	// rejects repeats.
+	if (queuePlayBuffer(buf, buf + _atariSampleBufferSize / 2, false))
+		_queuedDmaBuffer = buf;
+#endif
+
 	if (processed > 0 && processed != _samples) {
 		warning("processed: %d, _samples: %d", processed, _samples);
 	}
+#ifdef ATARI_PCM_PROBE
+	if (s_pcmProbe) {
+		s_pcmProbe->mixed(probeMixBegin, g_system->getMillis(), processed);
+		s_pcmProbe->service();
+	}
+#endif
 }

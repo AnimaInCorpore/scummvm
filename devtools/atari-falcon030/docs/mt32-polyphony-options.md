@@ -1,11 +1,12 @@
 # Doubling live polyphony and a 32-voice alternative
 
 Assessment: 2026-09-12; resident follow-up: 2026-09-13.
-The user subsequently prioritized faithful Fate of Atlantis music. The
-[current experiment](../tools/foa-faithful-music/README.md) renders actual
-post-iMUSE output offline and verifies preloaded PCM playback at 49.17 kHz.
-The 32-voice sample synthesizer below remains an approximation experiment,
-not the selected fidelity target.
+The active direction as of 2026-09-14 is the
+[FCM1 compiled MIDI/iMUSE and instrument-data prototype](../tools/foa-compiled-music/README.md),
+targeting live synthesis without prerecorded songs, notes or instruments.
+The [PCM experiment](../tools/foa-faithful-music/README.md) is now a historical
+reference/transport test. The 32-voice sample synthesizer below is also a
+historical approximation experiment, not the selected fidelity target.
 
 Target: the 16 MHz 68030 / 32 MHz DSP56001 Falcon
 with 14 MB, including ScummVM running Fate of Atlantis. This is an assessment
@@ -198,8 +199,9 @@ instrument character better than aggressive live LA simplification. This is
 a sound-quality judgment to test by listening, not an audition result.
 Samples will not reproduce arbitrary timbre SysEx, continuously changing
 filter behavior, independent partial releases or velocity response exactly.
-The resource analysis found factory patches rather than custom Roland timbre
-uploads in Atlantis, which makes this particular game a better candidate.
+The earlier factory-only claim was incorrect: indexed extraction finds 69
+custom-instrument events containing 52 distinct custom timbres. That removes
+the claimed factory-only justification for this alternative; see FCM1 above.
 
 Memory and bandwidth must be measured early. At 24.585 kHz, 32 mono 16-bit
 streams at unity pitch already represent about **1.57 MB/s of sample payload**

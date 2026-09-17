@@ -26,11 +26,13 @@
 #include "common/util.h"
 #include "common/system.h"
 #include "common/endian.h"
+#include "common/config-manager.h"
 
 #include "audio/mixer.h"
 
 #include "scumm/imuse/imuse.h"
 #include "scumm/imuse/imuse_internal.h"
+#include "scumm/imuse/imuse_fcm.h"
 #include "scumm/imuse/instrument.h"
 #include "scumm/resource.h"
 #include "scumm/scumm.h"
@@ -46,6 +48,7 @@ namespace Scumm {
 
 IMuseInternal::IMuseInternal(ScummEngine *vm, MidiDriverFlags sndType, bool nativeMT32) :
 	_vm(vm),
+	_fcmScore(nullptr),
 	_native_mt32(nativeMT32),
 	_newSystem(vm && vm->_game.id == GID_SAMNMAX),
 	_dynamicChanAllocation(vm && vm->_game.id != GID_MONKEY2 && vm->_game.id != GID_INDY4), // For the non-iMuse games that (unfortunately) run on this player we need to pretend we're on the more modern version
@@ -75,6 +78,12 @@ IMuseInternal::IMuseInternal(ScummEngine *vm, MidiDriverFlags sndType, bool nati
 	memset(_channel_volume, 0, sizeof(_channel_volume));
 	memset(_channel_volume_eff, 0, sizeof(_channel_volume_eff));
 	memset(_volchan_table, 0, sizeof(_volchan_table));
+	// Explicit experimental opt-in. This changes only the score parser, not
+	// the selected audio device or the game's digital speech/effect paths.
+	if (ConfMan.hasKey("foa_fcm_score") && !ConfMan.getPath("foa_fcm_score").empty()) {
+		_fcmScore = new FCMScore();
+		// Validate on first playback, after ScummEngine has finished setup.
+	}
 }
 
 IMuseInternal::~IMuseInternal() {
@@ -87,6 +96,8 @@ IMuseInternal::~IMuseInternal() {
 		_initialized = false;
 		stopAllSounds_internal();
 	}
+	delete _fcmScore;
+	_fcmScore = nullptr;
 
 	if (_midi_adlib) {
 		_midi_adlib->close();

@@ -67,12 +67,14 @@ def main():
     parser.add_argument("reference", type=Path)
     parser.add_argument("--start", type=float, default=8)
     parser.add_argument("--seconds", type=float, default=10)
+    parser.add_argument("--prepare-only", action="store_true", help="Write resampled PCM/WAV assets for the in-game stream probe without building a resident DMA test")
     parser.add_argument("--f030mt32", type=Path, default=HERE.parents[4] / "F030MT32")
     parser.add_argument("--hatari", type=Path, default=HERE.parents[4] / "F030Arcade/third_party/hatari/build/src/hatari")
     parser.add_argument("--output", type=Path, default=HERE / "build/pcm-gate")
     args = parser.parse_args()
-    if not np.isfinite([args.start, args.seconds]).all() or args.start < 0 or not 0 < args.seconds <= 15:
-        parser.error("Use a nonnegative start and 0 < seconds <= 15 (preloaded RAM gate)")
+    maximum = 3600 if args.prepare_only else 15
+    if not np.isfinite([args.start, args.seconds]).all() or args.start < 0 or not 0 < args.seconds <= maximum:
+        parser.error(f"Use a nonnegative start and 0 < seconds <= {maximum}")
     case = args.output.resolve()
     case.mkdir(parents=True, exist_ok=True)
     root = args.f030mt32.resolve()
@@ -93,6 +95,10 @@ def main():
     write_wav(case / "reference-excerpt.wav",
               samples[reference_first:reference_first+reference_count], source_rate)
     write_wav(case / "expected.wav", expected, RATE)
+    if args.prepare_only:
+        print(json.dumps(dict(source=str(case / "SOURCE.RAW"), frames=count,
+                              seconds=count / RATE, source_pcm_sha256=digest(case / "SOURCE.RAW")), indent=2))
+        return
     # Extra recording room permits whole-frame startup latency; compare the
     # complete excerpt, including its last sample, without accepting omissions.
     output_bytes = (count + 4096) * 4

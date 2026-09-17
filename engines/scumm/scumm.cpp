@@ -32,6 +32,10 @@
 #include "backends/keymapper/keymap.h"
 #include "backends/keymapper/keymapper.h"
 
+#ifdef ATARI_FALCON_GAME_ONLY
+#include "backends/platform/atari/osystem_atari.h"
+#endif
+
 #include "engines/util.h"
 
 #include "gui/message.h"
@@ -3130,6 +3134,10 @@ void ScummEngine_v0::scummLoop(int delta) {
 }
 
 void ScummEngine::scummLoop(int delta) {
+#ifdef ATARI_FALCON_GAME_ONLY
+	OSystem_Atari *falconSystem = dynamic_cast<OSystem_Atari *>(_system);
+	assert(falconSystem);
+#endif
 	// Notify the script about how much time has passed, in jiffies
 	if (VAR_TIMER != 0xFF)
 		VAR(VAR_TIMER) = delta;
@@ -3277,6 +3285,12 @@ load_game:
 
 	checkAndRunSentenceScript();
 
+#ifdef ATARI_FALCON_GAME_ONLY
+	// The stock Falcon mixes cooperatively. Service audio between engine
+	// stages as well as screen copies; these calls do not dispatch timers.
+	falconSystem->updateAudio();
+#endif
+
 	if (shouldQuit())
 		return;
 
@@ -3310,10 +3324,19 @@ load_game:
 		if (_game.version > 3)
 			displayDialog();
 
+#ifdef ATARI_FALCON_GAME_ONLY
+		falconSystem->updateAudio();
+#endif
 		scummLoop_handleDrawing();
 
+#ifdef ATARI_FALCON_GAME_ONLY
+		falconSystem->updateAudio();
+#endif
 		scummLoop_handleActors();
 
+#ifdef ATARI_FALCON_GAME_ONLY
+		falconSystem->updateAudio();
+#endif
 		_fullRedraw = false;
 
 		scummLoop_handleEffects();
@@ -3336,6 +3359,10 @@ load_game:
 	}
 
 	scummLoop_handleSound();
+
+#ifdef ATARI_FALCON_GAME_ONLY
+	falconSystem->updateAudio();
+#endif
 
 	camera._last = camera._cur;
 

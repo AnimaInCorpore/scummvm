@@ -158,6 +158,9 @@ void OSystem_NULL::initBackend() {
 	_mixerManager->init();
 
 	BaseBackend::initBackend();
+#ifdef FCM_IMUSE_TEST_CLOCK
+	logMessage(LogMessageType::kInfo, "FCM1 test clock: virtual\n");
+#endif
 #endif
 }
 
@@ -192,8 +195,16 @@ Common::MutexInternal *OSystem_NULL::createMutex() {
 	return new NullMutexInternal();
 }
 
+#ifdef FCM_IMUSE_TEST_CLOCK
+// Only the dedicated FCM comparison executable defines this macro. Advance
+// virtual time at explicit waits so host scheduling cannot alter MIDI traces.
+static uint32 fcmTestMillis = 0;
+#endif
+
 uint32 OSystem_NULL::getMillis(bool skipRecord) {
-#ifdef POSIX
+#ifdef FCM_IMUSE_TEST_CLOCK
+	return fcmTestMillis;
+#elif defined(POSIX)
 	timeval curTime;
 
 	gettimeofday(&curTime, 0);
@@ -208,7 +219,9 @@ uint32 OSystem_NULL::getMillis(bool skipRecord) {
 }
 
 void OSystem_NULL::delayMillis(uint msecs) {
-#ifdef POSIX
+#ifdef FCM_IMUSE_TEST_CLOCK
+	fcmTestMillis += msecs ? msecs : 1;
+#elif defined(POSIX)
 	usleep(msecs * 1000);
 #elif defined(WIN32)
 	Sleep(msecs);

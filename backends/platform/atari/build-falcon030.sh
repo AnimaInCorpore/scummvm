@@ -24,9 +24,11 @@ FASTCALL=false
 # the archives at all. ATARI_FALCON_GAME_ONLY (engines/scumm/metaengine.cpp)
 # is what removes those references.
 PLUGINS=false
-# Munt cannot synthesise MT-32 in real time on a 16 MHz 68030. The intended
-# replacement is a Falcon DSP driver behind the audio/softsynth/mt32.cpp
-# interface; see devtools/atari-falcon030/README.md.
+# Munt cannot synthesise MT-32 in real time on a 16 MHz 68030. Current music
+# work compiles MIDI/iMUSE and ROM-derived synth data for a future live backend;
+# an opt-in score adapter feeds real iMUSE, but there is no internal waveform
+# renderer yet. No prerendered music is selected by this build.
+# See devtools/atari-falcon030/README.md.
 MT32EMU=false
 
 export ASFLAGS="-m68030"

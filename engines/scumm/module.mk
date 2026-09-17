@@ -30,6 +30,7 @@ MODULE_OBJS := \
 	he/sound_he.o \
 	help.o \
 	imuse/imuse.o \
+	imuse/imuse_fcm.o \
 	imuse/imuse_part.o \
 	imuse/imuse_player.o \
 	imuse/instrument.o \

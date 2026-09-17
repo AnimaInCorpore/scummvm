@@ -2,8 +2,17 @@
 
 Historical live-synthesis requirements and offline resource-demand analysis.
 The [polyphony assessment](mt32-polyphony-options.md) corrects the earlier
-capacity and CPU-headroom claims. The current fidelity-first work is the
-[post-iMUSE reference and PCM playback experiment](../tools/foa-faithful-music/README.md).
+capacity and CPU-headroom claims. Current work is the
+[FCM1 compiled MIDI/iMUSE and instrument-data prototype](../tools/foa-compiled-music/README.md),
+with live synthesis as the target and no prerendered soundtrack.
+
+**2026-09-14 correction:** directory-indexed extraction finds 204 resources,
+257 tracks, 3,417 iMUSE operations and 69 custom-instrument events containing
+52 distinct timbres. The earlier scanner counted 210 physical copies, truncated
+ROL payloads by eight bytes and missed custom instruments. Historical demand,
+duration and usage statistics below therefore need recomputation through real
+iMUSE; they are not valid whole-game requirements or capacity predictions.
+The measured component costs remain separate evidence.
 
 Component costs are cited from the F030MT32 project
 (`/Users/saschaspringer/Work/F030MT32/docs/`); complete renderer capacities are
@@ -11,7 +20,7 @@ planning estimates, not achieved live polyphony. Resource demand is analyzed by
 [`tools/foa-mt32-demand.py`](../tools/foa-mt32-demand.py). Anything neither
 measured nor cited is marked unverified.
 
-## The short answer
+## Historical demand estimate (superseded extraction)
 
 **The offline cue analysis estimates 2.24 LA partials per note. Aggregate
 demand is at most eight partials for 50.1% of the rendered time, including
@@ -89,15 +98,14 @@ Mean while anything sounds: **5.63 notes**. Peak per cue: median 9, maximum 20.
   rhythm. Nothing outside the model.
 - **1-4 parts are active 77.8%** of the time; five or more only 13.6%.
 - 68 distinct program numbers across the set.
-- **No custom timbre upload.** The 3,515 SysEx messages in the music are all
-  iMUSE's own `0x7D` markers, not Roland `DT1` writes, and iMUSE's part setup
-  passes a program number
-  (`part->_instrument.program(buf[8], 0, player->_isMT32)` in
-  `engines/scumm/imuse/sysex_scumm.cpp`). `ROLAND.IMS` contains no Roland
-  SysEx header and no timbre-shaped record, and it is **not packed** - payload
-  entropy 6.75 bits/byte and no LZEXE, PKLITE, DIET or EXEPACK signature - so
-  there is no hidden timbre table either. The game plays the **factory
-  patches**.
+- **Custom instruments are required.** Correct indexed parsing finds 69
+  Roland-form custom-timbre events with 52 distinct 246-byte definitions,
+  in addition to 3,417 iMUSE `0x7D` operations. `Player::sysEx` in
+  `engines/scumm/imuse/imuse_player.cpp` assigns these to the logical iMUSE
+  part encoded in the message, then applies them through the allocated
+  channel. They must not be treated as immediate writes to a fixed hardware
+  part. FCM1 preserves their original bytes and Munt-normalized definitions.
+  Driver-file inspection did not justify the earlier factory-only conclusion.
 
 ### The driver files
 
@@ -206,7 +214,7 @@ the whole DSP budget - cannot be reclaimed by turning it off. That makes the
 half-rate reverb lever (open lever 3, worth about 45 cycles) directly relevant
 rather than speculative.
 
-### The timbre question is smaller than it looks
+### Historical program-number concentration (not custom-timbre coverage)
 
 Weighted by note-seconds across all 210 cues, program usage is highly
 concentrated:
@@ -221,9 +229,10 @@ concentrated:
 Program 50 alone is 27.6%, then 92 (12.0%), 32 (10.0%), 0 (5.5%) and 36
 (4.5%). 68 programs appear in total.
 
-This matters for the open partials-per-note question: it is really a question
-about **ten to twenty timbres**, not 128. The now-available control ROM supplies
-the partial-mute fields and patch names used in the probe results below.
+These program-number statistics do not bound the required instrument set:
+custom timbres and live iMUSE part state were missing from this analysis.
+FCM1 currently retains all 128 factory melodic timbres, 30 rhythm timbres and
+52 game custom timbres, rather than pruning by these old usage figures.
 
 ## What the Falcon supplies
 
