@@ -109,6 +109,17 @@ uint8 s_productionStack[kProductionStackBytes] __attribute__((aligned(16)));
 volatile uint32 s_refusedStreak, s_refusedStreakMax, s_refusedMutex, s_refusedAllocator, s_refusedLevel, s_extended;
 volatile uint32 s_produceTicks, s_produceTicksMax;   // nested ticks during one production call: its length in ms
 volatile uint32 s_emptyTicks, s_emptyStreak, s_emptyStreakMax;   // ticks with nothing queued
+// Inside the longest production session: how many periods its loop produced,
+// and how many register events they carried. A session that lasts because the
+// loop cannot outrun delivery shows many periods at about a period's length
+// each; one that lasts because a burst of iMUSE writes is expensive shows few
+// periods and a large event count.
+volatile uint32 s_produceLoops, s_produceEvents;
+volatile uint32 s_produceLoopsAtMax, s_produceEventsAtMax;
+// Which phase of a period the producer is in, sampled by the nested tick:
+// the OPL timer callbacks, or the framing and the PCM copy around them.
+// s_produceTicks is wall time, so this says where the main loop's freeze went.
+volatile uint32 s_phaseTicks[2], s_callbackTicksAtMax, s_callbacksAtMax;
 
 inline uint32 queued() {
 	return (uint32)((s_tail - s_head + kQueueSize) % kQueueSize);
@@ -188,6 +199,11 @@ long exchangeSuper() {
 
 } // namespace
 
+// Outside the anonymous namespace above: dsp-opl.cpp sets these around the
+// OPL timer callbacks, and the tick samples them.
+volatile uint8 g_atariDspInCallback;
+volatile uint32 g_atariDspCallbacks;
+
 // MFP Timer A, about 1 kHz, entered at interrupt level 6 in supervisor
 // mode. The assembly below has already moved to the handler's own stack
 // (unless this tick is nested inside a production call, which is on that
@@ -221,8 +237,14 @@ long atari_dsp_timer_tick(unsigned long interruptedLevel) {
 	if (s_producing) {
 		// A long production call (iMUSE can spend hundreds of milliseconds
 		// in one callback): extension periods keep the kernel fed meanwhile.
-		if (++s_produceTicks > s_produceTicksMax)
+		++s_phaseTicks[g_atariDspInCallback & 1];
+		if (++s_produceTicks > s_produceTicksMax) {
 			s_produceTicksMax = s_produceTicks;
+			s_produceLoopsAtMax = s_produceLoops;
+			s_produceEventsAtMax = s_produceEvents;
+			s_callbackTicksAtMax = s_phaseTicks[1];
+			s_callbacksAtMax = g_atariDspCallbacks;
+		}
 		if (queued() < AtariDspAudio::kExtendBelow && s_producer(s_producerContext, false))
 			++s_extended;
 		return 0;
@@ -250,6 +272,9 @@ long atari_dsp_timer_tick(unsigned long interruptedLevel) {
 	}
 	s_refusedStreak = 0;
 	s_produceTicks = 0;
+	s_produceLoops = s_produceEvents = 0;
+	s_phaseTicks[0] = s_phaseTicks[1] = 0;
+	g_atariDspCallbacks = 0;
 	s_producing = true;
 	return 1;
 }
@@ -259,6 +284,7 @@ long atari_dsp_timer_tick(unsigned long interruptedLevel) {
 // clear and the level change would take this stack for its own.
 void atari_dsp_produce() {
 	while (s_producer && queued() < AtariDspAudio::kProduceAhead) {
+		++s_produceLoops;
 		if (!s_producer(s_producerContext, true))
 			break;
 	}
@@ -452,6 +478,10 @@ bool AtariDspAudio::startStream() {
 	s_producing = false;
 	s_refusedStreak = s_refusedStreakMax = s_refusedMutex = s_refusedAllocator = s_refusedLevel = s_extended = 0;
 	s_produceTicks = s_produceTicksMax = s_emptyTicks = s_emptyStreak = s_emptyStreakMax = 0;
+	s_produceLoops = s_produceEvents = s_produceLoopsAtMax = s_produceEventsAtMax = 0;
+	s_phaseTicks[0] = s_phaseTicks[1] = s_callbackTicksAtMax = s_callbacksAtMax = 0;
+	g_atariDspInCallback = 0;
+	g_atariDspCallbacks = 0;
 	atari_dsp_stack_top = s_productionStack + kProductionStackBytes;
 	// Timer A: 2,457,600 Hz / 64 / 38 = 1,010 Hz.
 	s_deliver = true;
@@ -473,6 +503,8 @@ uint32 AtariDspAudio::periodsQueued() const {
 
 void AtariDspAudio::productionStats(uint32 &refusedStreakMax, uint32 &refusedMutex, uint32 &refusedAllocator,
                                     uint32 &refusedLevel, uint32 &extended, uint32 &produceMax,
+                                    uint32 &produceLoopsAtMax, uint32 &produceEventsAtMax,
+                                    uint32 &callbackTicksAtMax, uint32 &callbacksAtMax,
                                     uint32 &emptyTicks, uint32 &emptyStreakMax) const {
 	refusedStreakMax = s_refusedStreakMax;
 	refusedMutex = s_refusedMutex;
@@ -480,6 +512,10 @@ void AtariDspAudio::productionStats(uint32 &refusedStreakMax, uint32 &refusedMut
 	refusedLevel = s_refusedLevel;
 	extended = s_extended;
 	produceMax = s_produceTicksMax;
+	produceLoopsAtMax = s_produceLoopsAtMax;
+	produceEventsAtMax = s_produceEventsAtMax;
+	callbackTicksAtMax = s_callbackTicksAtMax;
+	callbacksAtMax = s_callbacksAtMax;
 	emptyTicks = s_emptyTicks;
 	emptyStreakMax = s_emptyStreakMax;
 }
@@ -538,6 +574,7 @@ AtariDspAudio::Period *AtariDspAudio::beginPeriod(bool extension) {
 }
 
 void AtariDspAudio::addEvent(Period *period, uint32 block, uint16 address, uint32 value) {
+	++s_produceEvents;
 	if (period->eventCount >= kMaxEvents) {
 		++s_protocolErrors;
 		return;

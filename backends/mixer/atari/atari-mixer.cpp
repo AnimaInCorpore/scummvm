@@ -275,12 +275,16 @@ void AtariMixerManager::updateDsp() {
 		_dspLoggedPeriods = submitted;
 		uint32 rendered = 0, late = 0, refusedStreak = 0, refusedMutex = 0, refusedAllocator = 0, refusedLevel = 0;
 		uint32 extended = 0, produceMax = 0, emptyTicks = 0, emptyStreak = 0;
+		uint32 produceLoops = 0, produceEvents = 0, callbackTicks = 0, callbacks = 0;
 		_dsp->queryCounters(rendered, late);
-		_dsp->productionStats(refusedStreak, refusedMutex, refusedAllocator, refusedLevel, extended, produceMax, emptyTicks, emptyStreak);
+		_dsp->productionStats(refusedStreak, refusedMutex, refusedAllocator, refusedLevel, extended, produceMax,
+		                      produceLoops, produceEvents, callbackTicks, callbacks, emptyTicks, emptyStreak);
 		debug("AtariDspAudio: %u periods submitted, %u rendered, %u late, %u protocol errors, %u pcm underruns, "
-		      "%u extended, refused %u ms max (%u mutex, %u allocator, %u level), production %u ms max, empty %u ticks (%u max)",
+		      "%u extended, refused %u ms max (%u mutex, %u allocator, %u level), production %u ms max "
+		      "(%u periods, %u events, %u ms in %u callbacks), empty %u ticks (%u max)",
 		      submitted, rendered, late, _dsp->protocolErrors(), _dspPcmUnderruns,
-		      extended, refusedStreak, refusedMutex, refusedAllocator, refusedLevel, produceMax, emptyTicks, emptyStreak);
+		      extended, refusedStreak, refusedMutex, refusedAllocator, refusedLevel, produceMax,
+		      produceLoops, produceEvents, callbackTicks, callbacks, emptyTicks, emptyStreak);
 	}
 }
 
