@@ -285,6 +285,15 @@ void AtariMixerManager::updateDsp() {
 		      submitted, rendered, late, _dsp->protocolErrors(), _dspPcmUnderruns,
 		      extended, refusedStreak, refusedMutex, refusedAllocator, refusedLevel, produceMax,
 		      produceLoops, produceEvents, callbackTicks, callbacks, emptyTicks, emptyStreak);
+		uint32 pcAddr[5], pcHits[5], pcLost = 0, pcRef = 0;
+		const uint32 pcTotal = _dsp->pcSamples(pcAddr, pcHits, 5, pcLost, pcRef);
+		if (pcTotal) {
+			debug("AtariDspAudio: %u pc samples in long productions (%u lost), tick at 0x%08x",
+			      pcTotal, pcLost, (unsigned)pcRef);
+			for (int i = 0; i < 5 && pcHits[i]; ++i)
+				debug("AtariDspAudio:   0x%08x  %u (%u%%)", (unsigned)pcAddr[i], pcHits[i],
+				      (unsigned)(pcHits[i] * 100 / pcTotal));
+		}
 	}
 }
 

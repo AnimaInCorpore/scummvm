@@ -142,6 +142,13 @@ public:
 	 * longest single production call, and the ticks with nothing queued,
 	 * total and longest streak.
 	 */
+	/**
+	 * DIAGNOSTIC: the PCs sampled inside long production sessions, commonest
+	 * first, with a reference symbol's runtime address so they can be resolved
+	 * against the unstripped binary. Returns the total sampled.
+	 */
+	uint32 pcSamples(uint32 *addr, uint32 *hits, uint32 count, uint32 &lost, uint32 &reference) const;
+
 	void productionStats(uint32 &refusedStreakMax, uint32 &refusedMutex, uint32 &refusedAllocator,
 	                     uint32 &refusedLevel, uint32 &extended, uint32 &produceMax,
 	                     uint32 &produceLoopsAtMax, uint32 &produceEventsAtMax,

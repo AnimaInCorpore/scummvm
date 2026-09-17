@@ -49,7 +49,7 @@ void *atari_dsp_saved_stack;
 void *atari_dsp_stack_top;
 volatile unsigned char atari_dsp_producing;   // a production call is in progress
 void atari_dsp_timer_a();
-long atari_dsp_timer_tick(unsigned long interruptedLevel);
+long atari_dsp_timer_tick(unsigned long interruptedLevel, unsigned long interruptedPc);
 void atari_dsp_produce();
 }
 
@@ -120,6 +120,31 @@ volatile uint32 s_produceLoopsAtMax, s_produceEventsAtMax;
 // the OPL timer callbacks, or the framing and the PCM copy around them.
 // s_produceTicks is wall time, so this says where the main loop's freeze went.
 volatile uint32 s_phaseTicks[2], s_callbackTicksAtMax, s_callbacksAtMax;
+// DIAGNOSTIC: where the 68030 actually is once a production session has run
+// long enough to be one of the pathological ones. The tick interrupts the
+// producer, so the exception frame's PC is the producer's own code.
+// Bucketed by 4 KB page, not by exact PC: a hot loop covers many addresses,
+// and a table keyed on each one fills with whatever arrived first and then
+// throws the rest away. Direct-mapped, and a page that is hit more often
+// takes a contested slot, so the ones worth seeing survive.
+enum { kPcBuckets = 512, kPcPageShift = 12, kPcSampleAfterMs = 10 };
+volatile uint32 s_pcPage[kPcBuckets], s_pcHits[kPcBuckets], s_pcTotal, s_pcLost;
+
+void samplePc(uint32 pc) {
+	++s_pcTotal;
+	const uint32 page = pc >> kPcPageShift;
+	const uint32 slot = page & (kPcBuckets - 1);
+	if (s_pcHits[slot] == 0 || s_pcPage[slot] == page) {
+		s_pcPage[slot] = page;
+		++s_pcHits[slot];
+		return;
+	}
+	// Another page owns the slot: take it over only once this one has been
+	// seen more, so a busy page is not evicted by a passing one.
+	++s_pcLost;
+	if (--s_pcHits[slot] == 0)
+		s_pcPage[slot] = page;
+}
 
 inline uint32 queued() {
 	return (uint32)((s_tail - s_head + kQueueSize) % kQueueSize);
@@ -217,7 +242,7 @@ volatile uint32 g_atariDspCallbacks;
 //
 // The in-service bit is cleared first so that a tick nested inside
 // production is delivered at all.
-long atari_dsp_timer_tick(unsigned long interruptedLevel) {
+long atari_dsp_timer_tick(unsigned long interruptedLevel, unsigned long interruptedPc) {
 	*((volatile uint8 *)0xFFFFFA0FL) = (uint8)~(1 << 5);
 	if (s_deliver)
 		deliverStep();
@@ -238,6 +263,8 @@ long atari_dsp_timer_tick(unsigned long interruptedLevel) {
 		// A long production call (iMUSE can spend hundreds of milliseconds
 		// in one callback): extension periods keep the kernel fed meanwhile.
 		++s_phaseTicks[g_atariDspInCallback & 1];
+		if (s_produceTicks >= kPcSampleAfterMs)
+			samplePc((uint32)interruptedPc);
 		if (++s_produceTicks > s_produceTicksMax) {
 			s_produceTicksMax = s_produceTicks;
 			s_produceLoopsAtMax = s_produceLoops;
@@ -308,12 +335,14 @@ asm(
 "	move.l	%sp,atari_dsp_saved_stack\n"
 "	move.l	atari_dsp_stack_top,%sp\n"
 "	move.l	atari_dsp_saved_stack,%a0\n"
+"	move.l	62(%a0),%d1\n"
 "	moveq	#0,%d0\n"
 "	move.w	60(%a0),%d0\n"
 "	and.l	#0x0700,%d0\n"
+"	move.l	%d1,-(%sp)\n"
 "	move.l	%d0,-(%sp)\n"
 "	jsr	atari_dsp_timer_tick\n"
-"	addq.l	#4,%sp\n"
+"	addq.l	#8,%sp\n"
 "	tst.l	%d0\n"
 "	beq	1f\n"
 "	fsave	-(%sp)\n"
@@ -335,12 +364,14 @@ asm(
 "	movem.l	(%sp)+,%d0-%d7/%a0-%a6\n"
 "	rte\n"
 "2:\n"
+"	move.l	62(%sp),%d1\n"
 "	moveq	#0,%d0\n"
 "	move.w	60(%sp),%d0\n"
 "	and.l	#0x0700,%d0\n"
+"	move.l	%d1,-(%sp)\n"
 "	move.l	%d0,-(%sp)\n"
 "	jsr	atari_dsp_timer_tick\n"
-"	addq.l	#4,%sp\n"
+"	addq.l	#8,%sp\n"
 "	movem.l	(%sp)+,%d0-%d7/%a0-%a6\n"
 "	rte\n"
 );
@@ -624,6 +655,35 @@ void AtariDspAudio::poll() {
 
 uint32 AtariDspAudio::protocolErrors() const {
 	return s_protocolErrors;
+}
+
+// DIAGNOSTIC: the sampled PCs, commonest first, with a reference symbol so
+// they can be resolved against the unstripped binary offline.
+uint32 AtariDspAudio::pcSamples(uint32 *addr, uint32 *hits, uint32 count, uint32 &lost, uint32 &reference) const {
+	reference = (uint32)&atari_dsp_timer_tick;
+	lost = s_pcLost;
+	uint32 taken = 0;
+	for (uint32 slot = 0; slot < count; ++slot) {
+		int best = -1;
+		for (int i = 0; i < kPcBuckets; ++i) {
+			if (s_pcHits[i] == 0)
+				continue;
+			bool already = false;
+			for (uint32 j = 0; j < taken; ++j)
+				if (addr[j] == (s_pcPage[i] << kPcPageShift))
+					already = true;
+			if (already)
+				continue;
+			if (best < 0 || s_pcHits[i] > s_pcHits[best])
+				best = i;
+		}
+		if (best < 0)
+			break;
+		addr[taken] = s_pcPage[best] << kPcPageShift;
+		hits[taken] = s_pcHits[best];
+		++taken;
+	}
+	return s_pcTotal;
 }
 
 #endif
