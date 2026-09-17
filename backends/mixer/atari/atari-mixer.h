@@ -70,8 +70,8 @@ private:
 	void updateDsp();
 	static bool produceDspPeriod(void *context, bool runCallbacks);
 	enum {
-		kDspPcmChunks = 12,   // ring capacity, one more than it ever holds
-		kDspPcmAhead = 8      // chunks mixed ahead: 125 ms of loop stall before a gap
+		kDspPcmChunks = 20,   // ring capacity, one more than it ever holds
+		kDspPcmAhead = 16     // chunks mixed ahead: 250 ms of loop stall before a gap
 	};
 	AtariDspAudio *_dsp = nullptr;
 	bool _dspMode = false;

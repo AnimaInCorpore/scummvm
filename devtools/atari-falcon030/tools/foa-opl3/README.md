@@ -508,7 +508,7 @@ The ScummVM build wires it in without touching the AdLib driver:
   falls back to the first other OPL2 emulator instead of returning nothing
   to a caller that does not expect that.
 - `AtariMixerManager` in DSP mode mixes speech and effects at 12,292 Hz
-  mono on the main loop, eight period chunks ahead into a ring the
+  mono on the main loop, sixteen period chunks ahead (250 ms) into a ring the
   interrupt takes from (the mixer's read path streams speech from disk,
   which only the main loop can do), and forwards the plain sound type's
   volume and mute as the kernel's master gain: what the mixer gives a
@@ -522,12 +522,12 @@ The ScummVM build wires it in without touching the AdLib driver:
 [game-gate.py](game-gate.py) runs Atlantis on the emulated Falcon with that
 build, records Hatari's DAC output and reads the transport's counters from
 the log. From [game-results.json](game-results.json): the kernel boots, the
-game starts, 6,172 periods stream through 90 s of its opening with no
+game starts, 6,175 periods stream through 90 s of its opening with no
 protocol error and no late period, and no tick found the queue empty once
-the stream was running. The loop stalled for 2,729 periods of PCM (43 s, nearly all
+the stream was running. The loop stalled for 2,538 periods of PCM (39.6 s, nearly all
 of it engine start-up before the first scene, the rest scene changes) while
-the music went on, and 98 extension periods (1.5 s of sequencer slip)
-covered resource loads of up to 128 ms and one iMUSE callback of 244 ms.
+the music went on, and 96 extension periods (1.4 s of sequencer slip)
+covered resource loads of up to 121 ms and one iMUSE callback of 245 ms.
 The recording carries the opening music at -12 dBFS peak.
 
 The build's profile admits three more DOS games on the same AdLib driver,
@@ -543,9 +543,9 @@ game got to.
 
 | Game | Periods | Extension periods | Music peak | Results |
 | --- | ---: | ---: | ---: | --- |
-| Day of the Tentacle, CD | 6,164 in 90 s | 73 | -24 dBFS | [game-results-tentacle.json](game-results-tentacle.json) |
-| The Secret of Monkey Island, Ultimate Talkie | 6,204 in 90 s | 100 | -24 dBFS | [game-results-monkey.json](game-results-monkey.json) |
-| Monkey Island 2, Ultimate Talkie | 7,684 in 120 s | 52 | -18 dBFS | [game-results-monkey2.json](game-results-monkey2.json) |
+| Day of the Tentacle, CD | 6,160 in 90 s | 69 | -24 dBFS | [game-results-tentacle.json](game-results-tentacle.json) |
+| The Secret of Monkey Island, Ultimate Talkie | 6,203 in 90 s | 102 | -24 dBFS | [game-results-monkey.json](game-results-monkey.json) |
+| Monkey Island 2, Ultimate Talkie | 7,718 in 120 s | 53 | -17 dBFS | [game-results-monkey2.json](game-results-monkey2.json) |
 
 So a v6 game and the two Monkey Islands fit in the 14 MB beside the DSP
 transport at least through their openings.
