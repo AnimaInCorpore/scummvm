@@ -253,6 +253,31 @@ still too long step down rather than being cut short, one as far as 6,134 Hz.
 The result is 268 MB in 53 s, and its gate passes with speech on: no late
 period, no protocol error, and no offset the game asks for that is missing.
 
+Monkey Island 1's edition is the same shape, at a single 44,100 Hz rather
+than Monkey 2's scatter around 48 kHz, and 4,391 of its 4,392 samples
+overrun as well. It rebuilds to 197 MB in 35 s, 4,384 of 4,393 at
+12,345 Hz. Both files hold a couple of stereo samples, which `--refit`
+downmixes; only the passthrough path needs mono, because it copies the
+samples as they are.
+
+**Beware a gate that is too short to hear anything.** Monkey Island 1's
+90 s run never reaches dialogue - its opening is titles and the walk to
+the lookout - so it passed with speech on while playing none, and its
+recording was indistinguishable from the speech-off one (-24.1 against
+-23.8 dBFS peak, the same profile second by second). At 240 s the peak
+rises to -13.4 dBFS and the loud seconds go from 62 to 160. An absent
+`startTalkSound: did not find sound at offset` says nothing on its own:
+the engine only warns about a sample it looked for and missed, so a run
+that asks for no speech is silent in both senses. Check the recording's
+peak against the speech-off gate before believing speech works.
+
+With that, all four games have their audio: Atlantis plays the `.sou` it
+ships, Tentacle a restored one, and the two Ultimate Talkie editions a
+refitted one. In-game PCM underruns measured with speech, over a play
+session rather than the opening: Monkey 1 2.12%, Tentacle 3.09%,
+Atlantis 3.26%, Monkey 2 3.66%, none of them with a late period or a
+protocol error.
+
 ## MT-32 on the same machine
 
 **Current direction: compiled MIDI/iMUSE and MT-32 data, synthesized live.**
