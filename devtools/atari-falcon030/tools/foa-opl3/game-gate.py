@@ -40,7 +40,9 @@ TOS = Path.home() / "Work/F030Arcade/third_party/tos/tos404.img"
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--game", type=Path, required=True, help="Atlantis CD data directory")
+    parser.add_argument("--game", type=Path, required=True, help="the game's data directory")
+    parser.add_argument("--gameid", default="atlantis", help="SCUMM game id of the build's profile: atlantis, monkey2, tentacle")
+    parser.add_argument("--extra", default="CD", help="the target's extra field, e.g. CD, Floppy, or empty")
     parser.add_argument("--binary", type=Path,
                         default=ROOT / "build-falcon030/scummvm-2026.3.1git-atari-lite/scummvm.prg")
     parser.add_argument("--seconds", type=float, default=90.0, help="game time to record")
@@ -64,20 +66,21 @@ def main():
     app = hd / "SCUMMVM"
     app.mkdir(parents=True)
     shutil.copy2(args.binary, app / "SCUMMVM.PRG")
-    (hd / "ATLANTIS").symlink_to(args.game.resolve(), target_is_directory=True)
+    folder = args.gameid.upper()
+    (hd / folder).symlink_to(args.game.resolve(), target_is_directory=True)
     ini = ("[scummvm]\ngui_theme=builtin\ngui_renderer=normal\n"
            + f"music_driver=adlib\nopl_driver={args.opl}\nautosave_period=0\n"
            + f"atari_dsp_audio={'false' if args.no_dsp_audio else 'true'}\n"
            + "music_volume=256\nsfx_volume=256\nspeech_volume=256\n"
            + f"speech_mute={'false' if args.speech else 'true'}\nsubtitles=true\n"
            + "".join(line + "\n" for line in args.ini_extra.split(";") if line)
-           + "\n[atlantis]\nplatform=pc\ngameid=atlantis\nengineid=scumm\n"
-           + "language=en\nextra=CD\npath=C:\\ATLANTIS\n")
+           + f"\n[{args.gameid}]\nplatform=pc\ngameid={args.gameid}\nengineid=scumm\n"
+           + f"language=en\nextra={args.extra}\npath=C:\\{folder}\n")
     (app / "SCUMMVM.INI").write_text(ini)
-    (case / "args.bin").write_bytes(b"atlantis\0")
+    (case / "args.bin").write_bytes(args.gameid.encode() + b"\0")
     (case / "start.ini").write_text(f"b pc = text :once :trace :quiet :file {case / 'basepage.ini'}\n")
     (case / "basepage.ini").write_text(
-        f"setopt dec\nw 'basepage+0x80' 8\nl {case / 'args.bin'} 'basepage+0x81'\n")
+        f"setopt dec\nw 'basepage+0x80' {len(args.gameid)}\nl {case / 'args.bin'} 'basepage+0x81'\n")
     fifo = case / "control.fifo"
     command = [str(HATARI), "--machine", "falcon", "--monitor", args.monitor, "--memsize", "14",
                "--cpuclock", "16", "--fpu", "68882", "--dsp", "emu", "--tos", str(TOS), "--harddrive", str(hd),
@@ -182,7 +185,7 @@ def main():
                  "first_loud_second": next((i for i, s in enumerate(seconds) if s > -50.0), None)}
     result = {
         "date": "2026-09-17",
-        "gate": "Fate of Atlantis with the DSP OPL build on the emulated Falcon: transport and recorded audio",
+        "gate": f"{args.gameid} with the DSP OPL build on the emulated Falcon: transport and recorded audio",
         "binary_sha256": hashlib.sha256(args.binary.read_bytes()).hexdigest(),
         "requested_seconds": args.seconds,
         "wall_seconds": round(time.monotonic() - started, 1),

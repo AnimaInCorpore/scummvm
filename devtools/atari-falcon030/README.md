@@ -1,9 +1,14 @@
 # Atari Falcon030 target (stock 14 MB machine)
 
 A **game-only** ScummVM build aimed at a **stock Falcon030: 16 MHz 68030 +
-68882, 32 MHz DSP56001, 14 MB RAM**, running the DOS CD version of
-**Indiana Jones and the Fate of Atlantis** — and nothing else. The single-game
-restriction leaves room for the game and faithful music playback. Current
+68882, 32 MHz DSP56001, 14 MB RAM**, running the DOS version of
+**Indiana Jones and the Fate of Atlantis**, the game every measurement here
+was made with, and since 2026-09-17 also admitting **Monkey Island 2** and
+**Day of the Tentacle**, the other two DOS games that use the same AdLib
+driver the DSP synthesizes for. Day of the Tentacle runs its intro on the
+emulated Falcon with the same transport figures as Atlantis; Monkey Island 2
+has not been run, for want of data. The narrow profile leaves room for the
+game and faithful music playback. Current
 music work investigates precomputed MT-32 audio with interactive iMUSE
 control; complete live MT-32 synthesis remains beyond the measured budget.
 
@@ -353,10 +358,15 @@ title-screen smoke test will not catch. Not attempted here.
 ## What "game-only" buys, and what it does not
 
 `ATARI_FALCON_GAME_ONLY` (in `engines/scumm/metaengine.cpp`) replaces the
-generic constructor matrix with a single v5/DOS/`atlantis` path. The build is
-static for the same reason: with one game there is nothing to choose at run
-time. This mirrors `ATARI_STE_GAME_ONLY` on `ste-port`; the two should be
-unified if both ever land upstream.
+generic constructor matrix with three DOS paths: `atlantis` and `monkey2` on
+`ScummEngine_v5`, `tentacle` on `ScummEngine_v6`. Both classes were in the
+link already (see below), so admitting the two extra games cost 133 bytes.
+Day of the Tentacle fits in the 14 MB beside the DSP transport at least
+through its intro (`tools/foa-opl3/game-results-tentacle.json`); Monkey
+Island 2 is unmeasured. The build is static for the same reason: with a
+fixed handful of games there is nothing to choose at run time. This mirrors
+`ATARI_STE_GAME_ONLY` on `ste-port`; the two should be unified if both ever
+land upstream.
 
 **It trims less than the STE comment claims.** Checked with `nm -C` on the
 linked image: `v7`/`v8` and the higher HE families (`v71he` upwards) are gone,

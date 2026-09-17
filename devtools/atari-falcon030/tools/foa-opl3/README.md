@@ -17,6 +17,7 @@ and its own committed result file.
 | Practical DSP kernel: word exact, 55-69% of budget | [rt-bench-results.json](rt-bench-results.json) | `rt-bench-gate.py` |
 | Stream mode through the SSI: word exact, no late period | [rt-stream-results.json](rt-stream-results.json) | `rt-stream-gate.py` |
 | Atlantis on the emulated Falcon with the DSP build | [game-results.json](game-results.json) | `game-gate.py` |
+| Day of the Tentacle on the same build | [game-results-tentacle.json](game-results-tentacle.json) | `game-gate.py --gameid tentacle` |
 
 The first three sections below are the capture and the exact kernel as
 originally measured; the practical kernel and everything after it start at
@@ -379,16 +380,26 @@ The ScummVM build wires it in without touching the AdLib driver:
 [game-gate.py](game-gate.py) runs Atlantis on the emulated Falcon with that
 build, records Hatari's DAC output and reads the transport's counters from
 the log. From [game-results.json](game-results.json): the kernel boots, the
-game starts, 6,328 periods stream through 90 s of its opening with no
+game starts, 6,334 periods stream through 90 s of its opening with no
 protocol error and one late period, the first (the kernel starts
 transmitting before the host has a period for it); after that no tick found
-the queue empty. The loop stalled for 2,866 periods of PCM (42 s, nearly all
+the queue empty. The loop stalled for 2,875 periods of PCM (42 s, nearly all
 of it engine start-up before the first scene, the rest scene changes) while
-the music went on, and 105 extension periods (1.5 s of sequencer slip)
-covered resource loads of up to 137 ms and one iMUSE callback of 241 ms.
+the music went on, and 102 extension periods (1.5 s of sequencer slip)
+covered resource loads of up to 136 ms and one iMUSE callback of 253 ms.
 The recording carries the opening music at -12 dBFS peak.
 
-Two earlier stages of the same run are worth keeping in mind. With
+The build's profile also admits Monkey Island 2 and Day of the Tentacle,
+the other two DOS games on the same AdLib driver. Day of the Tentacle (CD
+data, speech off, since its speech comes FLAC-compressed and this build has
+no decoder) runs the same 90 s gate with the same shape of result, in
+[game-results-tentacle.json](game-results-tentacle.json): 6,298 periods,
+one late (the first), no empty tick after it, 85 extension periods, and its
+intro music in the recording at -24 dBFS peak; so a v6 game fits in the
+14 MB beside the DSP transport at least through its intro. Monkey Island 2
+has not been run, for want of data.
+
+Two earlier stages of the Atlantis run are worth keeping in mind. With
 production on the main loop and delivery from the interrupt it reported two
 late periods; but the kernel counts one late per starvation, not per
 period, so each of those was the music frozen for the length of a scene
@@ -404,7 +415,8 @@ presence and level, not auditioned.
   DSP emulation instruction-wise correct rather than cycle accurate.
 - No listening test. The practical kernel's quality is the perceptual gate's
   numbers; the game recording was checked for presence and level, not heard.
-- One unattended opening sequence, with no player input and no other scenes.
+- One unattended opening sequence per game, with no player input and no
+  other scenes; Monkey Island 2 not at all.
   Dense gameplay, menus, save/load and MIDI-driven effects outside it are
   not covered, and the 68030's load in the game is not measured: the
   transport's counters (late, PCM underruns, extension periods, the longest
