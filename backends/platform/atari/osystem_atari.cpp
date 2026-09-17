@@ -50,6 +50,7 @@
 #include "backends/keymapper/hardware-input.h"
 #include "backends/mixer/atari/atari-mixer.h"
 #include "backends/mutex/null/null-mutex.h"
+#include "backends/platform/atari/atari-critical.h"
 #ifdef DYNAMIC_MODULES
 #include "backends/plugins/atari/atari-provider.h"
 #endif
@@ -394,8 +395,36 @@ void OSystem_Atari::engineDone() {
 	g_gameEngineActive = false;
 }
 
+#ifdef ATARI_DSP_OPL
+volatile long g_atariCriticalDepth = 0;
+volatile long g_atariAllocatorDepth = 0;
+
+namespace {
+
+// One thread, so a mutex never blocks; it counts instead, and the DSP
+// audio interrupt produces periods only while the count is zero. See
+// atari-critical.h.
+class AtariMutexInternal final : public Common::MutexInternal {
+public:
+	bool lock() override {
+		ATARI_CRITICAL_ENTER();
+		return true;
+	}
+	bool unlock() override {
+		ATARI_CRITICAL_LEAVE();
+		return true;
+	}
+};
+
+} // namespace
+#endif
+
 Common::MutexInternal *OSystem_Atari::createMutex() {
+#ifdef ATARI_DSP_OPL
+	return new AtariMutexInternal();
+#else
 	return new NullMutexInternal();
+#endif
 }
 
 uint32 OSystem_Atari::getMillis(bool skipRecord) {

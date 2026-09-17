@@ -440,16 +440,19 @@ each with a gate and a committed result file. In short:
 | DSP cost, Atlantis first 4 s | 268.7 cycles per frame, 55% of budget, word exact |
 | DSP cost, nine feedback FM channels with LFO held | 338.2 cycles per frame, 69% of budget, word exact |
 | Stream mode, Atlantis 20 s through the SSI | 1,365 periods, none late, checksum equal |
-| The game on the emulated Falcon | 4,608 periods through the opening, 2 to 5 late across runs (0.1%), opening music recorded |
+| The game on the emulated Falcon | 6,328 periods through 90 s of the opening, one late (the first), 105 extension periods (1.5 s of sequencer slip inside resource loads), opening music recorded |
 
 Steps 2 through 4 of the sequence above are therefore done in emulation
 with the practical kernel; step 5 (Sam & Max's layered path, hardware) is
-not. Payload delivery already runs from a Timer A interrupt with sixteen
-periods produced ahead; the remaining engineering items are the
-per-operator boundary pass (the second-largest DSP cost, unoptimized),
-period production off the main loop so a scene change longer than the
-buffered 234 ms cannot repeat a period, a listening pass, and a hardware
-run with the same counters.
+not. Production and delivery both run from a Timer A interrupt, the main
+loop only mixes PCM ahead, and the game's stalls at scene changes (seconds,
+as the transport's PCM underrun count shows) no longer touch the music;
+extension periods cover the stretches where the interrupt may not run
+iMUSE, at the cost of 14.6 ms of sequencer slip each. The remaining
+engineering items are the per-operator boundary pass (the second-largest
+DSP cost, unoptimized), the first period (the kernel starts transmitting
+before it has one), a listening pass that includes the slips, and a
+hardware run with the same counters.
 
 ## Evidence and reproduction
 

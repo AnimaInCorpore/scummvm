@@ -123,16 +123,18 @@ AtariMixerManager::~AtariMixerManager() {
 
 #ifdef ATARI_DSP_OPL
 	if (_dsp) {
+		_dsp->setProducer(nullptr, nullptr);
 		uint32 rendered = 0, late = 0;
+		_dsp->poll();
 		_dsp->queryCounters(rendered, late);
-		debug("AtariDspAudio: %u periods submitted, %u rendered, %u late, %u protocol errors",
-		      _dsp->periodsSubmitted(), rendered, late, _dsp->protocolErrors());
+		debug("AtariDspAudio: %u periods submitted, %u rendered, %u late, %u protocol errors, %u pcm underruns",
+		      _dsp->periodsSubmitted(), rendered, late, _dsp->protocolErrors(), _dspPcmUnderruns);
 		g_atariDspAudio = nullptr;
 		delete _dsp;
 		_dsp = nullptr;
 	}
-	delete[] _dspPcm;
-	_dspPcm = nullptr;
+	delete[] _dspPcmRing;
+	_dspPcmRing = nullptr;
 #endif
 
 	if (_atariSampleBuffer)
@@ -162,56 +164,95 @@ bool AtariMixerManager::initDsp() {
 	_samples = AtariDspAudio::kPcmPerPeriod;
 	_sampleBufferSize = _samples * 4;   // the mixer produces 32-bit samples
 	_sampleBuffer = new uint8[_sampleBufferSize];
-	_dspPcm = new int16[_samples];
+	_dspPcmRing = new int16[kDspPcmChunks * AtariDspAudio::kPcmPerPeriod];
+	_dspPcmHead = _dspPcmTail = 0;
 	debug("AtariMixerManager: DSP audio at %d Hz mono, %d-frame periods at %d Hz",
 	      _outputRate, AtariDspAudio::kPeriodFrames, AtariDspAudio::kCodecRateHz);
 	_mixer = new Audio::MixerImpl(_outputRate, false, _samples, 4, false);
 	_mixer->setReady(true);
+	// Fills the ring, then the interrupt takes over the periods.
 	resumeAudio();
+	_dsp->setProducer(produceDspPeriod, this);
 	return true;
 }
 
-// One period per free buffer, produced ahead of the interrupt-driven
-// delivery: the OPL's timer callbacks for the period, then the mix, then
-// the payload.
+// The main loop's share: speech and effects mixed ahead into the ring.
+// The mixer's read path may stream from disk, which only the main loop
+// can do; it also holds the mixer's mutex, which keeps the interrupt's
+// producer out for the duration of a chunk.
 void AtariMixerManager::updateDsp() {
 	if (_audioSuspended)
 		return;
 	_dsp->poll();
-	for (int produced = 0; produced < AtariDspAudio::kPeriods; ++produced) {
-		AtariDspAudio::Period *period = _dsp->beginPeriod();
-		if (!period)
+	while (true) {
+		const int filled = (_dspPcmTail - _dspPcmHead + kDspPcmChunks) % kDspPcmChunks;
+		if (filled >= kDspPcmAhead)
 			break;
-		const int volume = _mixer->getVolumeForSoundType(Audio::Mixer::kMusicSoundType);
-		if (volume != _dspMusicVolume) {
-			_dspMusicVolume = volume;
-			const uint32 gain = volume >= Audio::Mixer::kMaxMixerVolume ? 0x7fffffu
-				: (uint32)((uint64)volume * 0x7fffffu / Audio::Mixer::kMaxMixerVolume);
-			_dsp->addEvent(period, 0, OplPractical::SC_MASTER_GAIN, gain);
-		}
-		if (AtariDspOPL::instance())
-			AtariDspOPL::instance()->producePeriod(period);
 		const int processed = _mixer->mixCallback(_sampleBuffer, _sampleBufferSize);
 		const int32 *src = (const int32 *)_sampleBuffer;
+		int16 *chunk = _dspPcmRing + _dspPcmTail * AtariDspAudio::kPcmPerPeriod;
 		for (int i = 0; i < _samples; ++i) {
 			int32 v = i < processed ? src[i] : 0;
 			if (v > 32767)
 				v = 32767;
 			else if (v < -32768)
 				v = -32768;
-			_dspPcm[i] = (int16)v;
+			chunk[i] = (int16)v;
 		}
-		_dsp->setPcm(period, _dspPcm);
-		_dsp->submit(period);
-		_dsp->poll();
-		// About every seven seconds, the transport's view of the stream.
-		if ((_dsp->periodsSubmitted() & 511) == 0) {
-			uint32 rendered = 0, late = 0;
-			_dsp->queryCounters(rendered, late);
-			debug("AtariDspAudio: %u periods submitted, %u rendered, %u late, %u protocol errors",
-			      _dsp->periodsSubmitted(), rendered, late, _dsp->protocolErrors());
-		}
+		_dspPcmTail = (_dspPcmTail + 1) % kDspPcmChunks;
 	}
+	// About every seven seconds, the transport's view of the stream.
+	const uint32 submitted = _dsp->periodsSubmitted();
+	if (submitted - _dspLoggedPeriods >= 512) {
+		_dspLoggedPeriods = submitted;
+		uint32 rendered = 0, late = 0, refusedStreak = 0, refusedMutex = 0, refusedAllocator = 0, refusedLevel = 0;
+		uint32 extended = 0, produceMax = 0, emptyTicks = 0, emptyStreak = 0;
+		_dsp->queryCounters(rendered, late);
+		_dsp->productionStats(refusedStreak, refusedMutex, refusedAllocator, refusedLevel, extended, produceMax, emptyTicks, emptyStreak);
+		debug("AtariDspAudio: %u periods submitted, %u rendered, %u late, %u protocol errors, %u pcm underruns, "
+		      "%u extended, refused %u ms max (%u mutex, %u allocator, %u level), production %u ms max, empty %u ticks (%u max)",
+		      submitted, rendered, late, _dsp->protocolErrors(), _dspPcmUnderruns,
+		      extended, refusedStreak, refusedMutex, refusedAllocator, refusedLevel, produceMax, emptyTicks, emptyStreak);
+	}
+}
+
+// The interrupt's share, one period: the music volume as the kernel's
+// master gain when it changed, the OPL's timer callbacks for the period
+// (the AdLib driver and iMUSE's sequencing, whose register writes become
+// the period's events), and the next PCM chunk, or silence when the main
+// loop has not mixed one in time. No I/O and no OS calls happen here; see
+// atari-dsp.h. An extension period (runCallbacks false) skips the
+// callbacks and must touch nothing the main loop guards.
+bool AtariMixerManager::produceDspPeriod(void *context, bool runCallbacks) {
+	AtariMixerManager *self = (AtariMixerManager *)context;
+	if (self->_audioSuspended)
+		return false;
+	AtariDspAudio::Period *period = self->_dsp->beginPeriod(!runCallbacks);
+	if (!period)
+		return false;
+	const int volume = self->_mixer->getVolumeForSoundType(Audio::Mixer::kMusicSoundType);
+	if (volume != self->_dspMusicVolume) {
+		self->_dspMusicVolume = volume;
+		const uint32 gain = volume >= Audio::Mixer::kMaxMixerVolume ? 0x7fffffu
+			: (uint32)((uint64)volume * 0x7fffffu / Audio::Mixer::kMaxMixerVolume);
+		self->_dsp->addEvent(period, 0, OplPractical::SC_MASTER_GAIN, gain);
+	}
+	if (runCallbacks && AtariDspOPL::instance())
+		AtariDspOPL::instance()->producePeriod(period);
+	// An extension nested in a production that is between reading the ring
+	// head and advancing it takes silence rather than the same chunk twice.
+	if (self->_dspPcmHead != self->_dspPcmTail && !(!runCallbacks && self->_dspPcmTaking)) {
+		self->_dspPcmTaking = true;
+		self->_dsp->setPcm(period, self->_dspPcmRing + self->_dspPcmHead * AtariDspAudio::kPcmPerPeriod);
+		self->_dspPcmHead = (self->_dspPcmHead + 1) % kDspPcmChunks;
+		self->_dspPcmTaking = false;
+	} else {
+		self->_dsp->setPcm(period, nullptr);
+		if (runCallbacks)
+			++self->_dspPcmUnderruns;
+	}
+	self->_dsp->submit(period);
+	return true;
 }
 #endif
 

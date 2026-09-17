@@ -6,10 +6,12 @@ came out of it.
 The game runs unattended through its opening; the ScummVM build synthesizes
 the AdLib score on the DSP (backends/platform/atari/dsp-opl.cpp) and feeds
 speech and effects through the same stream. The transport logs its counters
-every 512 periods; this gate allows at most one late period in 200 (the
-game's loop stalls for hundreds of milliseconds at scene changes, and the
-transport produces 234 ms ahead) and no protocol error, and scores the
-recording: the music must be present at a sane level.
+every 512 periods; this gate allows one late period, the first (the kernel
+starts transmitting before the host has a period for it), and no protocol
+error, and scores the recording: the music must be present at a sane level.
+The kernel counts one late per starvation, not per period, so a late is a
+freeze of the music, however long; the PCM underrun and extension counts in
+the same line are where the game's loop stalls show.
 
 Established: the integrated build boots the DSP, streams, and the game runs
 with it under Hatari. Not established: any comparison against the exact
@@ -145,7 +147,15 @@ def main():
     for line in counters:
         parts = line.split("AtariDspAudio: ")[1].split()
         last = {"submitted": int(parts[0]), "rendered": int(parts[3]), "late": int(parts[5]),
-                "protocol_errors": int(parts[7]), "kernel_counters_fresh": "stale" not in line}
+                "protocol_errors": int(parts[7]), "kernel_counters_fresh": "stale" not in line,
+                # Periods the interrupt produced without a PCM chunk from the
+                # main loop: the game's loop was stalled for longer than the
+                # ring holds. Music is unaffected by these.
+                "pcm_underruns": int(parts[10]) if len(parts) > 10 else None,
+                # Periods the interrupt submitted without timer callbacks
+                # because the main loop held a critical section too long
+                # (a resource load): the sequencer slipped 14.6 ms each.
+                "extended": int(parts[13]) if len(parts) > 13 else None}
     late_max = max((int(line.split("AtariDspAudio: ")[1].split()[5]) for line in fresh), default=None)
 
     audio = {}
@@ -171,7 +181,7 @@ def main():
                  "loud_seconds": len(loud), "peak_dbfs": max(seconds) if seconds else None,
                  "first_loud_second": next((i for i, s in enumerate(seconds) if s > -50.0), None)}
     result = {
-        "date": "2026-09-16",
+        "date": "2026-09-17",
         "gate": "Fate of Atlantis with the DSP OPL build on the emulated Falcon: transport and recorded audio",
         "binary_sha256": hashlib.sha256(args.binary.read_bytes()).hexdigest(),
         "requested_seconds": args.seconds,
@@ -183,9 +193,9 @@ def main():
         "late_periods_max": late_max,
         "audio": audio,
         "kernel_counter_reports_fresh": len(fresh),
-        "late_rate_max": 0.005,
+        "late_allowed": 1,
         "passed": bool(booted and picked and last and fresh
-                       and late_max <= 0.005 * last["submitted"]
+                       and late_max <= 1
                        and last["protocol_errors"] == 0 and audio and audio["loud_seconds"] >= 10),
     }
     (case / "results.json").write_text(json.dumps(result, indent=2) + "\n")

@@ -26,6 +26,7 @@
 
 #include "backends/platform/atari/dsp-opl.h"
 
+#include "backends/platform/atari/atari-critical.h"
 #include "common/debug.h"
 #include "common/textconsole.h"
 
@@ -51,8 +52,10 @@ AtariDspOPL::AtariDspOPL(AtariDspAudio *audio)
 }
 
 AtariDspOPL::~AtariDspOPL() {
-	stop();
+	// Unregistered first: the transport's interrupt looks the instance up
+	// before every period it produces.
 	s_instance = nullptr;
+	stop();
 	delete _decoder;
 }
 
@@ -60,13 +63,18 @@ bool AtariDspOPL::init() {
 	return true;
 }
 
+// The decoder is entered from the main loop (the driver's own writes) and
+// from the transport's interrupt (the timer callbacks it runs); the
+// critical section keeps the interrupt out while the main loop is inside.
 void AtariDspOPL::reset() {
+	AtariCriticalSection critical;
 	// The driver rewrites every register after a reset; a fresh decoder
 	// shadow re-emits them all.
 	_decoder->reset(&_sink, 9);
 }
 
 void AtariDspOPL::write(int a, int v) {
+	AtariCriticalSection critical;
 	if (a & 1)
 		writeReg(_address, v);
 	else
@@ -74,6 +82,7 @@ void AtariDspOPL::write(int a, int v) {
 }
 
 void AtariDspOPL::writeReg(int r, int v) {
+	AtariCriticalSection critical;
 	_decoder->write(_block, (uint16)(r & 0x1ff), (uint8)v);
 }
 

@@ -32,8 +32,18 @@
 #include "common/debug.h"
 #include "common/textconsole.h"
 
+#include "backends/platform/atari/atari-critical.h"
 #include "backends/platform/atari/dsp-opl-image.h"
 #include "devtools/atari-falcon030/tools/foa-opl3/opl-practical.h"
+
+// The interrupt handler's assembly refers to these by name.
+extern "C" {
+void *atari_dsp_saved_stack;
+void *atari_dsp_stack_top;
+void atari_dsp_timer_a();
+long atari_dsp_timer_tick(unsigned long interruptedLevel);
+void atari_dsp_produce();
+}
 
 namespace {
 
@@ -73,6 +83,36 @@ volatile uint32 s_protocolErrors;
 volatile bool s_deliver;           // the handler acts only while streaming
 uint32 s_command;
 uint32 s_reply;
+
+// Production state. The producer runs inside the handler with interrupts
+// enabled, so a nested tick delivers but never produces.
+AtariDspAudio::Producer volatile s_producer;
+void *s_producerContext;
+volatile bool s_producing;
+
+// The producer's stack. Timer A interrupts whatever runs, and what runs
+// may be TOS itself on its own small supervisor stack.
+enum { kProductionStackBytes = 32 * 1024 };
+uint8 s_productionStack[kProductionStackBytes] __attribute__((aligned(16)));
+
+// Why production was refused, in ticks, for the log: the longest streak of
+// refused ticks while a period was due, how many refusals were a mutex,
+// the allocator or an interrupted handler, and the extension periods.
+volatile uint32 s_refusedStreak, s_refusedStreakMax, s_refusedMutex, s_refusedAllocator, s_refusedLevel, s_extended;
+volatile uint32 s_produceTicks, s_produceTicksMax;   // nested ticks during one production call: its length in ms
+volatile uint32 s_emptyTicks, s_emptyStreak, s_emptyStreakMax;   // ticks with nothing queued
+
+inline uint32 queued() {
+	return (uint32)((s_tail - s_head + kQueueSize) % kQueueSize);
+}
+
+// The producer's queue push and buffer scan against the extension a nested
+// tick may take: both run in supervisor mode, so the level can be raised.
+struct InterruptsOff {
+	unsigned short sr;
+	InterruptsOff() { asm volatile("move.w %%sr,%0\n\tor.w #0x0700,%%sr" : "=d"(sr) : : "memory"); }
+	~InterruptsOff() { asm volatile("move.w %0,%%sr" : : "d"(sr) : "memory"); }
+};
 
 inline bool txde() { return (*kHostIsr & 2) != 0; }
 inline bool rxdf() { return (*kHostIsr & 1) != 0; }
@@ -126,14 +166,6 @@ void deliverStep() {
 	}
 }
 
-// MFP Timer A, about 1 kHz. The handler runs in supervisor mode, so the
-// port is reachable directly; it ends by clearing its in-service bit.
-void __attribute__((interrupt)) deliverTimer() {
-	if (s_deliver)
-		deliverStep();
-	*((volatile uint8 *)0xFFFFFA0FL) = (uint8)~(1 << 5);
-}
-
 // A blocking command exchange over the raw port, for the stream loop's
 // stop command once delivery has been quiesced.
 long exchangeSuper() {
@@ -147,6 +179,116 @@ long exchangeSuper() {
 }
 
 } // namespace
+
+// MFP Timer A, about 1 kHz, entered at interrupt level 6 in supervisor
+// mode with the interrupted context's SR on the stack. Every tick takes one
+// delivery step; a tick that finds production due prepares for it here and
+// leaves the rest to the assembly below: the FPU state and the stack are
+// the interrupted context's, and the interrupt level must drop so that
+// delivery and the system keep running while the producer works.
+//
+// The in-service bit is cleared first so that a tick nested inside
+// production is delivered at all.
+long atari_dsp_timer_tick(unsigned long interruptedLevel) {
+	*((volatile uint8 *)0xFFFFFA0FL) = (uint8)~(1 << 5);
+	if (s_deliver)
+		deliverStep();
+	// Production only from the program's own level (TOS runs programs at
+	// interrupt level 3, so that the level-2 HBL stays masked; anything
+	// above that is another handler), outside every critical section of
+	// the main loop, and never nested.
+	if (!s_producer)
+		return 0;
+	if (queued() == 0) {
+		++s_emptyTicks;
+		if (++s_emptyStreak > s_emptyStreakMax)
+			s_emptyStreakMax = s_emptyStreak;
+	} else {
+		s_emptyStreak = 0;
+	}
+	if (s_producing) {
+		// A long production call (iMUSE can spend hundreds of milliseconds
+		// in one callback): extension periods keep the kernel fed meanwhile.
+		if (++s_produceTicks > s_produceTicksMax)
+			s_produceTicksMax = s_produceTicks;
+		if (queued() < AtariDspAudio::kExtendBelow && s_producer(s_producerContext, false))
+			++s_extended;
+		return 0;
+	}
+	if (queued() >= AtariDspAudio::kProduceAhead) {
+		s_refusedStreak = 0;
+		return 0;
+	}
+	if (interruptedLevel > 0x0300 || g_atariCriticalDepth != 0 || g_atariAllocatorDepth != 0) {
+		if (interruptedLevel > 0x0300)
+			++s_refusedLevel;
+		else if (g_atariCriticalDepth != 0)
+			++s_refusedMutex;
+		else
+			++s_refusedAllocator;
+		if (++s_refusedStreak > s_refusedStreakMax)
+			s_refusedStreakMax = s_refusedStreak;
+		// Refused for long enough that the queue is nearly empty: an
+		// extension period keeps the kernel fed. It touches nothing the
+		// main loop guards, so it is fine here, at level 6 on the
+		// interrupted stack.
+		if (queued() < AtariDspAudio::kExtendBelow && s_producer(s_producerContext, false))
+			++s_extended;
+		return 0;
+	}
+	s_refusedStreak = 0;
+	s_produceTicks = 0;
+	s_producing = true;
+	return 1;
+}
+
+// On the production stack, at interrupt level 3.
+void atari_dsp_produce() {
+	while (s_producer && queued() < AtariDspAudio::kProduceAhead) {
+		if (!s_producer(s_producerContext, true))
+			break;
+	}
+	s_producing = false;
+}
+
+// The vector: save the integer registers, ask the tick whether to produce,
+// and if so save the FPU state, switch stacks, lower the level to 3 for
+// the producer, and undo it all. The exception frame's SR sits above the
+// fifteen saved registers.
+asm(
+"	.text\n"
+"	.align	2\n"
+"	.globl	atari_dsp_timer_a\n"
+"atari_dsp_timer_a:\n"
+"	movem.l	%d0-%d7/%a0-%a6,-(%sp)\n"
+"	moveq	#0,%d0\n"
+"	move.w	60(%sp),%d0\n"
+"	and.l	#0x0700,%d0\n"
+"	move.l	%d0,-(%sp)\n"
+"	jsr	atari_dsp_timer_tick\n"
+"	addq.l	#4,%sp\n"
+"	tst.l	%d0\n"
+"	beq	1f\n"
+"	fsave	-(%sp)\n"
+"	fmovem.x	%fp0-%fp7,-(%sp)\n"
+"	fmove.l	%fpcr,-(%sp)\n"
+"	fmove.l	%fpsr,-(%sp)\n"
+"	fmove.l	%fpiar,-(%sp)\n"
+"	move.l	%sp,atari_dsp_saved_stack\n"
+"	move.l	atari_dsp_stack_top,%sp\n"
+"	move.w	#0x2300,%sr\n"
+"	jsr	atari_dsp_produce\n"
+"	move.w	#0x2600,%sr\n"
+"	move.l	atari_dsp_saved_stack,%sp\n"
+"	fmove.l	(%sp)+,%fpiar\n"
+"	fmove.l	(%sp)+,%fpsr\n"
+"	fmove.l	(%sp)+,%fpcr\n"
+"	fmovem.x	(%sp)+,%fp0-%fp7\n"
+"	frestore	(%sp)+\n"
+"1:\n"
+"	movem.l	(%sp)+,%d0-%d7/%a0-%a6\n"
+"	rte\n"
+);
 
 AtariDspAudio::AtariDspAudio()
 	: _filling(-1), _booted(false), _streaming(false), _submitted(0), _rendered(0), _late(0) {
@@ -279,12 +421,40 @@ bool AtariDspAudio::startStream() {
 	_filling = -1;
 	for (int i = 0; i < kPeriods; ++i)
 		_periods[i].inFlight = false;
+	s_producer = nullptr;
+	s_producing = false;
+	s_refusedStreak = s_refusedStreakMax = s_refusedMutex = s_refusedAllocator = s_refusedLevel = s_extended = 0;
+	s_produceTicks = s_produceTicksMax = s_emptyTicks = s_emptyStreak = s_emptyStreakMax = 0;
+	atari_dsp_stack_top = s_productionStack + kProductionStackBytes;
 	// Timer A: 2,457,600 Hz / 64 / 38 = 1,010 Hz.
 	s_deliver = true;
-	Xbtimer(XB_TIMERA, 5, 38, deliverTimer);
+	Xbtimer(XB_TIMERA, 5, 38, atari_dsp_timer_a);
 	Jenabint(MFP_TIMERA);
 	_streaming = true;
 	return true;
+}
+
+void AtariDspAudio::setProducer(Producer producer, void *context) {
+	s_producer = nullptr;
+	s_producerContext = context;
+	s_producer = producer;
+}
+
+uint32 AtariDspAudio::periodsQueued() const {
+	return queued();
+}
+
+void AtariDspAudio::productionStats(uint32 &refusedStreakMax, uint32 &refusedMutex, uint32 &refusedAllocator,
+                                    uint32 &refusedLevel, uint32 &extended, uint32 &produceMax,
+                                    uint32 &emptyTicks, uint32 &emptyStreakMax) const {
+	refusedStreakMax = s_refusedStreakMax;
+	refusedMutex = s_refusedMutex;
+	refusedAllocator = s_refusedAllocator;
+	refusedLevel = s_refusedLevel;
+	extended = s_extended;
+	produceMax = s_produceTicksMax;
+	emptyTicks = s_emptyTicks;
+	emptyStreakMax = s_emptyStreakMax;
 }
 
 // The stream loop answers the status query; the command loop does not, so
@@ -300,8 +470,9 @@ bool AtariDspAudio::queryCounters(uint32 &rendered, uint32 &late) {
 void AtariDspAudio::stopStream() {
 	if (!_streaming)
 		return;
-	// Let the handler drain the queue so the kernel is back in its stream
-	// loop, then take the port back.
+	// Stop production, let the handler drain the queue so the kernel is
+	// back in its stream loop, then take the port back.
+	s_producer = nullptr;
 	for (int i = 0; i < 1000000 && (s_head != s_tail || s_pollState != 0); ++i)
 		;
 	s_deliver = false;
@@ -322,12 +493,15 @@ void AtariDspAudio::shutdown() {
 	}
 }
 
-AtariDspAudio::Period *AtariDspAudio::beginPeriod() {
-	if (_filling >= 0)
+AtariDspAudio::Period *AtariDspAudio::beginPeriod(bool extension) {
+	if (!extension && _filling >= 0)
 		return &_periods[_filling];
+	InterruptsOff off;
 	for (int i = 0; i < kPeriods; ++i) {
-		if (!_periods[i].inFlight) {
-			_filling = i;
+		if (!_periods[i].inFlight && i != _filling) {
+			if (!extension)
+				_filling = i;
+			_periods[i].inFlight = true;   // claimed; submit() queues it
 			_periods[i].eventCount = 0;
 			_periods[i].words[0] = 0;
 			return &_periods[i];
@@ -368,10 +542,11 @@ void AtariDspAudio::setPcm(Period *period, const int16 *samples) {
 
 void AtariDspAudio::submit(Period *period) {
 	period->words[0] = period->eventCount;
-	period->inFlight = true;
+	InterruptsOff off;
 	s_queue[s_tail] = period;
 	s_tail = (s_tail + 1) % kQueueSize;
-	_filling = -1;
+	if (period == &_periods[_filling])
+		_filling = -1;
 	++_submitted;
 }
 

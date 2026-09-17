@@ -31,6 +31,23 @@
 #define MSPACES 1
 #define MALLOC_ALIGNMENT ((size_t)16U) /* 16B cache line */
 
+#ifdef ATARI_DSP_OPL
+/* The DSP audio interrupt produces periods only while the main loop is
+   outside the allocator, so the allocator's locks count critical-section
+   depth instead of locking; see backends/platform/atari/atari-critical.h. */
+#include "backends/platform/atari/atari-critical.h"
+#define USE_LOCKS 2
+#define USE_SPIN_LOCKS 1
+#define LACKS_SCHED_H
+#define MLOCK_T long
+#define INITIAL_LOCK(lk) (*(lk) = 0)
+#define DESTROY_LOCK(lk) (0)
+#define ACQUIRE_LOCK(lk) (ATARI_ALLOCATOR_ENTER(), 0)
+#define RELEASE_LOCK(lk) ATARI_ALLOCATOR_LEAVE()
+#define TRY_LOCK(lk) (ATARI_ALLOCATOR_ENTER(), 1)
+static MLOCK_T malloc_global_mutex __attribute__((unused)) = 0;
+#endif
+
 #pragma GCC diagnostic push
 /* warning: 'mallinfo mallinfo()' hides constructor for 'struct mallinfo' [-Wshadow] */
 #pragma GCC diagnostic ignored "-Wshadow"

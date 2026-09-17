@@ -38,11 +38,29 @@
  * a payload before rendering it, so the 68030 stays one period ahead; a
  * period that arrives late repeats the previous one and is counted.
  *
- * Delivery runs from an MFP Timer A interrupt at about 1 kHz: announce,
- * wait for the kernel's READY, blast the words paced on the port, take the
- * acknowledgement. The main loop only produces periods, up to sixteen
- * ahead, so a stall in the game's loop of up to about 230 ms costs no
- * period; a longer one repeats a period per 14.6 ms it lasts.
+ * Production and delivery both run from an MFP Timer A interrupt at about
+ * 1 kHz, so neither depends on the game's loop. Delivery takes one
+ * protocol step per tick: announce the head period, blast it once the
+ * kernel is ready, take the acknowledgement. Production runs whenever
+ * fewer than kProduceAhead periods are queued and the interrupted code is
+ * outside every critical section (atari-critical.h: no mutex held, not
+ * inside the allocator): the handler drops back to the program's
+ * interrupt level so delivery and the system's interrupts keep running,
+ * switches to its own stack, saves the FPU state, and calls the producer
+ * the mixer manager registered. That producer runs the OPL's timer callbacks, which are the
+ * AdLib driver and iMUSE's sequencing, and attaches the PCM chunk the
+ * main loop mixed ahead. A stall of the game's loop therefore no longer
+ * touches the music; it only drains the PCM ring, after which speech and
+ * effects are silent until the loop runs again. When the main loop holds
+ * a critical section for longer than the queue lasts (a resource load
+ * holds SCUMM's resource mutex for over 100 ms), or when a production
+ * call itself runs long (iMUSE re-parses a track at a jump, hundreds of
+ * milliseconds here), the handler submits extension periods without
+ * callbacks instead: the voices carry on and the sequencer slips by a
+ * period, where the kernel would otherwise loop the last period it had.
+ *
+ * The producer runs in interrupt context: it must not do I/O or call the
+ * OS. It may allocate, since the allocator counts as a critical section.
  */
 class AtariDspAudio {
 public:
@@ -55,7 +73,9 @@ public:
 		kPcmRateHz = 10927,          // a third of the codec rate, rounded
 		kMaxEvents = 2048,           // the kernel's table holds 4,096; a period never needs half
 		kPayloadWords = 1 + 2 * kMaxEvents + 1 + kPcmPerPeriod,
-		kPeriods = 16                // produced ahead: 234 ms of audio, 264 KB
+		kProduceAhead = 4,           // periods queued ahead of delivery: 58 ms of tolerance
+		kExtendBelow = 2,            // refused production extends while fewer than this are queued
+		kPeriods = kProduceAhead + 2 // buffers: the queue, one in flight, one being filled
 	};
 
 	struct Period {
@@ -63,6 +83,16 @@ public:
 		uint32 eventCount;
 		volatile bool inFlight;
 	};
+
+	/**
+	 * Fills one period from the interrupt; false when it could not. With
+	 * runCallbacks false it is an extension period: the PCM chunk and the
+	 * volume, but no timer callbacks, so the kernel has something to render
+	 * while the main loop holds a critical section too long or while a
+	 * production call itself runs long. The synth's voices carry on and the
+	 * sequencer's timeline slips by one period.
+	 */
+	typedef bool (*Producer)(void *context, bool runCallbacks);
 
 	AtariDspAudio();
 	~AtariDspAudio();
@@ -76,18 +106,40 @@ public:
 
 	bool isStreaming() const { return _streaming; }
 
-	/** A period buffer to fill, or nullptr while every buffer is in flight. */
-	Period *beginPeriod();
+	/** Registers the producer the interrupt calls; nullptr stops production. */
+	void setProducer(Producer producer, void *context);
+
+	// The producer's tools, for interrupt context only.
+	/**
+	 * A period buffer to fill, or nullptr while every buffer is in flight.
+	 * An extension is taken by a tick nested inside a production call and
+	 * never returns the buffer that call is filling.
+	 */
+	Period *beginPeriod(bool extension);
 	/** Adds a kernel parameter event to the period being filled. */
 	void addEvent(Period *period, uint32 block, uint16 address, uint32 value);
 	/** Sets the period's PCM: 160 signed 16-bit samples, or nullptr for silence. */
 	void setPcm(Period *period, const int16 *samples);
 	/** Queues the period for delivery. */
 	void submit(Period *period);
-	/** Delivery runs from the interrupt; this only refreshes the cached counters. */
+
+	/** Refreshes the cached counters from the kernel's last acknowledgement. */
 	void poll();
 
 	uint32 periodsSubmitted() const { return _submitted; }
+	/** Periods submitted and not yet acknowledged by the kernel. */
+	uint32 periodsQueued() const;
+	/**
+	 * The interrupt's account of production, in 1 ms ticks: the longest
+	 * streak of ticks a due period was refused, how many refusals were a
+	 * mutex held by the main loop, how many the allocator and how many an
+	 * interrupted handler, how many extension periods were submitted, the
+	 * longest single production call, and the ticks with nothing queued,
+	 * total and longest streak.
+	 */
+	void productionStats(uint32 &refusedStreakMax, uint32 &refusedMutex, uint32 &refusedAllocator,
+	                     uint32 &refusedLevel, uint32 &extended, uint32 &produceMax,
+	                     uint32 &emptyTicks, uint32 &emptyStreakMax) const;
 	uint32 protocolErrors() const;
 	/** The kernel's counters, periods rendered and periods rendered late, as of its last acknowledgement. */
 	bool queryCounters(uint32 &rendered, uint32 &late);

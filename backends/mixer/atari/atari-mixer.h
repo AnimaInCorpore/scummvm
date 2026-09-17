@@ -59,14 +59,26 @@ private:
 	int _atariSampleBufferSize = 0;
 	byte *_atariSampleBuffer = nullptr;
 #ifdef ATARI_DSP_OPL
-	// The DSP owns the codec: the mix goes to it one period at a time and
-	// the AdLib voices are synthesized there. See backends/platform/atari/atari-dsp.h.
+	// The DSP owns the codec and synthesizes the AdLib voices; its
+	// interrupt produces the periods (backends/platform/atari/atari-dsp.h).
+	// The main loop only mixes speech and effects ahead into a ring of
+	// period-sized chunks, from which the interrupt takes one per period.
 	bool initDsp();
 	void updateDsp();
+	static bool produceDspPeriod(void *context, bool runCallbacks);
+	enum {
+		kDspPcmChunks = 12,   // ring capacity, one more than it ever holds
+		kDspPcmAhead = 8      // chunks mixed ahead: 117 ms of loop stall before a gap
+	};
 	AtariDspAudio *_dsp = nullptr;
 	bool _dspMode = false;
-	int16 *_dspPcm = nullptr;
+	int16 *_dspPcmRing = nullptr;
+	volatile int _dspPcmHead = 0;          // the interrupt's next chunk
+	volatile int _dspPcmTail = 0;          // the main loop's next chunk
+	volatile uint32 _dspPcmUnderruns = 0;  // periods produced with no chunk to take
+	volatile bool _dspPcmTaking = false;   // a production is between reading the head and advancing it
 	int _dspMusicVolume = -1;
+	uint32 _dspLoggedPeriods = 0;
 #endif
 };
 

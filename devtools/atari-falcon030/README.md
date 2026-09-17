@@ -161,8 +161,10 @@ feedback FM channels held, word exact against its host reference on the
 emulated DSP, and streams through the SSI with no late period. The Falcon
 build embeds it: `opl_driver=atari_dsp` synthesizes the AdLib score on the
 DSP, which also carries the mixer's speech and effects, and `game-gate.py`
-runs the game with it on the emulated Falcon and records the music. Nothing
-has run on hardware. See the same directory's README for every figure.
+runs the game with it on the emulated Falcon and records the music. Both
+synthesis and delivery run from an interrupt, so the game's loop stalls at
+scene changes (seconds) no longer freeze the music. Nothing has run on
+hardware. See the same directory's README for every figure.
 
 ## MT-32 on the same machine
 

@@ -37,7 +37,9 @@
  * 32-frame block of the period being produced; the timer callbacks run
  * inside period production, on the audio clock, so a callback's writes land
  * in the block that corresponds to its time. AtariMixerManager owns the
- * transport and drives producePeriod() once per 480-frame period.
+ * transport, whose interrupt calls producePeriod() once per 480-frame
+ * period, so the callbacks, and with them iMUSE's sequencing, run in
+ * interrupt context (see atari-dsp.h for what that requires).
  */
 class AtariDspOPL : public ::OPL::OPL {
 public:
@@ -78,7 +80,9 @@ private:
 	uint32 _nextTick16;        // next callback's frame within the period, 16.16
 	uint32 _block;             // block of the period the current writes belong to
 
-	enum { kPendingMax = 256 };
+	// A song start from the main loop can write several hundred registers
+	// while the interrupt is refused production; none may be dropped.
+	enum { kPendingMax = 2048 };
 	uint32 _pending[kPendingMax * 2];
 	uint32 _pendingCount;
 
