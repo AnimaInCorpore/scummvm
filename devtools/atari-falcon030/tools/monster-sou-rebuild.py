@@ -104,22 +104,34 @@ def lowpass(ffmpeg, pcm, rate, cutoff):
     therefore folds everything above 6,146 Hz back into the speech band, which
     is audible on bright voices as a smeared, blurred consonant.
 
-    Filtering does not resample, so the sample count - and with it the record
-    size and every offset after it - is unchanged; the caller checks that.
-    Three biquad sections give about 36 dB per octave, so the content near the
-    source's own Nyquist, which folds down the furthest into the speech band,
-    lands well attenuated.
+    The filter is a brickwall rather than a gentle roll-off. A cascade of
+    biquads has to sit well under Nyquist to attenuate anything near it, which
+    costs treble the mixer could have carried, and still leaves the region just
+    above Nyquist barely touched - that residue is what shimmers on long, bright
+    vowels. firequalizer is an FIR, so it can cut just under Nyquist and leave
+    the passband alone.
+
+    Being an FIR it also has latency, and ffmpeg returns the tail: the output is
+    longer than the input by twice the delay, symmetrically, so the original
+    window is the middle. Filtering does not resample, so once that window is
+    taken the sample count - and with it the record size and every offset after
+    it - is unchanged; the caller checks that.
     """
-    chain = ",".join([f"lowpass=f={cutoff}:poles=2"] * 3)
     done = subprocess.run([ffmpeg, "-v", "error", "-f", "u8", "-ar", str(rate), "-ac", "1",
-                           "-i", "-", "-af", chain, "-f", "u8", "-"],
-                          input=pcm, capture_output=True)
+                           "-i", "-", "-af", f"firequalizer=gain='if(gte(f,{cutoff}),-INF,0)'",
+                           "-f", "u8", "-"], input=pcm, capture_output=True)
     if done.returncode != 0:
         raise RuntimeError(f"ffmpeg failed: {done.stderr.decode(errors='replace').strip()}")
-    if len(done.stdout) != len(pcm):
-        raise RuntimeError(f"lowpass changed the length, {len(pcm)} to {len(done.stdout)}; "
+    out = done.stdout
+    extra = len(out) - len(pcm)
+    if extra < 0 or extra % 2:
+        raise RuntimeError(f"lowpass returned {len(out)} bytes for {len(pcm)}; "
+                           "expected the input length plus twice the filter delay")
+    out = out[extra // 2:extra // 2 + len(pcm)]
+    if len(out) != len(pcm):
+        raise RuntimeError(f"lowpass changed the length, {len(pcm)} to {len(out)}; "
                            "the record would no longer fit its offset")
-    return done.stdout
+    return out
 
 
 def decode(flac, data):
@@ -151,10 +163,10 @@ def main():
                         help="parallel flac processes")
     parser.add_argument("--limit", type=int, help="only the first N samples (a smoke test; "
                                                   "the result is not playable)")
-    parser.add_argument("--lowpass", type=int, nargs="?", const=5800, metavar="HZ",
+    parser.add_argument("--lowpass", type=int, nargs="?", const=6100, metavar="HZ",
                         help="band-limit samples that the Falcon mixer will have to downsample "
                              f"(those above {PCM_RATE_HZ} Hz), so they do not alias in ScummVM's "
-                             "unfiltered rate conversion; default 5800 Hz")
+                             "unfiltered rate conversion; default 6100 Hz, just under its 6,146 Hz Nyquist")
     parser.add_argument("--ffmpeg", default="ffmpeg", help="the ffmpeg CLI to filter with")
     parser.add_argument("--verify", type=int, nargs="?", const=200, metavar="N",
                         help="after writing, read N random samples back out of the .sou and "

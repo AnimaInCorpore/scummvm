@@ -231,9 +231,14 @@ Its `--lowpass` matters as much as the rebuild. That game's speech is mostly
 22,050 Hz against the mixer's 12,292, and `audio/rate.cpp` resamples by linear
 interpolation with no anti-alias filter, so everything above 6,146 Hz folds
 back into the speech band - bright voices come out smeared, which is the same
-blur the OPL kernel had at 32.78 kHz. Band-limiting the source at 5.8 kHz
-costs nothing at run time and leaves the sample count, and so every offset,
-untouched. Atlantis never showed this because 11,025 Hz is upsampled instead.
+blur the OPL kernel had at 32.78 kHz. Band-limiting the source at 6.1 kHz,
+just under that Nyquist, costs nothing at run time and leaves the sample
+count, and so every offset, untouched. The filter is an FIR brickwall: a
+biquad cascade has to sit well below Nyquist before it attenuates anything
+near it, which throws away treble the mixer could have carried and still
+leaves the region just above Nyquist barely touched, and that residue
+shimmers on long, bright vowels. Atlantis never showed any of this because
+11,025 Hz is upsampled instead.
 
 ## MT-32 on the same machine
 
