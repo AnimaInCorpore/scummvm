@@ -527,8 +527,14 @@ protocol error and no late period, and no tick found the queue empty once
 the stream was running. The loop stalled for 2,538 periods of PCM (39.6 s, nearly all
 of it engine start-up before the first scene, the rest scene changes) while
 the music went on, and 96 extension periods (1.4 s of sequencer slip)
-covered resource loads of up to 121 ms and one iMUSE callback of 245 ms.
-The recording carries the opening music at -12 dBFS peak.
+covered resource loads of up to 121 ms and one production session of
+245 ms. That last figure is not a single callback, as this said before:
+`atari_dsp_produce` loops until `kProduceAhead` periods are queued, so
+`production N ms max` is how long one such session ran, and a long one
+means the loop was not outrunning delivery - the 68030 could not generate
+a period's events in a period's time and stayed there until the load
+eased. The main loop gets no CPU throughout, which is what empties the
+PCM ring. The recording carries the opening music at -12 dBFS peak.
 
 The build's profile admits three more DOS games on the same AdLib driver,
 and each runs the same gate on the same binary with the same shape of
