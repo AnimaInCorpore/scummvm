@@ -33,7 +33,7 @@ export ASFLAGS="-m68030"
 # No -ffunction-sections/--gc-sections: section garbage collection does nothing
 # on m68k-atari-mintelf (verified - ld 2.45 removes zero sections even for a
 # trivially dead function), and the extra section headers cost ~11 KB.
-export CXXFLAGS="-m68030 -DATARI_FALCON_GAME_ONLY -DDISABLE_FANCY_THEMES -DDISABLE_LAUNCHERDISPLAY_GRID -DDISABLE_DOSBOX_OPL -DDISABLE_MAME_OPL"
+export CXXFLAGS="-m68030 -DATARI_FALCON_GAME_ONLY -DATARI_DSP_OPL -DDISABLE_FANCY_THEMES -DDISABLE_LAUNCHERDISPLAY_GRID -DDISABLE_DOSBOX_OPL -DDISABLE_MAME_OPL"
 export LDFLAGS="-m68030"
 
 export PKG_CONFIG_LIBDIR="$(${PLATFORM}-gcc -print-sysroot)/usr/lib/m68020-60/pkgconfig"

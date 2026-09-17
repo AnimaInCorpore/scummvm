@@ -25,6 +25,10 @@
 #include "backends/mixer/mixer.h"
 #include "common/events.h"
 
+#ifdef ATARI_DSP_OPL
+class AtariDspAudio;
+#endif
+
 /**
  *  Atari XBIOS based audio mixer.
  */
@@ -54,6 +58,16 @@ private:
 
 	int _atariSampleBufferSize = 0;
 	byte *_atariSampleBuffer = nullptr;
+#ifdef ATARI_DSP_OPL
+	// The DSP owns the codec: the mix goes to it one period at a time and
+	// the AdLib voices are synthesized there. See backends/platform/atari/atari-dsp.h.
+	bool initDsp();
+	void updateDsp();
+	AtariDspAudio *_dsp = nullptr;
+	bool _dspMode = false;
+	int16 *_dspPcm = nullptr;
+	int _dspMusicVolume = -1;
+#endif
 };
 
 #endif

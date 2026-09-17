@@ -1,16 +1,19 @@
 # OPL3 on the Falcon DSP: investigation
 
 2026-09-16. Target: 16 MHz 68030, 32 MHz DSP56001, 14 MB, with ScummVM
-running Fate of Atlantis. This is a source audit, a reproduction of F030MXDRV
-measurements, and a capture of the game's own OPL register stream. No OPL DSP
-renderer has been implemented or timed.
+running Fate of Atlantis. This note started as a source audit, a
+reproduction of F030MXDRV measurements and a capture of the game's own OPL
+register stream; it now also records the outcome.
 
-**An OPL3-compatible DSP backend is a credible development direction, using
-F030MXDRV's practical FM architecture. Full 36-operator playback during
-gameplay is still unproven. Atlantis's original AdLib arrangement needs
-only the OPL2 subset, making that the strongest first integration target.**
-The result would preserve the AdLib arrangement and live iMUSE behavior;
-it would not reproduce the MT-32 arrangement or its instrument sound.
+**Outcome, 2026-09-16 (see [Outcome](#outcome) at the end).** An exact OPL
+renderer does not fit the DSP, but a practical block-rate one does: measured
+at 55% of the 32.780 kHz budget on the Atlantis stream and 69% with nine
+feedback FM channels held with tremolo and vibrato, word exact against its
+host reference, streaming through the SSI without a late period, and
+playing the game's opening on the emulated Falcon from the ScummVM build
+(`opl_driver=atari_dsp`). It preserves the AdLib arrangement and live
+iMUSE behavior; it does not reproduce the MT-32 arrangement or its
+instrument sound, and nothing has run on hardware.
 
 ## What the games actually ask for
 
@@ -417,15 +420,36 @@ its OPL2-compatible Atlantis path first. That path is now measured, and an
 32.780 kHz budget with the envelope generator still absent, and optimization
 of the remaining kind cannot close a gap that size.
 
-What remains open is an *approximate* renderer, along the lines F030MXDRV
+What remained open was an *approximate* renderer, along the lines F030MXDRV
 already took for the YM2151: block-rate envelopes and LFO, a lower synthesis
 rate with the clocks correctly retimed, and perceptual rather than sample
-compatibility. That is a different proposition from the one this note opened
-with, and it needs its own quality gate, because the exactness argument that
-made the OPL direction attractive is exactly what the budget cannot afford.
-The bit-exact host kernel is the reference any such approximation would be
-scored against, and the capture, fixture and benchmark harness here measure
-it. None of these findings make FM timbres sound like an MT-32.
+compatibility. That renderer was then built and measured; the next section
+records it. None of these findings make FM timbres sound like an MT-32.
+
+## Outcome
+
+The practical kernel, its DSP implementation, the stream transport and the
+ScummVM integration are in [tools/foa-opl3](../tools/foa-opl3/README.md),
+each with a gate and a committed result file. In short:
+
+| Measurement | Result |
+| --- | ---: |
+| Practical kernel against the exact one, sustained tones | levels within 0.1 dB, partials within 0.8 dB, pitch within 0.5 cent |
+| Envelope contour correlation, Atlantis 60 s | 0.973, mean level error 0.86 dB |
+| Aliasing, brightest Atlantis passage | +3.4 dB in the 8-15 kHz band |
+| DSP cost, Atlantis first 4 s | 268.7 cycles per frame, 55% of budget, word exact |
+| DSP cost, nine feedback FM channels with LFO held | 338.2 cycles per frame, 69% of budget, word exact |
+| Stream mode, Atlantis 20 s through the SSI | 1,365 periods, none late, checksum equal |
+| The game on the emulated Falcon | 4,608 periods through the opening, 2 to 5 late across runs (0.1%), opening music recorded |
+
+Steps 2 through 4 of the sequence above are therefore done in emulation
+with the practical kernel; step 5 (Sam & Max's layered path, hardware) is
+not. Payload delivery already runs from a Timer A interrupt with sixteen
+periods produced ahead; the remaining engineering items are the
+per-operator boundary pass (the second-largest DSP cost, unoptimized),
+period production off the main loop so a scene change longer than the
+buffered 234 ms cannot repeat a period, a listening pass, and a hardware
+run with the same counters.
 
 ## Evidence and reproduction
 

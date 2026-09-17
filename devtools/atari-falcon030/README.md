@@ -151,12 +151,18 @@ against Nuked-OPL3 over parameter sweeps and the captured stream, its
 DSP56001 transliteration, and a benchmark on an emulated Falcon. The DSP
 kernel reproduces the reference word for word at nine and eighteen channels.
 
-**It does not fit.** Synthesis alone costs 1,025 instruction cycles per frame
-for Atlantis's own nine-channel arrangement, 209% of the 32.780 kHz budget,
-with the envelope generator, LFO, register decoding, SSI and transport all
-still absent. An exact OPL renderer on this DSP is measured as out of reach;
-an approximate one, along the lines F030MXDRV took for the YM2151, is the
-remaining option and needs its own quality gate.
+**The exact kernel does not fit**: synthesis alone costs 1,025 instruction
+cycles per frame for Atlantis's own nine-channel arrangement, 209% of the
+32.780 kHz budget. **The practical kernel does.** It renders at the codec
+rate in 32-frame blocks with block-rate envelopes and LFO, is scored against
+the exact kernel by a perceptual gate (sustained tones within a dB and half a
+cent), costs 55% of the budget on the Atlantis stream and 69% with nine
+feedback FM channels held, word exact against its host reference on the
+emulated DSP, and streams through the SSI with no late period. The Falcon
+build embeds it: `opl_driver=atari_dsp` synthesizes the AdLib score on the
+DSP, which also carries the mixer's speech and effects, and `game-gate.py`
+runs the game with it on the emulated Falcon and records the music. Nothing
+has run on hardware. See the same directory's README for every figure.
 
 ## MT-32 on the same machine
 

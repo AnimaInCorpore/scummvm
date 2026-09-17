@@ -340,6 +340,15 @@ void OSystem_Atari::initBackend() {
 	atariEventSource->setGraphicsManager(atariGraphicsManager);
 
 #ifdef DISABLE_FANCY_THEMES
+#ifdef ATARI_DSP_OPL
+	// The Falcon030 game build synthesizes AdLib on the DSP by default.
+	if (!ConfMan.hasKey("opl_driver")) {
+		ConfMan.set("opl_driver", "atari_dsp");
+	}
+	if (!ConfMan.hasKey("music_driver")) {
+		ConfMan.set("music_driver", "adlib");
+	}
+#else
 	// On the lite build force "None" as the opl driver, i.e. do not attempt
 	// to emulate anything by default.
 	if (!ConfMan.hasKey("opl_driver")) {
@@ -350,6 +359,7 @@ void OSystem_Atari::initBackend() {
 	if (!ConfMan.hasKey("music_driver")) {
 		ConfMan.set("music_driver", "stmidi");
 	}
+#endif
 	if (!ConfMan.hasKey("gm_device")) {
 		ConfMan.set("gm_device", "auto");
 	}

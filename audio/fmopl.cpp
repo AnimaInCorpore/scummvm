@@ -33,6 +33,10 @@
 #include "audio/softsynth/opl/mame.h"
 #include "audio/softsynth/opl/nuked.h"
 
+#ifdef ATARI_DSP_OPL
+	#include "backends/platform/atari/dsp-opl.h"
+#endif
+
 #include "common/config-manager.h"
 #include "common/textconsole.h"
 #include "common/translation.h"
@@ -95,6 +99,9 @@ enum OplEmulator {
 	kNfmNatfeatsNull = 17,
 	kNfmNukedOpl3 = 18
 #endif
+#ifdef ATARI_DSP_OPL
+	,kAtariDsp = 19
+#endif
 };
 
 OPL::OPL() {
@@ -140,6 +147,9 @@ const Config::EmulatorDescription Config::_drivers[] = {
 	{"nfm_ce_stbus_isa_vme", _s("[nFM] ST Bus ISA / VME SoundBlaster"), kNfmStBusIsaVmeSb, kFlagOpl2 | kFlagDualOpl2 | kFlagOpl3},
 	{"nfm_natfeats_null", _s("[nFM] NatFeats / NULL"), kNfmNatfeatsNull, kFlagOpl2 | kFlagDualOpl2 | kFlagOpl3},
 	{"nfm_nuked_opl3", _s("[nFM] Nuked-OPL3 softsynth (OPL3)"), kNfmNukedOpl3, kFlagOpl2 | kFlagDualOpl2 | kFlagOpl3},
+#endif
+#ifdef ATARI_DSP_OPL
+	{ "atari_dsp", _s("Atari Falcon DSP (OPL2)"), kAtariDsp, kFlagOpl2 },
 #endif
 	{ nullptr, nullptr, 0, 0 }
 };
@@ -328,6 +338,14 @@ OPL *Config::create(DriverId driver, OplType type) {
 		return NfmOPL::RealChip::create(type, NfmOPL::dtNatfeatsOpl);
 	case kNfmNukedOpl3:
 		return NfmOPL::EmulatedChip::create(type, NfmOPL::dtNukedOpl3);
+#endif
+
+#ifdef ATARI_DSP_OPL
+	case kAtariDsp:
+		if (type == kOpl2)
+			return AtariDspOPL::create();
+		warning("The Atari Falcon DSP OPL supports OPL2 only");
+		return nullptr;
 #endif
 
 	case kNull:

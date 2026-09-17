@@ -35,6 +35,15 @@
 #include "common/debug.h"
 #include "common/textconsole.h"
 
+#ifdef ATARI_DSP_OPL
+#include "audio/mixer_intern.h"
+#include "backends/platform/atari/atari-dsp.h"
+#include "backends/platform/atari/dsp-opl.h"
+#include "devtools/atari-falcon030/tools/foa-opl3/opl-practical.h"
+
+extern AtariDspAudio *g_atariDspAudio;
+#endif
+
 #ifdef DISABLE_FANCY_THEMES
 #define DEFAULT_OUTPUT_RATE			11025
 #define DEFAULT_OUTPUT_CHANNELS		1
@@ -46,10 +55,14 @@
 #endif
 
 static USoundContext usoundContext;
+static bool s_usoundActive = false;
 
 void AtariAudioShutdown() {
+	if (!s_usoundActive)
+		return;
 	Jdisint(MFP_TIMERA);
 	USoundDeinitXbios(&usoundContext);
+	s_usoundActive = false;
 }
 
 static volatile enum {
@@ -108,14 +121,105 @@ AtariMixerManager::~AtariMixerManager() {
 
 	AtariAudioShutdown();
 
-	Mfree(_atariSampleBuffer);
+#ifdef ATARI_DSP_OPL
+	if (_dsp) {
+		uint32 rendered = 0, late = 0;
+		_dsp->queryCounters(rendered, late);
+		debug("AtariDspAudio: %u periods submitted, %u rendered, %u late, %u protocol errors",
+		      _dsp->periodsSubmitted(), rendered, late, _dsp->protocolErrors());
+		g_atariDspAudio = nullptr;
+		delete _dsp;
+		_dsp = nullptr;
+	}
+	delete[] _dspPcm;
+	_dspPcm = nullptr;
+#endif
+
+	if (_atariSampleBuffer)
+		Mfree(_atariSampleBuffer);
 	_atariSampleBuffer = nullptr;
 
 	delete[] _sampleBuffer;
 	_sampleBuffer = nullptr;
 }
 
+#ifdef ATARI_DSP_OPL
+bool AtariMixerManager::initDsp() {
+	ConfMan.registerDefault("atari_dsp_audio", true);
+	if (!ConfMan.getBool("atari_dsp_audio"))
+		return false;
+	_dsp = new AtariDspAudio();
+	if (!_dsp->boot() || !_dsp->startStream()) {
+		warning("AtariMixerManager: DSP audio unavailable, using DMA playback");
+		delete _dsp;
+		_dsp = nullptr;
+		return false;
+	}
+	g_atariDspAudio = _dsp;
+	_dspMode = true;
+	_outputRate = AtariDspAudio::kPcmRateHz;
+	_outputChannels = 1;
+	_samples = AtariDspAudio::kPcmPerPeriod;
+	_sampleBufferSize = _samples * 4;   // the mixer produces 32-bit samples
+	_sampleBuffer = new uint8[_sampleBufferSize];
+	_dspPcm = new int16[_samples];
+	debug("AtariMixerManager: DSP audio at %d Hz mono, %d-frame periods at %d Hz",
+	      _outputRate, AtariDspAudio::kPeriodFrames, AtariDspAudio::kCodecRateHz);
+	_mixer = new Audio::MixerImpl(_outputRate, false, _samples, 4, false);
+	_mixer->setReady(true);
+	resumeAudio();
+	return true;
+}
+
+// One period per free buffer, produced ahead of the interrupt-driven
+// delivery: the OPL's timer callbacks for the period, then the mix, then
+// the payload.
+void AtariMixerManager::updateDsp() {
+	if (_audioSuspended)
+		return;
+	_dsp->poll();
+	for (int produced = 0; produced < AtariDspAudio::kPeriods; ++produced) {
+		AtariDspAudio::Period *period = _dsp->beginPeriod();
+		if (!period)
+			break;
+		const int volume = _mixer->getVolumeForSoundType(Audio::Mixer::kMusicSoundType);
+		if (volume != _dspMusicVolume) {
+			_dspMusicVolume = volume;
+			const uint32 gain = volume >= Audio::Mixer::kMaxMixerVolume ? 0x7fffffu
+				: (uint32)((uint64)volume * 0x7fffffu / Audio::Mixer::kMaxMixerVolume);
+			_dsp->addEvent(period, 0, OplPractical::SC_MASTER_GAIN, gain);
+		}
+		if (AtariDspOPL::instance())
+			AtariDspOPL::instance()->producePeriod(period);
+		const int processed = _mixer->mixCallback(_sampleBuffer, _sampleBufferSize);
+		const int32 *src = (const int32 *)_sampleBuffer;
+		for (int i = 0; i < _samples; ++i) {
+			int32 v = i < processed ? src[i] : 0;
+			if (v > 32767)
+				v = 32767;
+			else if (v < -32768)
+				v = -32768;
+			_dspPcm[i] = (int16)v;
+		}
+		_dsp->setPcm(period, _dspPcm);
+		_dsp->submit(period);
+		_dsp->poll();
+		// About every seven seconds, the transport's view of the stream.
+		if ((_dsp->periodsSubmitted() & 511) == 0) {
+			uint32 rendered = 0, late = 0;
+			_dsp->queryCounters(rendered, late);
+			debug("AtariDspAudio: %u periods submitted, %u rendered, %u late, %u protocol errors",
+			      _dsp->periodsSubmitted(), rendered, late, _dsp->protocolErrors());
+		}
+	}
+}
+#endif
+
 void AtariMixerManager::init() {
+#ifdef ATARI_DSP_OPL
+	if (initDsp())
+		return;
+#endif
 	USoundSpec desired, obtained;
 
 	desired.frequency = _outputRate;
@@ -126,6 +230,7 @@ void AtariMixerManager::init() {
 	if (!USoundInitXbios(&desired, &obtained, &usoundContext)) {
 		error("Sound system is not available");
 	}
+	s_usoundActive = true;
 
 	if (obtained.format != USoundFormatSigned8 && obtained.format != USoundFormatSigned16MSB) {
 		error("Sound system currently supports only 8/16-bit signed big endian samples");
@@ -184,6 +289,12 @@ void AtariMixerManager::init() {
 void AtariMixerManager::suspendAudio() {
 	debug("suspendAudio");
 
+#ifdef ATARI_DSP_OPL
+	if (_dspMode) {
+		_audioSuspended = true;
+		return;
+	}
+#endif
 	Buffoper(0x00);
 	s_playbackState = kPlaybackStopped;
 	_audioSuspended = true;
@@ -219,6 +330,13 @@ void AtariMixerManager::update() {
 	}
 
 	assert(_mixer);
+
+#ifdef ATARI_DSP_OPL
+	if (_dspMode) {
+		updateDsp();
+		return;
+	}
+#endif
 
 	s_updatePulse++;
 

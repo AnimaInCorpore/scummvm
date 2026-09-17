@@ -3,6 +3,8 @@ MODULE := backends/platform/atari
 MODULE_OBJS := \
 	osystem_atari.o \
 	atari_ikbd.o \
+	atari-dsp.o \
+	dsp-opl.o \
 	native_features.o \
 	dlmalloc.o
 

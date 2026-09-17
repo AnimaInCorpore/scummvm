@@ -1,0 +1,90 @@
+/* ScummVM - Graphic Adventure Engine
+ *
+ * ScummVM is the legal property of its developers, whose names
+ * are too numerous to list here. Please refer to the COPYRIGHT
+ * file distributed with this source distribution.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ */
+
+#ifndef BACKENDS_PLATFORM_ATARI_DSP_OPL_H
+#define BACKENDS_PLATFORM_ATARI_DSP_OPL_H
+
+#ifdef ATARI_DSP_OPL
+
+#include "audio/fmopl.h"
+#include "backends/platform/atari/atari-dsp.h"
+#include "devtools/atari-falcon030/tools/foa-opl3/opl-practical.h"
+
+/**
+ * An OPL2 whose synthesis runs on the Falcon030's DSP.
+ *
+ * The AdLib driver above it is unchanged: it writes registers and asks for
+ * a 250 Hz timer. Register writes go through the practical kernel's decoder
+ * into parameter events for the DSP's operator records, stamped with the
+ * 32-frame block of the period being produced; the timer callbacks run
+ * inside period production, on the audio clock, so a callback's writes land
+ * in the block that corresponds to its time. AtariMixerManager owns the
+ * transport and drives producePeriod() once per 480-frame period.
+ */
+class AtariDspOPL : public ::OPL::OPL {
+public:
+	static ::OPL::OPL *create();
+	static AtariDspOPL *instance() { return s_instance; }
+
+	~AtariDspOPL() override;
+
+	bool init() override;
+	void reset() override;
+	void write(int a, int v) override;
+	void writeReg(int r, int v) override;
+	void setCallbackFrequency(int timerFrequency) override;
+
+	/** Runs the timer callbacks that fall in this period and collects their writes into it. */
+	void producePeriod(AtariDspAudio::Period *period);
+
+protected:
+	void startCallbacks(int timerFrequency) override;
+	void stopCallbacks() override;
+
+private:
+	struct EventSink : OplPractical::Sink {
+		AtariDspOPL *owner;
+		void write(uint32 block, uint16 address, int32 value) override;
+	};
+
+	explicit AtariDspOPL(AtariDspAudio *audio);
+	void emit(uint32 block, uint16 address, int32 value);
+
+	AtariDspAudio *_audio;
+	AtariDspAudio::Period *_period;
+	EventSink _sink;
+	OplPractical::Decoder *_decoder;
+	int _address;
+	bool _running;
+	uint32 _framesPerTick16;   // codec frames per callback, 16.16
+	uint32 _nextTick16;        // next callback's frame within the period, 16.16
+	uint32 _block;             // block of the period the current writes belong to
+
+	enum { kPendingMax = 256 };
+	uint32 _pending[kPendingMax * 2];
+	uint32 _pendingCount;
+
+	static AtariDspOPL *s_instance;
+};
+
+#endif
+
+#endif
