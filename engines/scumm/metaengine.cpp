@@ -468,9 +468,10 @@ Common::Error ScummMetaEngine::createInstance(OSystem *syst, Engine **engine,
 	// Finally, we have massaged the GameDescriptor to our satisfaction, and can
 	// instantiate the appropriate game engine. Hooray!
 #ifdef ATARI_FALCON_GAME_ONLY
-	// The Falcon build is deliberately a profile of three DOS games that share
-	// the AdLib driver its DSP synthesizes for: Fate of Atlantis and Monkey
-	// Island 2 (v5) and Day of the Tentacle (v6). Dropping the generic
+	// The Falcon build is deliberately a profile of four DOS games that share
+	// the AdLib driver its DSP synthesizes for: Fate of Atlantis, Monkey
+	// Island 1 (its v5 editions) and Monkey Island 2 (v5), and Day of the
+	// Tentacle (v6). Dropping the generic
 	// constructor matrix keeps the v7/v8 and the higher HE families out of the
 	// link. It does not remove v0-v4, which ScummEngine_v5 inherits from, nor
 	// v60he/v70he, which other references still pull in; see
@@ -478,7 +479,8 @@ Common::Error ScummMetaEngine::createInstance(OSystem *syst, Engine **engine,
 	// Mirrors ATARI_STE_GAME_ONLY on the ste-port branch; unify if both land.
 	if (res.game.platform != Common::kPlatformDOS)
 		return Common::Error(Common::kUnsupportedGameidError);
-	if (res.game.version == 5 && (strcmp(res.game.gameid, "atlantis") == 0 || strcmp(res.game.gameid, "monkey2") == 0))
+	if (res.game.version == 5 && (strcmp(res.game.gameid, "atlantis") == 0 || strcmp(res.game.gameid, "monkey") == 0 ||
+	                              strcmp(res.game.gameid, "monkey2") == 0))
 		*engine = new ScummEngine_v5(syst, res);
 	else if (res.game.version == 6 && strcmp(res.game.gameid, "tentacle") == 0)
 		*engine = new ScummEngine_v6(syst, res);

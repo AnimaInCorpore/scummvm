@@ -40,6 +40,7 @@
 extern "C" {
 void *atari_dsp_saved_stack;
 void *atari_dsp_stack_top;
+volatile unsigned char atari_dsp_producing;   // a production call is in progress
 void atari_dsp_timer_a();
 long atari_dsp_timer_tick(unsigned long interruptedLevel);
 void atari_dsp_produce();
@@ -88,7 +89,7 @@ uint32 s_reply;
 // enabled, so a nested tick delivers but never produces.
 AtariDspAudio::Producer volatile s_producer;
 void *s_producerContext;
-volatile bool s_producing;
+#define s_producing atari_dsp_producing
 
 // The producer's stack. Timer A interrupts whatever runs, and what runs
 // may be TOS itself on its own small supervisor stack.
@@ -181,11 +182,15 @@ long exchangeSuper() {
 } // namespace
 
 // MFP Timer A, about 1 kHz, entered at interrupt level 6 in supervisor
-// mode with the interrupted context's SR on the stack. Every tick takes one
-// delivery step; a tick that finds production due prepares for it here and
-// leaves the rest to the assembly below: the FPU state and the stack are
-// the interrupted context's, and the interrupt level must drop so that
-// delivery and the system keep running while the producer works.
+// mode. The assembly below has already moved to the handler's own stack
+// (unless this tick is nested inside a production call, which is on that
+// stack already), so the interrupted stack, which may be TOS's small one
+// inside a BIOS or XBIOS call, carries only the exception frame and the
+// saved registers. Every tick takes one delivery step; a tick that finds
+// production due prepares for it here and leaves the rest to the assembly:
+// the FPU state is the interrupted context's, and the interrupt level must
+// drop so that delivery and the system keep running while the producer
+// works.
 //
 // The in-service bit is cleared first so that a tick nested inside
 // production is delivered at all.
@@ -242,27 +247,36 @@ long atari_dsp_timer_tick(unsigned long interruptedLevel) {
 	return 1;
 }
 
-// On the production stack, at interrupt level 3.
+// On the production stack, at interrupt level 3. The assembly clears the
+// producing flag itself, once the level is back at 6: a tick between the
+// clear and the level change would take this stack for its own.
 void atari_dsp_produce() {
 	while (s_producer && queued() < AtariDspAudio::kProduceAhead) {
 		if (!s_producer(s_producerContext, true))
 			break;
 	}
-	s_producing = false;
 }
 
-// The vector: save the integer registers, ask the tick whether to produce,
-// and if so save the FPU state, switch stacks, lower the level to 3 for
-// the producer, and undo it all. The exception frame's SR sits above the
-// fifteen saved registers.
+// The vector: save the integer registers, and unless nested inside a
+// production call move to the handler's own stack; ask the tick whether to
+// produce, and if so save the FPU state, lower the level to 3 for the
+// producer, and undo it all. The exception frame's SR sits above the
+// fifteen saved registers on the interrupted stack, which is all that
+// stack ever carries. A nested tick stays on the production stack it was
+// interrupted on, and the tick refuses production while nested.
 asm(
 "	.text\n"
 "	.align	2\n"
 "	.globl	atari_dsp_timer_a\n"
 "atari_dsp_timer_a:\n"
 "	movem.l	%d0-%d7/%a0-%a6,-(%sp)\n"
+"	tst.b	atari_dsp_producing\n"
+"	bne	2f\n"
+"	move.l	%sp,atari_dsp_saved_stack\n"
+"	move.l	atari_dsp_stack_top,%sp\n"
+"	move.l	atari_dsp_saved_stack,%a0\n"
 "	moveq	#0,%d0\n"
-"	move.w	60(%sp),%d0\n"
+"	move.w	60(%a0),%d0\n"
 "	and.l	#0x0700,%d0\n"
 "	move.l	%d0,-(%sp)\n"
 "	jsr	atari_dsp_timer_tick\n"
@@ -274,18 +288,26 @@ asm(
 "	fmove.l	%fpcr,-(%sp)\n"
 "	fmove.l	%fpsr,-(%sp)\n"
 "	fmove.l	%fpiar,-(%sp)\n"
-"	move.l	%sp,atari_dsp_saved_stack\n"
-"	move.l	atari_dsp_stack_top,%sp\n"
 "	move.w	#0x2300,%sr\n"
 "	jsr	atari_dsp_produce\n"
 "	move.w	#0x2600,%sr\n"
-"	move.l	atari_dsp_saved_stack,%sp\n"
+"	clr.b	atari_dsp_producing\n"
 "	fmove.l	(%sp)+,%fpiar\n"
 "	fmove.l	(%sp)+,%fpsr\n"
 "	fmove.l	(%sp)+,%fpcr\n"
 "	fmovem.x	(%sp)+,%fp0-%fp7\n"
 "	frestore	(%sp)+\n"
 "1:\n"
+"	move.l	atari_dsp_saved_stack,%sp\n"
+"	movem.l	(%sp)+,%d0-%d7/%a0-%a6\n"
+"	rte\n"
+"2:\n"
+"	moveq	#0,%d0\n"
+"	move.w	60(%sp),%d0\n"
+"	and.l	#0x0700,%d0\n"
+"	move.l	%d0,-(%sp)\n"
+"	jsr	atari_dsp_timer_tick\n"
+"	addq.l	#4,%sp\n"
 "	movem.l	(%sp)+,%d0-%d7/%a0-%a6\n"
 "	rte\n"
 );

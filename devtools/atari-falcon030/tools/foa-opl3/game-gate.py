@@ -54,6 +54,13 @@ def main():
     parser.add_argument("--no-natfeats", action="store_true", help="diagnosis: leave NatFeats off")
     parser.add_argument("--no-cpu-exact", action="store_true", help="diagnosis: default CPU model")
     parser.add_argument("--ini-extra", default="", help="extra lines for the [scummvm] section, semicolon separated")
+    parser.add_argument("--no-press", action="store_true",
+                        help="calibration: move the cursor for each --click and screenshot, but do not press")
+    parser.add_argument("--click", action="append", default=[], metavar="SECONDS:X:Y",
+                        help="left-click at game coordinates X,Y once SECONDS of audio have been submitted "
+                             "(for a game that waits on a menu, e.g. Monkey Island 2's difficulty screen); repeatable. "
+                             "In Hatari's 320x200 screenshots the game's origin is at (60,72) and the scale is 2, "
+                             "so game X,Y = ((sx-60)/2, (sy-72)/2)")
     args = parser.parse_args()
     for required in (HATARI, TOS, args.binary):
         if not required.is_file():
@@ -86,7 +93,7 @@ def main():
                "--cpuclock", "16", "--fpu", "68882", "--dsp", "emu", "--tos", str(TOS), "--harddrive", str(hd),
                "--fast-boot", "on", "--fast-forward", "on", "--sound", args.sound_rate,
                "--confirm-quit", "off", "--conout", "2", "--cmd-fifo", str(fifo),
-               "--natfeats", "off" if args.no_natfeats else "on",
+               "--natfeats", "off" if args.no_natfeats else "on", "--screenshot-dir", str(case),
                "--cpu-exact", "off" if args.no_cpu_exact else "on", "--compatible", "off" if args.no_cpu_exact else "on",
                "--run-vbls", str(int(args.seconds * 50) * 4 + 12000),
                "--parse", "prg:" + str(case / "start.ini"), "--auto", "C:\\SCUMMVM\\SCUMMVM.PRG"]
@@ -119,12 +126,33 @@ def main():
             # (68.3 periods per second of audio) paces the run; quitting
             # through the control FIFO finalizes the recording.
             target = int(args.seconds * 32780.0 / 480.0)
+            clicks = sorted((float(c.split(":")[0]) * 32780.0 / 480.0, int(c.split(":")[1]), int(c.split(":")[2]))
+                            for c in args.click)
             deadline = time.monotonic() + 900
             while proc.poll() is None:
                 text = (case / "hatari.log").read_text(errors="replace")
                 submitted = [int(line.split("AtariDspAudio: ")[1].split()[0]) for line in text.splitlines()
                              if "AtariDspAudio: " in line and " periods submitted" in line]
+                while clicks and submitted and submitted[-1] >= clicks[0][0]:
+                    # The cursor position is only known relatively: park it in
+                    # the top-left corner first, then move to the target.
+                    _, x, y = clicks.pop(0)
+                    send("hatari-event mousemove -2000 -2000")
+                    time.sleep(0.5)
+                    send(f"hatari-event mousemove {x} {y}")
+                    time.sleep(0.5)
+                    if args.no_press:
+                        send("hatari-shortcut screenshot")
+                        time.sleep(1.0)
+                        continue
+                    send("hatari-event leftdown")
+                    time.sleep(0.3)
+                    send("hatari-event leftup")
+                    time.sleep(0.3)
                 if submitted and submitted[-1] >= target:
+                    # A screenshot of where the game got to, then quit.
+                    send("hatari-shortcut screenshot")
+                    time.sleep(1.5)
                     send("hatari-shortcut quit")
                     break
                 if "~OSystem_Atari" in text:
@@ -195,6 +223,7 @@ def main():
         "last_counters": last,
         "late_periods_max": late_max,
         "audio": audio,
+        "screenshot": next((p.name for p in sorted(case.glob("grab*.png"))), None),
         "kernel_counter_reports_fresh": len(fresh),
         "late_allowed": 1,
         "passed": bool(booted and picked and last and fresh

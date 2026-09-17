@@ -440,8 +440,8 @@ each with a gate and a committed result file. In short:
 | DSP cost, Atlantis first 4 s | 268.7 cycles per frame, 55% of budget, word exact |
 | DSP cost, nine feedback FM channels with LFO held | 338.2 cycles per frame, 69% of budget, word exact |
 | Stream mode, Atlantis 20 s through the SSI | 1,365 periods, none late, checksum equal |
-| The game on the emulated Falcon | 6,334 periods through 90 s of the opening, one late (the first), 102 extension periods (1.5 s of sequencer slip inside resource loads), opening music recorded |
-| Day of the Tentacle on the same build | 6,298 periods through 90 s of its intro, one late (the first), 85 extension periods, intro music recorded |
+| The game on the emulated Falcon | 6,383 periods through 90 s of the opening, one late (the first), 111 extension periods (1.6 s of sequencer slip inside resource loads), opening music recorded |
+| Day of the Tentacle, Monkey Island 1 and 2 on the same build | 6,345 / 6,337 periods in 90 s, 8,348 in 120 s; one late each (the first); 91 / 91 / 68 extension periods; opening music recorded |
 
 Steps 2 through 4 of the sequence above are therefore done in emulation
 with the practical kernel; step 5 (Sam & Max's layered path, hardware) is
