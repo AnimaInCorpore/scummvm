@@ -19,6 +19,10 @@ opl-practical-test: $(OPL3_TOOLS)/practical-test.cpp $(OPL3_TOOLS)/opl-practical
 	$(QUIET_CXX)$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(DEFINES) $(INCLUDES) \
 		-I$(OPL3_TOOLS) -I$(OPL3_TOOLS)/build -o $@ $< $(TEST_LIBS) $(TEST_LDFLAGS) $(OPL3_TEST_LDFLAGS)
 
+# Standalone: the two kernels and nothing of ScummVM.
+opl-practical-unit-test: $(OPL3_TOOLS)/practical-unit-test.cpp $(OPL3_TOOLS)/opl-practical.h $(OPL3_TOOLS)/opl-kernel.h $(OPL3_GEN) $(OPL3_GEN_PRACTICAL)
+	$(QUIET_CXX)$(CXX) $(CXXFLAGS) -I$(OPL3_TOOLS) -o $@ $<
+
 opl-rt-fixture: $(OPL3_TOOLS)/rt-fixture.cpp $(OPL3_TOOLS)/opl-practical.h $(OPL3_TOOLS)/opl-kernel.h $(OPL3_GEN) $(OPL3_GEN_PRACTICAL) $(TEST_LIBS)
 	$(QUIET_CXX)$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(DEFINES) $(INCLUDES) \
 		-I$(OPL3_TOOLS) -I$(OPL3_TOOLS)/build -o $@ $< $(TEST_LIBS) $(TEST_LDFLAGS) $(OPL3_TEST_LDFLAGS)

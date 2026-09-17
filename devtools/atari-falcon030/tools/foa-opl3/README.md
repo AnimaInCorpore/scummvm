@@ -14,6 +14,7 @@ and its own committed result file.
 | Exact host kernel, bit exact against Nuked-OPL3 | [kernel-results.json](kernel-results.json) | `kernel-gate.py` |
 | Exact DSP synthesis loop: 209% of budget | [bench-results.json](bench-results.json) | `bench-gate.py` |
 | Practical kernel against the exact one | [practical-results.json](practical-results.json) | `practical-gate.py` |
+| Practical kernel's register semantics, word for word | [practical-unit-results.json](practical-unit-results.json) | `opl-practical-unit-test` |
 | Practical DSP kernel at 49.17 kHz: word exact, 62-80% of budget | [rt-bench-results.json](rt-bench-results.json) | `rt-bench-gate.py` |
 | Stream mode through the SSI: word exact, no late period, also under the worst-case load | [rt-stream-results.json](rt-stream-results.json), [rt-stream-stress-results.json](rt-stream-stress-results.json) | `rt-stream-gate.py` |
 | Atlantis on the emulated Falcon with the DSP build | [game-results.json](game-results.json) | `game-gate.py` |
@@ -284,27 +285,122 @@ write becomes a few parameter words for the DSP's operator and channel
 records, emitted only when they change, so the DSP's per-block work is
 free of register logic and the host pays about a microsecond per write.
 
+What is not given up is the chip's register semantics, and a review on
+2026-09-17 found four places where the first version had let them go:
+
+- **Vibrato is the chip's integer arithmetic.** The chip displaces the
+  f-number by its top three bits, halved at the odd LFO positions and again
+  at the shallow depth, truncating each time, *before* the block and the
+  multiplier apply. Scaling one increment by fractional LFO coefficients
+  instead gave f-number 200 in block 5 an 8.65 cent vibrato where the chip
+  has none at all (f-numbers below 256 have no shallow half-step, below 128
+  no vibrato), and 873,349 keyed operator-blocks of the 300 s Atlantis
+  trace sit in that range. The decoder now computes the increment at each
+  of the five distinct displacements and sends them as offsets; the DSP
+  picks one by LFO position, which is cheaper than the multiply it
+  replaces. The depth bit is the decoder's business and no longer a DSP
+  scalar.
+- **A high increment aliases as the chip's does.** The chip's phase is 19
+  bits, so a high block under a high multiplier wraps: f-number `0x241`,
+  block 7, multiplier 15 plays 2,810 Hz. The increment used to saturate at
+  the 24-bit word's limit, which put every such pitch on one 48 Hz tone.
+  It is now reduced modulo the chip's phase range, taken as the negative
+  frequency it aliases to above half of it, and retimed; the DSP's phase
+  arithmetic is modular and takes a negative increment as it is.
+- **Decay ends on the chip's equality test.** The chip leaves decay when
+  the envelope's top five bits *equal* the sustain level. A level lowered
+  under a running decay is never met again and the decay runs on to
+  silence; the first version clamped the envelope back to the new level, a
+  5 dB jump upwards. Below the level the step may reach it, within one
+  sustain step of it the envelope holds where it is, past it the decay
+  continues.
+- **No attenuation is exact.** A 24-bit fraction cannot hold 1.0, and the
+  gain 0.999... truncated every positive product one short: at full level
+  the modulator indexed the carrier one table step low through its
+  positive half, which moved four samples in ten of a bright patch. The
+  gain table now holds half the gain against waveform samples of twice the
+  scale, so no attenuation is 0.5 exactly, at no cost on the DSP; the emit
+  rounds its master gain product for the same reason (`mpyr` for `mpy`),
+  so full volume passes the mix through unchanged. With its increments set
+  to the chip's, the kernel then reproduces 97% of the exact kernel's
+  samples of a held full-level FM patch within one LSB (59% before),
+  falling off only as the control's rounded increment drifts.
+- **A reset resets the machine.** `Decoder::reset` sends the whole reset
+  state whatever its shadow held (every host-owned word, and the envelope,
+  state and applied key-on count the DSP owns), 344 events for nine
+  channels, because a cleared shadow alone leaves the DSP playing and then
+  swallows the zeros a driver writes to silence it.
+
+`opl-practical-unit-test` holds these to the word against the exact
+kernel: all 2,097,152 combinations of f-number, block, multiplier, depth
+and LFO position give the exact kernel's increment, aliased and retimed;
+576 sustain level writes at three decay rates never lower the attenuation,
+and the 552 of them where both envelopes are on the same side of the new
+level at the write (the block-rate envelope runs up to a block behind)
+settle where the chip's does; a reset under nine held voices leaves the
+machine word for word a fresh one, silent from its first block, and a song
+started on it renders as on a fresh pair.
+
 [practical-gate.py](practical-gate.py) scores it against the exact kernel
 on synthetic scenarios and the captured 60-second Atlantis stream, at each
-signal's own rate, on what a listener would notice. From
+signal's own rate, on what a listener would notice. Every note of a
+single-voice scenario gets its own spectral check, from the note list the
+renderer writes; the first version took one spectrum per uninterrupted loud
+stretch, and since release tails kept the stretch alive, the feedback and
+waveform sweeps were each checked on their first setting only. The note's
+frequency separates its harmonics, compared in level one by one, from
+everything else: an alias folds around each signal's own Nyquist
+frequency, and a phase truncation spur sits where the increment's
+fraction puts it, so neither can coincide between two sample rates. They
+are held to a level instead (the strongest below -30 dB, or no more than
+6 dB above the chip's own strongest). From
 [practical-results.json](practical-results.json):
 
-| Scenario | Envelope corr. | Level error mean / max | Partials mean / max | Pitch | Notes |
-| --- | ---: | ---: | ---: | ---: | --- |
-| sustained tone | 1.0000 | 0.00 / 0.05 dB | 0.24 / 0.59 dB | 0.6 c | |
-| pitch sweep, blocks 2-6 | 0.9981 | 0.03 / 0.64 dB | 0.25 / 0.36 dB | 0.6 c | |
-| envelopes, both types | 0.9999 | 0.09 / 1.35 dB | 1.42 / 4.43 dB | 0.7 c | partial error is inside slow attacks |
-| feedback 0-7 | 0.9991 | 0.04 / 0.80 dB | 0.66 / 1.37 dB | 0.7 c | |
-| four waveforms, both connections | 0.9996 | 0.09 / 0.99 dB | 0.16 / 0.58 dB | 0.7 c | |
-| tremolo, both depths | 1.0000 | 0.01 / 0.16 dB | | | depth 1.72 vs 1.71 dB, 5.33 vs 5.22 dB |
-| vibrato, both depths | 1.0000 | 0.01 / 0.13 dB | | | depth 11.5 vs 13.7 c, 26.4 vs 27.3 c, period 165 ms both |
-| nine-channel polyphony | 0.9946 | 0.07 / 0.88 dB | | | |
-| Atlantis, 60 s | 0.9817 | 0.71 / 7.91 dB | | | mix of coincident partials; +0.4 dB in 8-15 kHz |
+| Scenario | Notes checked | Envelope corr. | Level error mean / max | Partials mean / max | Bands | Pitch | Notes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| sustained tone | 1 | 1.0000 | 0.00 / 0.05 dB | 0.23 / 0.65 dB | 0.13 dB | 0.6 c | |
+| pitch sweep, blocks 2-6 | 9 | 0.9998 | 0.01 / 0.30 dB | 0.61 / 1.37 dB | 0.73 dB | 3.2 c | the 3.2 c is 0.24 Hz at 129 Hz |
+| envelopes, both types | 10 | 0.9999 | 0.09 / 1.35 dB | 1.42 / 4.43 dB | 1.35 dB | 0.7 c | partial error is inside slow attacks |
+| four waveforms, both connections | 8 | 0.9996 | 0.09 / 0.99 dB | 1.53 / 3.79 dB | 0.76 dB | 0.7 c | |
+| feedback 0-7 at four modulator levels, held | 32 | 1.0000 | 0.02 / 0.47 dB | 1.14 / 5.81 dB | 1.67 dB | 3.2 c | 7 notes graded on bands alone, see below |
+| every multiplier at block 7, held | 16 | 1.0000 | 0.00 / 0.14 dB | 0.55 / 1.10 dB | 0.02 dB | 0.2 c | to 24.5 kHz; eight are past half the chip's phase range and play its alias |
+| tremolo, both depths | 2 | 1.0000 | 0.01 / 0.16 dB | | | | depth 1.72 vs 1.71 dB, 5.33 vs 5.22 dB |
+| vibrato, both depths, and none | 3 | 1.0000 | 0.00 / 0.12 dB | | | | depth 11.5 vs 11.8 c, 26.4 vs 26.5 c (13.7 and 27.3 before), period 165 ms both; f-number 200 stays unmodulated in both |
+| nine-channel polyphony | | 0.9946 | 0.07 / 0.88 dB | | | | |
+| Atlantis, 60 s | | 0.9821 | 0.70 / 7.89 dB | | | | mix of coincident partials; +0.6 dB in 8-15 kHz |
 
 The onset skew is at most 2.7 ms on the synthetic scenarios and 2.8 ms on
 the trace (10.4 ms before the attack factor was refitted). The polyphonic
 peak errors come from partials of different channels adding with phases
-the block quantization shifts, not from levels.
+the block quantization shifts, not from levels. The envelope figures let
+each 20 ms window match anywhere within the range of its neighbours, so
+an onset straddling a window edge is no error; they grade the loudness
+contour and say nothing about spectra. The same windows one to one differ
+by 0.04 to 0.32 dB on the synthetic scenarios and 1.09 dB on the trace
+(`envelope_db_mean_abs_unaligned`).
+
+**Strong feedback is not periodic, on the chip either.** Isolated, a
+full-level modulator at feedback 5, 6 and 7 differs from the exact kernel
+by 6, 13 and 21 dB per partial on average, with the RMS level equal, and
+the review asked whether that is arithmetic. It is not: the exact kernel
+differs from *itself* by 2, 10 and 19 dB between the window and two later
+windows of the same held note. The oscillator has left the periodic
+regime, its partials wander, and a reference that fails the partial test
+against itself cannot serve for it. The gate therefore measures the exact
+kernel against itself wherever a scenario holds its notes at a constant
+level, and grades such a window (7 of the 32) on what the chip does
+reproduce: third-octave bands, within 1.67 dB, and the inharmonic peaks.
+Two arithmetic candidates were tried on the way and neither is the
+cause: summing the two history products before the shift, as the chip
+does, instead of truncating each (0.30 to 0.18 dB in the periodic regime,
+nothing past it), and the exact unity gain above, which moves samples and
+none of these figures. What remains in the periodic regime is the rate:
+the same patch at another sample rate has other aliases and other
+truncation spurs.
+
+The gate was also run on the kernel as committed before the review's
+fixes: it fails the vibrato scenario (11.5 c of vibrato on the note the
+chip plays with 1.7 c of measurement jitter) and all of the high-pitch one.
 
 ## The practical DSP kernel and its cost
 
@@ -327,12 +423,21 @@ DSP profile by code range. From [rt-bench-results.json](rt-bench-results.json):
 | Frames compared | 49,152 | 196,672 |
 | Mismatches | 0 | 0 |
 | Stages (per-frame) | 183.8 | 130.6 |
-| Per-operator boundary pass | 48.5 | 42.3 |
-| Loaders, modes, driver | 11.9 | 11.0 |
-| Block and channel boundary | 11.1 | 10.4 |
-| Emit, clear, events | 6.9 | 6.9 |
-| **Instruction cycles per frame** | **262.1** | **201.1** |
-| Share of the 326.3-cycle budget at 49.17 kHz | 80% | 62% |
+| Per-operator boundary pass | 48.8 | 42.8 |
+| Loaders, modes, driver | 11.9 | 10.9 |
+| Block and channel boundary | 11.0 | 10.4 |
+| Emit, clear, events | 7.1 | 7.0 |
+| **Instruction cycles per frame** | **262.7** | **201.6** |
+| Share of the 326.3-cycle budget at 49.17 kHz | 81% | 62% |
+
+A third case, `paths`, is there for exactness alone: the stress case plus
+what music rarely does, so that the DSP's code for it is compared word for
+word too. A sustain level lowered under a running decay (127 blocks past
+the level, and the block that enters sustain above it), increments past
+half the chip's phase range with a deep vibrato straddling it (109 blocks
+with a negative increment), and a chip reset under held notes followed by
+a song whose zero writes a stale shadow would swallow: 49,152 frames, no
+mismatch. The gate fails if the case stops reaching any of these paths.
 
 Everything but the stages is per-block work, and that is why the block is
 64 frames. At 48 frames (the 0.98 ms of the first version's 32 frames at
@@ -342,7 +447,7 @@ a millisecond or so per period while the host's 1 kHz tick notices READY
 and sends the payload, so the stress case overran in the stream gate, and
 so did Atlantis's densest passage in the game. The boundary pass still
 walks the record with indexed accesses and remains the obvious next
-optimization. The whole program is 1,246 words; the stages and the
+optimization. The whole program is 1,249 words; the stages and the
 operator pass live in the 512 words of internal program RAM, everything
 else in external.
 
@@ -394,24 +499,35 @@ The ScummVM build wires it in without touching the AdLib driver:
   (`opl_driver=atari_dsp`, OPL2 only): register writes go through the
   decoder into the period being produced, and the driver's 250 Hz callbacks
   run inside period production on the audio clock, so each callback's
-  writes land in the block that corresponds to its time.
+  writes land in the block that corresponds to its time. The kernel
+  outlives every OPL, so creating one, resetting it and destroying it each
+  send the decoder's full reset; writes made between periods wait in a
+  queue that outlives the instance, because the last of them (the reset a
+  closing driver leaves behind) has no instance left to deliver it. When
+  the DSP stream is off or the DSP was not available, the driver entry
+  falls back to the first other OPL2 emulator instead of returning nothing
+  to a caller that does not expect that.
 - `AtariMixerManager` in DSP mode mixes speech and effects at 12,292 Hz
   mono on the main loop, eight period chunks ahead into a ring the
   interrupt takes from (the mixer's read path streams speech from disk,
-  which only the main loop can do), and forwards the music volume as the
-  kernel's master gain. A loop stall longer than the ring silences speech
+  which only the main loop can do), and forwards the plain sound type's
+  volume and mute as the kernel's master gain: what the mixer gives a
+  software OPL's stream. The engine has already put the music slider into
+  the operator levels it writes (iMUSE's `setMusicVolume`), so the music
+  type's volume on top, as first committed, applied it twice, 6 dB too
+  quiet at half volume. A loop stall longer than the ring silences speech
   and effects until the loop runs again; the music does not notice.
   `atari_dsp_audio=false` restores DMA playback.
 
 [game-gate.py](game-gate.py) runs Atlantis on the emulated Falcon with that
 build, records Hatari's DAC output and reads the transport's counters from
 the log. From [game-results.json](game-results.json): the kernel boots, the
-game starts, 6,166 periods stream through 90 s of its opening with no
+game starts, 6,172 periods stream through 90 s of its opening with no
 protocol error and no late period, and no tick found the queue empty once
-the stream was running. The loop stalled for 2,708 periods of PCM (42 s, nearly all
+the stream was running. The loop stalled for 2,729 periods of PCM (43 s, nearly all
 of it engine start-up before the first scene, the rest scene changes) while
 the music went on, and 98 extension periods (1.5 s of sequencer slip)
-covered resource loads of up to 143 ms and one iMUSE callback of 244 ms.
+covered resource loads of up to 128 ms and one iMUSE callback of 244 ms.
 The recording carries the opening music at -12 dBFS peak.
 
 The build's profile admits three more DOS games on the same AdLib driver,
@@ -427,9 +543,9 @@ game got to.
 
 | Game | Periods | Extension periods | Music peak | Results |
 | --- | ---: | ---: | ---: | --- |
-| Day of the Tentacle, CD | 6,137 in 90 s | 80 | -24 dBFS | [game-results-tentacle.json](game-results-tentacle.json) |
-| The Secret of Monkey Island, Ultimate Talkie | 6,179 in 90 s | 97 | -25 dBFS | [game-results-monkey.json](game-results-monkey.json) |
-| Monkey Island 2, Ultimate Talkie | 7,716 in 120 s | 60 | -18 dBFS | [game-results-monkey2.json](game-results-monkey2.json) |
+| Day of the Tentacle, CD | 6,164 in 90 s | 73 | -24 dBFS | [game-results-tentacle.json](game-results-tentacle.json) |
+| The Secret of Monkey Island, Ultimate Talkie | 6,204 in 90 s | 100 | -24 dBFS | [game-results-monkey.json](game-results-monkey.json) |
+| Monkey Island 2, Ultimate Talkie | 7,684 in 120 s | 52 | -18 dBFS | [game-results-monkey2.json](game-results-monkey2.json) |
 
 So a v6 game and the two Monkey Islands fit in the 14 MB beside the DSP
 transport at least through their openings.
@@ -477,6 +593,18 @@ presence and level, not auditioned.
   image is built for nine.
 - The exact kernel's sample equality holds at the chip's native 49,716 Hz;
   the practical kernel is not sample exact by design.
+- The game gate runs at full music volume, where both volume paths give
+  the same level; that the slider is now applied once was read from the
+  code (`audio/chip.cpp` plays the software OPL on the plain sound type),
+  not measured in a game. The reset path is covered by the unit test and
+  the `paths` bench, not by a game that restarts its music driver.
+- Aliases and phase truncation spurs are where the codec rate puts them,
+  not where the chip's 49,716 Hz does (for f-number `0x1e5` in block 3 the
+  chip's spurs fall within 1 Hz of its harmonics, the kernel's 27 Hz above
+  them, at about the same level). Only synthesis at the chip's rate and a
+  resampler would change that. Feedback 5 to 7 under a loud modulator is
+  compared by bands, because neither kernel reproduces its own partials
+  there.
 
 ## Reproducing
 
@@ -520,7 +648,8 @@ The practical kernel's gates, in the same tree:
 
 ```sh
 make -C devtools/atari-falcon030/tools/foa-opl3/build/headless \
-  -f Makefile -f ../../kernel.mk opl-practical-test opl-rt-fixture
+  -f Makefile -f ../../kernel.mk opl-practical-unit-test opl-practical-test opl-rt-fixture
+devtools/atari-falcon030/tools/foa-opl3/build/headless/opl-practical-unit-test
 python3 devtools/atari-falcon030/tools/foa-opl3/practical-gate.py \
   --trace <opl-writes.ev> --seconds 60 --wav --output build-falcon030/opl3-practical
 sh devtools/atari-falcon030/tools/foa-opl3/build-dsp.sh

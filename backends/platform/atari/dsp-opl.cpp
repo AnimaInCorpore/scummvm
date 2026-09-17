@@ -31,6 +31,8 @@
 #include "common/textconsole.h"
 
 AtariDspOPL *AtariDspOPL::s_instance = nullptr;
+uint32 AtariDspOPL::s_pending[AtariDspOPL::kPendingMax * 2];
+uint32 AtariDspOPL::s_pendingCount = 0;
 
 // The mixer manager sets this when the DSP owns the codec.
 AtariDspAudio *g_atariDspAudio = nullptr;
@@ -45,17 +47,30 @@ AtariDspAudio *g_atariDspAudio = nullptr;
 
 AtariDspOPL::AtariDspOPL(AtariDspAudio *audio)
 	: _audio(audio), _period(nullptr), _decoder(new OplPractical::Decoder), _address(0),
-	  _running(false), _framesPerTick16(0), _nextTick16(0), _block(0), _pendingCount(0) {
+	  _running(false), _framesPerTick16(0), _nextTick16(0), _block(0) {
 	_sink.owner = this;
+	// The kernel outlives every OPL and may hold an earlier one's patches:
+	// the decoder's reset sends the whole reset state rather than trust it.
+	AtariCriticalSection critical;
+	s_pendingCount = 0;
 	_decoder->reset(&_sink, 9);
 	s_instance = this;
 }
 
 AtariDspOPL::~AtariDspOPL() {
-	// Unregistered first: the transport's interrupt looks the instance up
-	// before every period it produces.
-	s_instance = nullptr;
 	stop();
+	{
+		// Nothing writes to the kernel after this OPL, so it is left silent;
+		// the reset supersedes the driver's closing key-offs still waiting.
+		// The pending events outlive the instance and go out with the next
+		// period (flushPending).
+		AtariCriticalSection critical;
+		s_pendingCount = 0;
+		_decoder->reset(&_sink, 9);
+		// Unregistered before the critical section ends: the transport's
+		// interrupt looks the instance up before every period it produces.
+		s_instance = nullptr;
+	}
 	delete _decoder;
 }
 
@@ -68,9 +83,13 @@ bool AtariDspOPL::init() {
 // critical section keeps the interrupt out while the main loop is inside.
 void AtariDspOPL::reset() {
 	AtariCriticalSection critical;
-	// The driver rewrites every register after a reset; a fresh decoder
-	// shadow re-emits them all.
-	_decoder->reset(&_sink, 9);
+	// The kernel is reset with the decoder: clearing the shadow alone would
+	// leave the DSP playing and then swallow the zeros a driver writes to
+	// silence it, as equal to the fresh shadow. Writes still waiting for a
+	// period belong to what the reset ends.
+	if (!_period)
+		s_pendingCount = 0;
+	_decoder->reset(&_sink, 9, _block);
 }
 
 void AtariDspOPL::write(int a, int v) {
@@ -97,11 +116,17 @@ void AtariDspOPL::emit(uint32 block, uint16 address, int32 value) {
 		_audio->addEvent(_period, block, address, (uint32)value);
 		return;
 	}
-	if (_pendingCount < kPendingMax) {
-		_pending[2 * _pendingCount] = address;
-		_pending[2 * _pendingCount + 1] = (uint32)value;
-		++_pendingCount;
+	if (s_pendingCount < kPendingMax) {
+		s_pending[2 * s_pendingCount] = address;
+		s_pending[2 * s_pendingCount + 1] = (uint32)value;
+		++s_pendingCount;
 	}
+}
+
+void AtariDspOPL::flushPending(AtariDspAudio *audio, AtariDspAudio::Period *period) {
+	for (uint32 i = 0; i < s_pendingCount; ++i)
+		audio->addEvent(period, 0, (uint16)s_pending[2 * i], s_pending[2 * i + 1]);
+	s_pendingCount = 0;
 }
 
 void AtariDspOPL::setCallbackFrequency(int timerFrequency) {
@@ -122,9 +147,6 @@ void AtariDspOPL::stopCallbacks() {
 void AtariDspOPL::producePeriod(AtariDspAudio::Period *period) {
 	_period = period;
 	_block = 0;
-	for (uint32 i = 0; i < _pendingCount; ++i)
-		_audio->addEvent(period, 0, (uint16)_pending[2 * i], _pending[2 * i + 1]);
-	_pendingCount = 0;
 
 	const uint32 periodFrames16 = (uint32)AtariDspAudio::kPeriodFrames << 16;
 	if (_running && _framesPerTick16) {

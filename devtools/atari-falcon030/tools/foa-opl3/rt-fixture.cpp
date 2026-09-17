@@ -8,7 +8,7 @@
 //   block count, event count, and (block << 16 | address), value pairs.
 // EXPECT.BIN holds every chunk's output words in order, 24 bits each.
 //
-// usage: opl-rt-fixture <trace|stress> <opldata.bin> <expect.bin>
+// usage: opl-rt-fixture <trace|stress|paths> <opldata.bin> <expect.bin>
 //                       [--trace opl-writes.ev] [--seconds N] [--chunk-blocks N]
 //                       [--play playdata.bin]
 //
@@ -68,6 +68,7 @@ struct RegisterWrite {
 };
 
 const uint8 kModOffset[9] = { 0x00, 0x01, 0x02, 0x08, 0x09, 0x0a, 0x10, 0x11, 0x12 };
+const uint16 kResetChip = 0xffff;   // not a register: the driver resetting the chip
 
 // Every channel in feedback FM with tremolo and vibrato, held: the most
 // expensive render path on all nine channels for the whole run.
@@ -105,6 +106,59 @@ std::vector<RegisterWrite> stressScript(double seconds) {
 	return writes;
 }
 
+// The stress case, then the paths a musical patch rarely takes, so that the
+// DSP's are compared word for word too. Not a cost measurement.
+std::vector<RegisterWrite> pathsScript(double seconds) {
+	std::vector<RegisterWrite> writes = stressScript(seconds);
+	static const uint16 chord[9] = { 0x181, 0x1e5, 0x241, 0x2aa, 0x181, 0x1e5, 0x241, 0x2aa, 0x33d };
+	// Channel 8's carrier decays past a sustain level that is then lowered
+	// under it (the decay must run on) and channel 7's is lowered onto its
+	// envelope (it must hold there); channel 6 plays above half the chip's
+	// phase range, where the increment is negative, with vibrato across it.
+	double at = seconds * 0.6;
+	for (uint8 c = 7; c < 9; ++c) {
+		const uint8 car = (uint8)(kModOffset[c] + 3);
+		writes.push_back(RegisterWrite{at, (uint16)(0xb0 + c), 0x0a});
+		writes.push_back(RegisterWrite{at, (uint16)(0x60 + car), (uint8)(c == 8 ? 0xf8 : 0xf3)});
+		writes.push_back(RegisterWrite{at, (uint16)(0x80 + car), 0xf4});
+		writes.push_back(RegisterWrite{at + 0.005, (uint16)(0xb0 + c), 0x2a});
+		writes.push_back(RegisterWrite{at + 0.035, (uint16)(0x80 + car), (uint8)(c == 8 ? 0x14 : 0x04)});
+	}
+	for (int which = 0; which < 2; ++which)
+		writes.push_back(RegisterWrite{at, (uint16)(0x20 + kModOffset[6] + 3 * which), 0x6f});
+	writes.push_back(RegisterWrite{at, 0xa6, 0xf0});
+	writes.push_back(RegisterWrite{at, 0xb6, 0x3d});        // f-number 0x1f0, block 7, multiplier 15
+	writes.push_back(RegisterWrite{at + 0.1, 0xa6, 0x11});
+	writes.push_back(RegisterWrite{at + 0.1, 0xb6, 0x3d});   // 0x111: the deep vibrato straddles half the range
+	// A reset under held notes, and a song started on the reset chip.
+	at = seconds * 0.8;
+	writes.push_back(RegisterWrite{at, kResetChip, 0});
+	writes.push_back(RegisterWrite{at, 0x01, 0x20});
+	for (uint8 c = 0; c < 9; c += 2) {
+		const uint8 mod = kModOffset[c];
+		const uint8 car = (uint8)(mod + 3);
+		writes.push_back(RegisterWrite{at, (uint16)(0x20 + mod), 0x01});
+		writes.push_back(RegisterWrite{at, (uint16)(0x20 + car), 0x01});
+		writes.push_back(RegisterWrite{at, (uint16)(0x40 + mod), 0x00});   // zeros a stale shadow would swallow
+		writes.push_back(RegisterWrite{at, (uint16)(0x40 + car), 0x00});
+		writes.push_back(RegisterWrite{at, (uint16)(0x60 + mod), 0xf2});
+		writes.push_back(RegisterWrite{at, (uint16)(0x60 + car), 0xf2});
+		writes.push_back(RegisterWrite{at, (uint16)(0x80 + mod), 0x24});
+		writes.push_back(RegisterWrite{at, (uint16)(0x80 + car), 0x24});
+		writes.push_back(RegisterWrite{at, (uint16)(0xc0 + c), (uint8)(c << 1)});
+		writes.push_back(RegisterWrite{at + 0.01 * c, (uint16)(0xa0 + c), (uint8)(chord[c] & 0xff)});
+		writes.push_back(RegisterWrite{at + 0.01 * c, (uint16)(0xb0 + c), (uint8)(0x30 | (chord[c] >> 8))});
+	}
+	// Writes are decoded in time order.
+	for (size_t i = 1; i < writes.size(); ++i)
+		for (size_t j = i; j > 0 && writes[j].seconds < writes[j - 1].seconds; --j) {
+			const RegisterWrite moved = writes[j];
+			writes[j] = writes[j - 1];
+			writes[j - 1] = moved;
+		}
+	return writes;
+}
+
 std::vector<RegisterWrite> traceScript(const char *path, double seconds) {
 	std::vector<RegisterWrite> writes;
 	FILE *file = std::fopen(path, "r");
@@ -132,7 +186,7 @@ std::vector<RegisterWrite> traceScript(const char *path, double seconds) {
 
 int main(int argc, char **argv) {
 	if (argc < 4) {
-		std::fprintf(stderr, "usage: opl-rt-fixture <trace|stress> <opldata.bin> <expect.bin>"
+		std::fprintf(stderr, "usage: opl-rt-fixture <trace|stress|paths> <opldata.bin> <expect.bin>"
 		                     " [--trace file] [--seconds N] [--chunk-blocks N]\n");
 		return 2;
 	}
@@ -159,6 +213,8 @@ int main(int argc, char **argv) {
 	std::vector<RegisterWrite> writes;
 	if (scenario == "stress")
 		writes = stressScript(seconds);
+	else if (scenario == "paths")
+		writes = pathsScript(seconds);
 	else if (scenario == "trace" && trace)
 		writes = traceScript(trace, seconds);
 	else
@@ -173,7 +229,10 @@ int main(int argc, char **argv) {
 	decoder.reset(&sink, 9);
 	for (size_t i = 0; i < writes.size(); ++i) {
 		const uint32 block = (uint32)((uint64)(writes[i].seconds * OPL_PRACTICAL_CODEC_RATE) / P::kBlockFrames);
-		decoder.write(block, writes[i].reg, writes[i].value);
+		if (writes[i].reg == kResetChip)
+			decoder.reset(&sink, 9, block);
+		else
+			decoder.write(block, writes[i].reg, writes[i].value);
 	}
 
 	// ---- the DSP image
@@ -185,7 +244,7 @@ int main(int argc, char **argv) {
 	out.word(9);   // upload blocks
 
 	out.word(0); out.word(P::SC_TREMOLO_SHIFT); out.word(4);
-	out.word(4); out.word(1); out.word(9); out.word(0x7fffff);
+	out.word(4); out.word(0); out.word(9); out.word(0x7fffff);
 
 	out.word(0); out.word(P::kGainTable); out.word(512);
 	for (int i = 0; i < 512; ++i)
@@ -210,11 +269,9 @@ int main(int argc, char **argv) {
 	out.word(0); out.word(P::kDecayTable); out.word(64);
 	for (int i = 0; i < 64; ++i)
 		out.word(kOplDecayBlock[i]);
-	out.word(0); out.word(P::kVibratoTable); out.word(16);
+	out.word(0); out.word(P::kVibratoTable); out.word(8);
 	for (int i = 0; i < 8; ++i)
-		out.word((uint32)kOplVibratoDeep[i] & 0xffffff);
-	for (int i = 0; i < 8; ++i)
-		out.word((uint32)kOplVibratoShallow[i] & 0xffffff);
+		out.word((uint32)P::kVibratoOffset[i]);
 
 	out.word(1); out.word(P::kWaveBase); out.word(P::kWaveforms * 1024);
 	for (int wf = 0; wf < P::kWaveforms; ++wf)
@@ -230,6 +287,8 @@ int main(int argc, char **argv) {
 	out.word(chunks);
 	size_t next = 0;
 	uint32 peakEvents = 0;
+	// Blocks in which some audible operator took a rarely taken path.
+	uint32 decayPastBlocks = 0, decayHeldBlocks = 0, negativeIncrementBlocks = 0, vibratoBlocks = 0;
 	int32 frames[P::kBlockFrames];
 	for (uint32 chunk = 0; chunk < chunks; ++chunk) {
 		const uint32 first = chunk * chunkBlocks;
@@ -258,7 +317,26 @@ int main(int argc, char **argv) {
 				P::poke(&chip, sink.events[at].address, sink.events[at].value);
 				++at;
 			}
+			bool past = false, held = false, negative = false, vibrato = false;
+			for (int i = 0; i < 18; ++i) {
+				const int32 *w = chip.op[i].w;
+				if (w[P::OP_STATE] == P::kDecay && w[P::OP_ENV] >= w[P::OP_SL] + (16 << 12))
+					past = true;
+				if (w[P::OP_STATE] == P::kDecay && w[P::OP_ENV] > w[P::OP_SL] && w[P::OP_ENV] < w[P::OP_SL] + (16 << 12))
+					held = true;
+			}
 			P::renderBlock(&chip, nullptr, frames);
+			for (int i = 0; i < 18; ++i) {
+				const int32 *w = chip.op[i].w;
+				if (w[P::OP_GAIN] && w[P::OP_INC] < 0)
+					negative = true;
+				if (w[P::OP_GAIN] && w[P::OP_INC] != w[P::OP_INCBASE])
+					vibrato = true;
+			}
+			decayPastBlocks += past;
+			decayHeldBlocks += held;
+			negativeIncrementBlocks += negative;
+			vibratoBlocks += vibrato;
 			for (int i = 0; i < P::kBlockFrames; ++i)
 				expect.word((uint32)frames[i] & 0xffffff);
 		}
@@ -308,8 +386,11 @@ int main(int argc, char **argv) {
 
 	std::printf("{\"scenario\": \"%s\", \"seconds\": %.3f, \"blocks\": %u, \"frames\": %u, \"chunks\": %u,"
 	            " \"chunk_blocks\": %u, \"register_writes\": %zu, \"parameter_events\": %zu,"
-	            " \"peak_events_per_chunk\": %u, \"periods\": %u, \"period_checksum\": %u}\n",
+	            " \"peak_events_per_chunk\": %u, \"periods\": %u, \"period_checksum\": %u,"
+	            " \"blocks_decaying_past_sustain_level\": %u, \"blocks_entering_sustain_above_level\": %u,"
+	            " \"blocks_with_negative_increment\": %u, \"blocks_with_vibrato\": %u}\n",
 	            scenario.c_str(), seconds, totalBlocks, totalBlocks * P::kBlockFrames, chunks, chunkBlocks,
-	            writes.size(), sink.events.size(), peakEvents, play ? periods : 0, checksum);
+	            writes.size(), sink.events.size(), peakEvents, play ? periods : 0, checksum,
+	            decayPastBlocks, decayHeldBlocks, negativeIncrementBlocks, vibratoBlocks);
 	return 0;
 }

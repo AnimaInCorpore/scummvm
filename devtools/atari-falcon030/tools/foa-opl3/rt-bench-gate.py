@@ -2,9 +2,12 @@
 """Run the practical OPL kernel on the emulated Falcon DSP, check its frames
 against the host reference word for word, and measure its cost.
 
-Two scenarios: the captured Atlantis register stream (the real workload,
-with its bursts and its five-of-nine average occupancy) and a stress case
-holding all nine channels in feedback FM with tremolo and vibrato.
+Three scenarios: the captured Atlantis register stream (the real workload,
+with its bursts and its five-of-nine average occupancy), a stress case
+holding all nine channels in feedback FM with tremolo and vibrato, and a
+paths case that adds what music rarely does (a sustain level lowered under a
+running decay, increments past half the chip's phase range, a chip reset
+under held notes) for exactness alone: its cost means nothing.
 
 Cost is attributed by code range from Hatari's DSP profile, so the host
 port waits between chunks (the bench reads every frame back through XBIOS)
@@ -36,6 +39,10 @@ BUDGET = OSCILLATOR / CLOCKS_PER_CYCLE / CODEC_RATE
 LABEL_RE = re.compile(r"^\s*\d+\s+([A-Za-z_][A-Za-z0-9_]*):\s*(;.*)?$")
 ADDRESS_RE = re.compile(r"^\s*\d+\s+P:([0-9A-F]+)\b")
 PROFILE_RE = re.compile(r"^p:([0-9a-f]+).*?\s[0-9]+[.,][0-9]+% \((\d+), (\d+), (\d+)\)$")
+
+# Rarely taken paths the paths case must reach, as block counts from the fixture.
+PATHS = ("blocks_decaying_past_sustain_level", "blocks_entering_sustain_above_level",
+         "blocks_with_negative_increment", "blocks_with_vibrato")
 
 # Code ranges that are the kernel's own per-block work, by listing symbol.
 RANGES = {
@@ -133,6 +140,7 @@ def run_case(name, fixture_args, output, vbls):
         "register_writes": shape["register_writes"],
         "parameter_events": shape["parameter_events"],
         "peak_events_per_chunk": shape["peak_events_per_chunk"],
+        "paths_exercised": {key: shape[key] for key in PATHS},
         "frame_words_compared": len(got),
         "mismatches_against_host_kernel": len(mismatches),
         "first_mismatch_frame": mismatches[0] if mismatches else None,
@@ -158,6 +166,7 @@ def main():
 
     cases = [
         run_case("stress", ["stress", "--seconds", str(args.stress_seconds)], args.output, args.vbls),
+        run_case("paths", ["paths", "--seconds", str(args.stress_seconds)], args.output, args.vbls),
         run_case("atlantis", ["trace", "--trace", str(args.trace.resolve()), "--seconds", str(args.seconds)],
                  args.output, args.vbls),
     ]
@@ -172,7 +181,7 @@ def main():
         if line.startswith("DSP_STAGE2_PROGRAM_WORDS"):
             program_words = int(line.split()[-1])
     result = {
-        "date": "2026-09-16",
+        "date": "2026-09-17",
         "gate": "practical OPL kernel on the emulated Falcon DSP56001: exactness and cycle cost",
         "scummvm_commit": repository,
         "scummvm_worktree_dirty": dirty,
@@ -190,7 +199,9 @@ def main():
                     " transport are not yet included",
         },
         "implemented": ["block-rate envelope with the chip's rates retimed to the codec rate",
-                        "tremolo and vibrato at block rate", "feedback, FM and additive connections",
+                        "tremolo and vibrato at block rate, the vibrato from the decoder's exact"
+                        " per-position increments", "negative (aliased) phase increments",
+                        "a full reset through parameter events", "feedback, FM and additive connections",
                         "all four OPL2 waveforms", "channel skipping when silent",
                         "parameter events applied at block boundaries"],
         "not_implemented": ["SSI output and the period-paced host transport", "PCM mixing",
@@ -204,6 +215,9 @@ def main():
     print(json.dumps(result, indent=2))
     if any(not case["bit_exact"] for case in cases):
         raise SystemExit("the DSP output differs from the host reference")
+    missed = [key for key in PATHS if not cases[1]["paths_exercised"][key]]
+    if missed:
+        raise SystemExit(f"the paths case no longer reaches: {', '.join(missed)}")
 
 
 if __name__ == "__main__":

@@ -1,18 +1,18 @@
 {
-  "date": "2026-09-16",
+  "date": "2026-09-17",
   "gate": "practical OPL kernel on the emulated Falcon DSP56001: exactness and cycle cost",
-  "scummvm_commit": "f6d3f40e2e84774d3cd05a230a44fc84f8d7d746",
+  "scummvm_commit": "cf44d85376a2cd3b3903c893766630579c8b7cae",
   "scummvm_worktree_dirty": true,
   "source_sha256": {
-    "dsp/oplrt.asm": "14a28b295f1aa79bfefec5235c3415b1a4a970080d90d219e97f7ed9b2c5ddc1",
+    "dsp/oplrt.asm": "fb337d7d249019e8575b560dff2ca419030bcd6f20782b50f9da98eaf1255a09",
     "m68k/oplrt.s": "1a1c2aa92065a0d8fb6a7fd6db97d57efde0bafd0b709f7cb9b4390bbc7c11d9",
-    "rt-fixture.cpp": "82b0cc5752c8578141c835e5f09753f29ba0030bec42c3ccd464059c861320a1",
-    "opl-practical.h": "e0a74271609780c2eddb0773fec4d2610a037fc53d9f1c26435584756c80f5b0",
-    "rt-bench-gate.py": "b9396f84000c092ea5cf4ea80eb03c7acd7d908caab56c7e992f104fe6cb2658",
-    "generate-tables.py": "dd4363680be114aae06a0cdb00704d20181405ee29a8c5f6177f8c222eec67cc"
+    "rt-fixture.cpp": "f6f27bc088116b282c4da191d88e4a959f0ad8a62d3e8b566ad27a56c6f86232",
+    "opl-practical.h": "33fef41a4c0a583477787ad611f17447ca488e519d1be0daae9fcc9145d2b3e6",
+    "rt-bench-gate.py": "bcb083544f84f8cb08352a79783f8dbc264f073f7ab653429b1eeedc8cb8378e",
+    "generate-tables.py": "5061aa05b59a3b0b10532317d3a5a54546861858be11d2695769572b2d26eef7"
   },
   "trace_sha256": "883bae533b8338fb9ca9714216412705853f52248b75ff970f8f4ddc666a893f",
-  "dsp_program_words": 1246,
+  "dsp_program_words": 1249,
   "reference": "opl-practical.h, scored against the exact kernel by practical-gate.py",
   "cases": [
     {
@@ -22,27 +22,68 @@
       "blocks": 768,
       "chunks": 12,
       "register_writes": 146,
-      "parameter_events": 336,
-      "peak_events_per_chunk": 273,
+      "parameter_events": 732,
+      "peak_events_per_chunk": 669,
+      "paths_exercised": {
+        "blocks_decaying_past_sustain_level": 0,
+        "blocks_entering_sustain_above_level": 0,
+        "blocks_with_negative_increment": 0,
+        "blocks_with_vibrato": 570
+      },
       "frame_words_compared": 49152,
       "mismatches_against_host_kernel": 0,
       "first_mismatch_frame": null,
       "bit_exact": true,
-      "instruction_cycles_per_frame": 262.14,
+      "instruction_cycles_per_frame": 262.66,
       "instruction_cycles_per_frame_by_range": {
         "stages": 183.8,
-        "op_boundary": 48.49,
+        "op_boundary": 48.82,
         "stream_emit": 0.0,
         "render_driver": 4.98,
         "loaders_and_modes": 6.89,
         "clear_mix": 1.09,
         "emit": 5.14,
-        "block_and_channel_boundary": 11.09,
+        "block_and_channel_boundary": 11.04,
         "render_block": 0.36,
-        "apply_events": 0.3
+        "apply_events": 0.54
       },
       "budget_cycles_per_frame": 326.27,
-      "budget_use_percent": 80.3
+      "budget_use_percent": 80.5
+    },
+    {
+      "scenario": "paths",
+      "seconds": 1.0,
+      "frames": 49152,
+      "blocks": 768,
+      "chunks": 12,
+      "register_writes": 219,
+      "parameter_events": 1333,
+      "peak_events_per_chunk": 669,
+      "paths_exercised": {
+        "blocks_decaying_past_sustain_level": 127,
+        "blocks_entering_sustain_above_level": 1,
+        "blocks_with_negative_increment": 109,
+        "blocks_with_vibrato": 457
+      },
+      "frame_words_compared": 49152,
+      "mismatches_against_host_kernel": 0,
+      "first_mismatch_frame": null,
+      "bit_exact": true,
+      "instruction_cycles_per_frame": 236.03,
+      "instruction_cycles_per_frame_by_range": {
+        "stages": 161.39,
+        "op_boundary": 45.16,
+        "stream_emit": 0.0,
+        "render_driver": 4.98,
+        "loaders_and_modes": 6.15,
+        "clear_mix": 1.09,
+        "emit": 5.14,
+        "block_and_channel_boundary": 10.79,
+        "render_block": 0.36,
+        "apply_events": 0.97
+      },
+      "budget_cycles_per_frame": 326.27,
+      "budget_use_percent": 72.3
     },
     {
       "scenario": "atlantis",
@@ -51,27 +92,33 @@
       "blocks": 3073,
       "chunks": 49,
       "register_writes": 257,
-      "parameter_events": 562,
-      "peak_events_per_chunk": 198,
+      "parameter_events": 840,
+      "peak_events_per_chunk": 344,
+      "paths_exercised": {
+        "blocks_decaying_past_sustain_level": 0,
+        "blocks_entering_sustain_above_level": 0,
+        "blocks_with_negative_increment": 0,
+        "blocks_with_vibrato": 0
+      },
       "frame_words_compared": 196672,
       "mismatches_against_host_kernel": 0,
       "first_mismatch_frame": null,
       "bit_exact": true,
-      "instruction_cycles_per_frame": 201.13,
+      "instruction_cycles_per_frame": 201.6,
       "instruction_cycles_per_frame_by_range": {
         "stages": 130.6,
-        "op_boundary": 42.29,
+        "op_boundary": 42.77,
         "stream_emit": 0.0,
         "render_driver": 4.98,
         "loaders_and_modes": 5.95,
         "clear_mix": 1.09,
         "emit": 5.14,
-        "block_and_channel_boundary": 10.4,
+        "block_and_channel_boundary": 10.35,
         "render_block": 0.36,
-        "apply_events": 0.32
+        "apply_events": 0.36
       },
       "budget_cycles_per_frame": 326.27,
-      "budget_use_percent": 61.6
+      "budget_use_percent": 61.8
     }
   ],
   "budget_basis": {
@@ -82,7 +129,9 @@
   },
   "implemented": [
     "block-rate envelope with the chip's rates retimed to the codec rate",
-    "tremolo and vibrato at block rate",
+    "tremolo and vibrato at block rate, the vibrato from the decoder's exact per-position increments",
+    "negative (aliased) phase increments",
+    "a full reset through parameter events",
     "feedback, FM and additive connections",
     "all four OPL2 waveforms",
     "channel skipping when silent",

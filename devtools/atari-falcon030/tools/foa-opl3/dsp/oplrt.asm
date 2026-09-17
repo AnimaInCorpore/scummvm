@@ -20,25 +20,26 @@
 ;   Y internal $0000-$003f  mix ring, 64 words
 ;   Y internal $0040-$0063  gain pairs of feedback modulators, [history, onward]
 ;   Y internal $0080-$0091  feedback history, older product
-;   X external $0200-$03ff  gain table 2^(-envOut/32), 512 words
+;   X external $0200-$03ff  gain table 2^(-envOut/32) / 2, 512 words
 ;   X external $0400-$087f  operator records, 32 words each, 36 operators
 ;   X external $0900-$09ff  channel records, 8 words each
 ;   X external $0a00-$0a3f  attack factor per block, by 6-bit rate
 ;   X external $0a40-$0a7f  decay step per block, by rate
-;   X external $0a80-$0a8f  vibrato multipliers, deep then shallow
+;   X external $0a80-$0a87  record offset of the vibrato delta, by LFO position
 ;   X external $0b00-$0b8f  per-operator render parameters, 4 words each
 ;   X external $2000-$2fff  bench output, 128 blocks
 ;   X external $3000-$3fff  bench events, (block << 16 | address), value
 ;   X external $2000-$3fff  stream events, same format, 4,096 of them
 ;   Y external $0400-$087f  phase fractions, the L-space partners of the records
-;   Y external $1000-$1fff  waveforms as linear samples * 128, 1,024 each
+;   Y external $1000-$1fff  waveforms as linear samples * 256, 1,024 each
 ;
 ; Arithmetic conventions shared with the host reference
 ;   phase      48-bit index.fraction in B; the index is B1 masked to 10 bits
 ;   advance    mac x1,y1,b with y1 = $3ff: the increment word times 2046
 ;   product    mpy of a sample by a 24-bit fractional gain, A1 truncated
 ;   mix        24-bit ring sums stored with the accumulator limiter
-;   output     the mix doubled and limited; the 16-bit sample is the top
+;   output     the mix times the master gain, rounded, then doubled and
+;              limited; the 16-bit sample is the top
 
         include 'ioequ.inc'
         include 'oplrttab.inc'          ; the generated block, period and LFO constants (8.3 for the DOS assembler)
@@ -83,12 +84,12 @@ OPR_SL          equ     6
 OPR_RATE_A      equ     7
 OPR_TLKSL       equ     11
 OPR_INCBASE     equ     12
-OPR_VIBSTEP2    equ     13
 OPR_WFBASE      equ     14
 OPR_GAIN        equ     15
 OPR_GAINMOD     equ     16
 OPR_GAINFB      equ     17
 OPR_INC         equ     18
+OPR_VIBDELTA    equ     19              ; five words: zero, +half, +full, -half, -full
 
 CHR_MODE        equ     0               ; render routine address
 CHR_CONN        equ     1
@@ -126,7 +127,7 @@ block_index:    ds      1
 tremolo_phase:  ds      1
 vibrato_phase:  ds      1
 tremolo_value:  ds      1
-vibrato_mul:    ds      1
+vibrato_offset: ds      1               ; this block's vibrato delta, as an offset from STATE
 ob_flags:       ds      1
 render_ch:      ds      1
 render_rt:      ds      1
@@ -137,7 +138,7 @@ ob_base:        ds      1
 
         org     x:$0010
 tremolo_shift:  ds      1               ; host: 4 (1 dB) or 2 (4.8 dB)
-vib_shift:      ds      1               ; host: 1 (shallow) or 0 (deep)
+unused_11:      ds      1               ; the vibrato depth is the decoder's business
 channel_count:  ds      1               ; host: 9 or 18
 master_gain:    ds      1               ; host: fraction applied to the FM mix
 ob_gain:        ds      1               ; op_boundary results
@@ -397,20 +398,35 @@ ob_attack:
         move    #>1,b
         move    b1,x:(r1)               ; state = decay
         jmp     ob_env_store
+; The chip leaves decay when the envelope's top five bits equal the sustain
+; level: below it the step may reach it, inside that one sustain step the
+; envelope holds where it is, and past it (a level lowered under a running
+; decay) the decay runs on to silence.
 ob_decay:
         move    #>DECAY_TABLE,a
         add     x0,a
         move    a1,r0
         move    #>OPR_SL-OPR_STATE,n1
-        move    x:(r0),x1
-        add     x1,b
+        move    x:(r0),x0               ; the step
         move    x:(r1+n1),x1            ; SL
+        cmp     x1,b
+        jge     ob_decay_past
+        add     x0,b
         cmp     x1,b
         jlt     ob_decay_keep
         move    x1,b                    ; reached: hold at SL, sustain
+ob_decay_sustain:
         move    #>2,a
         move    a1,x:(r1)
 ob_decay_keep:
+        move    b1,a
+        jmp     ob_env_snap
+ob_decay_past:
+        move    #>$010000,a             ; one sustain step, 16 << 12
+        add     x1,a
+        cmp     a,b
+        jlt     ob_decay_sustain
+        add     x0,b
         move    b1,a
 ob_env_snap:
         move    #>ENV_SNAP,x1
@@ -463,12 +479,10 @@ ob_gain_lookup:
         nop
         move    x:(r1+n1),a
         jclr    #2,x:ob_flags,ob_no_vibrato
-        move    #>OPR_VIBSTEP2-OPR_STATE,n1
-        move    x:vibrato_mul,y0
-        move    x:(r1+n1),x1
-        mpy     x1,y0,b
-        move    b1,x1
-        add     x1,a
+        move    x:vibrato_offset,n1
+        nop
+        move    x:(r1+n1),x1            ; the delta of this LFO position
+        add     x1,a                    ; a1 wraps, as the host's sum does
 ob_no_vibrato:
         move    #>OPR_INC-OPR_STATE,n1
         move    a1,x:(r3)+              ; render parameters: INC
@@ -502,7 +516,8 @@ emit_block_stream:
         jeq     ebs_silent
         do      #BLOCK_FRAMES,ebs_done
         move    x:(r1)+,x0 y:(r5)+,y1
-        mpy     y0,y1,a                 ; the mix scaled by the master gain
+        mpyr    y0,y1,a                 ; the mix scaled by the master gain: rounded,
+                                        ; so that $7fffff passes it unchanged
         add     x0,a
         asl     a
         move    a,x:(r2)+
@@ -515,7 +530,7 @@ ebs_done:
 ebs_silent:
         do      #BLOCK_FRAMES,ebs_silent_done
         move    y:(r5)+,y1
-        mpy     y0,y1,a
+        mpyr    y0,y1,a
         asl     a
         move    a,x:(r2)+
         move    a,x:(r2)+
@@ -554,8 +569,6 @@ start:
 start_cleared:
         move    #>4,a
         move    a1,x:tremolo_shift
-        move    #>1,a
-        move    a1,x:vib_shift
         move    #>9,a
         move    a1,x:channel_count
         move    #>$7fffff,a
@@ -893,7 +906,7 @@ emit_block:
         move    x:master_gain,y0
         do      #BLOCK_FRAMES,eb_done
         move    y:(r5)+,y1
-        mpy     y0,y1,a
+        mpyr    y0,y1,a
         asl     a
         move    a,x:(r1)+
 eb_done:
@@ -940,7 +953,8 @@ bb_trem_scaled:
         mpy     x1,y0,a
         move    a1,x:tremolo_value
 
-        ; vibrato: eight positions at 6.1 Hz, multiplier by position and depth
+        ; vibrato: eight positions at 6.1 Hz, each selecting one of the
+        ; record's increment deltas
         move    x:vibrato_phase,a
         move    #>OPL_VIBRATO_STEP,x0
         add     x0,a
@@ -954,17 +968,13 @@ bb_vib_wrapped:
         move    #>$000800,y0
         mpy     x1,y0,a                 ; position 0..7
         move    a1,a
-        move    x:vib_shift,b
-        asl     b
-        asl     b
-        asl     b
-        add     b,a
         move    #>VIB_TABLE,x0
         add     x0,a
         move    a1,r0
-        nop
+        move    #>OPR_STATE,x0
         move    x:(r0),a
-        move    a1,x:vibrato_mul
+        sub     x0,a                    ; op_boundary indexes from STATE
+        move    a1,x:vibrato_offset
 
         move    #>OP_BASE,r1
         move    #>CH_BASE,r2

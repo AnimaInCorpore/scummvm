@@ -352,7 +352,7 @@ bool AtariDspAudio::uploadTables() {
 	namespace P = OplPractical;
 	static uint32 buffer[4096];
 
-	const uint32 scalars[4] = { 4, 1, 9, 0x7fffff };
+	const uint32 scalars[4] = { 4, 0, 9, 0x7fffff };
 	uploadWords(false, P::SC_TREMOLO_SHIFT, scalars, 4);
 
 	for (int i = 0; i < 512; ++i)
@@ -376,11 +376,9 @@ bool AtariDspAudio::uploadTables() {
 	for (int i = 0; i < 64; ++i)
 		buffer[i] = kOplDecayBlock[i];
 	uploadWords(false, P::kDecayTable, buffer, 64);
-	for (int i = 0; i < 8; ++i) {
-		buffer[i] = (uint32)kOplVibratoDeep[i] & 0xffffff;
-		buffer[8 + i] = (uint32)kOplVibratoShallow[i] & 0xffffff;
-	}
-	uploadWords(false, P::kVibratoTable, buffer, 16);
+	for (int i = 0; i < 8; ++i)
+		buffer[i] = (uint32)P::kVibratoOffset[i];
+	uploadWords(false, P::kVibratoTable, buffer, 8);
 
 	for (int wf = 0; wf < P::kWaveforms; ++wf)
 		for (int phase = 0; phase < 1024; ++phase)

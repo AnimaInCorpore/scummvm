@@ -54,6 +54,15 @@ public:
 	void writeReg(int r, int v) override;
 	void setCallbackFrequency(int timerFrequency) override;
 
+	/**
+	 * Moves the writes made between periods into this one. They are kept
+	 * apart from the instance because the last of them, the reset a closing
+	 * OPL leaves the kernel with, has no instance left to deliver it. Only
+	 * for a period produced while the main loop is outside every critical
+	 * section, as the writers run inside one.
+	 */
+	static void flushPending(AtariDspAudio *audio, AtariDspAudio::Period *period);
+
 	/** Runs the timer callbacks that fall in this period and collects their writes into it. */
 	void producePeriod(AtariDspAudio::Period *period);
 
@@ -83,8 +92,8 @@ private:
 	// A song start from the main loop can write several hundred registers
 	// while the interrupt is refused production; none may be dropped.
 	enum { kPendingMax = 2048 };
-	uint32 _pending[kPendingMax * 2];
-	uint32 _pendingCount;
+	static uint32 s_pending[kPendingMax * 2];
+	static uint32 s_pendingCount;
 
 	static AtariDspOPL *s_instance;
 };

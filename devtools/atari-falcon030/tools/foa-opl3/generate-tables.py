@@ -144,14 +144,11 @@ def practical_tables():
         samples = decay_samples(rate)
         units_per_block = ENV_OFF / samples * NATIVE_PER_BLOCK
         decay.append(min(0x7FFFFF, int(round(units_per_block * (1 << ENV_FRACTION_BITS)))))
-    # Vibrato multipliers of the pre-doubled f-number step, by LFO position
-    # and depth shift (index 0 is the deep setting, 1 the shallow one).
-    shape = (0.0, 0.25, 0.5, 0.25, 0.0, -0.25, -0.5, -0.25)
-    vibrato = [[int(round(value / (1 << shift) * (1 << 23))) & 0xFFFFFF for value in shape]
-               for shift in (0, 1)]
-    # Envelope gain 2^(-envOut/32) as a 24-bit fraction; the chip is silent
-    # from 0x1f8 up, where its exponent shifts every mantissa bit away.
-    gain = [0 if e >= ENV_OFF else min(0x7FFFFF, int(round(2.0 ** (-e / 32.0) * (1 << 23))))
+    # Half the envelope gain 2^(-envOut/32) as a 24-bit fraction, against
+    # waveform samples of twice the scale: no attenuation is then 0.5
+    # exactly, where 1.0 would not fit the fraction. The chip is silent from
+    # 0x1f8 up, where its exponent shifts every mantissa bit away.
+    gain = [0 if e >= ENV_OFF else int(round(2.0 ** (-e / 32.0) * (1 << 22)))
             for e in range(512)]
     return {
         "rate_q16": int(round(RATIO * 65536)),
@@ -163,7 +160,6 @@ def practical_tables():
         "vibrato_step": int(round(NATIVE_PER_BLOCK / 1024.0 * 4096)),
         "attack": attack,
         "decay": decay,
-        "vibrato": vibrato,
     }
 
 
@@ -173,10 +169,6 @@ def c_table(name, values, per_line=8, ctype="uint16_t", width=4):
         body += "\t" + ", ".join((f"-0x{-v:0{width}x}" if v < 0 else f"0x{v:0{width}x}")
                                   for v in values[start:start + per_line]) + ",\n"
     return f"static const {ctype} {name}[{len(values)}] = {{\n{body}}};\n"
-
-
-def signed24(values):
-    return [v - (1 << 24) if v >= (1 << 23) else v for v in values]
 
 
 def dsp_table(label, values, per_line=8):
@@ -226,10 +218,7 @@ def main():
                 + c_table("kOplAttackBlock", tables["attack"], ctype="uint32_t", width=6) +
                 "\n/* Decay and release step per block, attenuation units * 2^12, by rate. */\n"
                 + c_table("kOplDecayBlock", tables["decay"], ctype="uint32_t", width=6) +
-                "\n/* Vibrato multiplier of the doubled f-number step: [depth shift][position]. */\n"
-                + c_table("kOplVibratoDeep", signed24(tables["vibrato"][0]), ctype="int32_t", width=6)
-                + c_table("kOplVibratoShallow", signed24(tables["vibrato"][1]), ctype="int32_t", width=6)
-                + "\n/* Envelope gain 2^(-envOut/32), 24-bit fraction, zero from 0x1f8. */\n"
+                "\n/* Half the envelope gain 2^(-envOut/32), 24-bit fraction, zero from 0x1f8. */\n"
                 + c_table("kOplGain", tables["gain"], ctype="uint32_t", width=6)
                 + "\n#endif\n")
         if args.practical_dsp:

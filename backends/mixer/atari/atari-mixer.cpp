@@ -284,7 +284,7 @@ void AtariMixerManager::updateDsp() {
 	}
 }
 
-// The interrupt's share, one period: the music volume as the kernel's
+// The interrupt's share, one period: the FM volume as the kernel's
 // master gain when it changed, the OPL's timer callbacks for the period
 // (the AdLib driver and iMUSE's sequencing, whose register writes become
 // the period's events), and the next PCM chunk, or silence when the main
@@ -298,15 +298,24 @@ bool AtariMixerManager::produceDspPeriod(void *context, bool runCallbacks) {
 	AtariDspAudio::Period *period = self->_dsp->beginPeriod(!runCallbacks);
 	if (!period)
 		return false;
-	const int volume = self->_mixer->getVolumeForSoundType(Audio::Mixer::kMusicSoundType);
-	if (volume != self->_dspMusicVolume) {
-		self->_dspMusicVolume = volume;
+	// The FM mix gets what the mixer gives a software OPL's stream, which
+	// plays on the plain sound type: the engine has already put the music
+	// slider into the operator levels it writes (iMUSE's setMusicVolume), so
+	// the music type's volume on top would apply it twice, 6 dB too quiet at
+	// half volume. Mute is the mixer's own flag.
+	const int volume = self->_mixer->isSoundTypeMuted(Audio::Mixer::kPlainSoundType) ? 0
+		: self->_mixer->getVolumeForSoundType(Audio::Mixer::kPlainSoundType);
+	if (volume != self->_dspFmVolume) {
+		self->_dspFmVolume = volume;
 		const uint32 gain = volume >= Audio::Mixer::kMaxMixerVolume ? 0x7fffffu
 			: (uint32)((uint64)volume * 0x7fffffu / Audio::Mixer::kMaxMixerVolume);
 		self->_dsp->addEvent(period, 0, OplPractical::SC_MASTER_GAIN, gain);
 	}
-	if (runCallbacks && AtariDspOPL::instance())
-		AtariDspOPL::instance()->producePeriod(period);
+	if (runCallbacks) {
+		AtariDspOPL::flushPending(self->_dsp, period);
+		if (AtariDspOPL::instance())
+			AtariDspOPL::instance()->producePeriod(period);
+	}
 	// An extension nested in a production that is between reading the ring
 	// head and advancing it takes silence rather than the same chunk twice.
 	if (self->_dspPcmHead != self->_dspPcmTail && !(!runCallbacks && self->_dspPcmTaking)) {

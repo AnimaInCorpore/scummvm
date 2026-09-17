@@ -342,8 +342,19 @@ OPL *Config::create(DriverId driver, OplType type) {
 
 #ifdef ATARI_DSP_OPL
 	case kAtariDsp:
-		if (type == kOpl2)
-			return AtariDspOPL::create();
+		if (type == kOpl2) {
+			OPL *dsp = AtariDspOPL::create();
+			if (dsp)
+				return dsp;
+			// The DSP stream is off (atari_dsp_audio=false) or the DSP was
+			// not available: callers do not expect an OPL2 to fail, so the
+			// first other emulator plays through the mixer instead.
+			for (int i = 2; _drivers[i].name; ++i) {
+				if (_drivers[i].id != kAtariDsp && (_drivers[i].flags & kFlagOpl2))
+					return create(_drivers[i].id, type);
+			}
+			return new NullOPL();
+		}
 		warning("The Atari Falcon DSP OPL supports OPL2 only");
 		return nullptr;
 #endif
