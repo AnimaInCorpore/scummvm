@@ -8,3 +8,6 @@ dsp/*.LST
 dsp/BUILD.BAT
 dsp/ioequ.inc
 dsp/opl_boot.i
+dsp/oplrttab.inc
+dsp/oplrt_image.i
+dsp/OPLBOOT.ASM

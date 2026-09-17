@@ -1,14 +1,26 @@
-# Atlantis OPL register capture
+# AdLib on the Falcon DSP: capture, kernels, transport, integration
 
-2026-09-16. First step of the [OPL3 investigation's implementation
-sequence](../../docs/opl3-feasibility.md): record the register writes that
-ScummVM's real AdLib driver makes while the game runs, so a DSP renderer can
-be designed against a measured stream instead of resource counts.
+2026-09-16. The [OPL3 investigation](../../docs/opl3-feasibility.md) in
+five steps: the register stream ScummVM's real AdLib driver produces for
+Fate of Atlantis, an exact OPL kernel checked against Nuked-OPL3, its
+DSP56001 transliteration (which does not fit), a *practical* block-rate
+kernel that does, the same kernel streaming through the Falcon codec, and
+the ScummVM build that plays the game with it. Each step has its own gate
+and its own committed result file.
 
-**This measures register traffic and keyed-voice occupancy. It renders no
-audio, reaches no OPL emulator, and times nothing on a Falcon or a DSP.**
-The capture is the input a renderer would have to consume; it says nothing
-about whether a renderer can keep up.
+| Step | Result | Gate |
+| --- | --- | --- |
+| Register capture | [results.json](results.json) | `capture-gate.py` |
+| Exact host kernel, bit exact against Nuked-OPL3 | [kernel-results.json](kernel-results.json) | `kernel-gate.py` |
+| Exact DSP synthesis loop: 209% of budget | [bench-results.json](bench-results.json) | `bench-gate.py` |
+| Practical kernel against the exact one | [practical-results.json](practical-results.json) | `practical-gate.py` |
+| Practical DSP kernel: word exact, 55-69% of budget | [rt-bench-results.json](rt-bench-results.json) | `rt-bench-gate.py` |
+| Stream mode through the SSI: word exact, no late period | [rt-stream-results.json](rt-stream-results.json) | `rt-stream-gate.py` |
+| Atlantis on the emulated Falcon with the DSP build | [game-results.json](game-results.json) | `game-gate.py` |
+
+The first three sections below are the capture and the exact kernel as
+originally measured; the practical kernel and everything after it start at
+[The practical kernel](#the-practical-kernel).
 
 ## How the capture works
 
@@ -230,21 +242,154 @@ external memory zero wait states and which Hatari's own documentation calls
 instruction-wise correct rather than cycle accurate. No audio was auditioned,
 and no output-rate conversion is modelled.
 
+## The practical kernel
+
+`opl-practical.h` is the renderer the budget allows. It keeps the chip's
+1,024-step waveforms, its log-domain envelope in the same 0.1875 dB units,
+its feedback and modulation depth and its f-number pitch, and gives up
+sample equality in three places:
+
+- **Codec-rate synthesis.** It runs at the Falcon codec's 32,779.9479 Hz
+  instead of the chip's 49,716 Hz, with the phase, envelope and LFO clocks
+  retimed (`generate-tables.py` measures every envelope rate on the exact
+  machine and folds it into one step per block). Partials above 16.4 kHz
+  alias; in the brightest Atlantis passage the 8-15 kHz band carries 3.4 dB
+  more energy than the exact kernel's.
+- **Block-rate control.** Envelopes, tremolo and vibrato advance once per
+  32-frame block (0.98 ms), which is what lets each operator run as one
+  hardware loop over the block, operator-major, the way the sibling YM2151
+  kernel does. Attack is a per-block retention factor, decay and release a
+  per-block step; sustain level, key scaling, the envelope-type flag, the
+  silence snap and the instant attack keep their chip semantics.
+- **Block-boundary writes.** A register write takes effect at the start of
+  the block it falls in, so up to 0.98 ms early. Key-on edges are counted,
+  not sampled, so an off-then-on inside one block still retriggers.
+
+Register decoding stays on the 68030 in the same header (`Decoder`): each
+write becomes a few parameter words for the DSP's operator and channel
+records, emitted only when they change, so the DSP's per-block work is
+free of register logic and the host pays about a microsecond per write.
+
+[practical-gate.py](practical-gate.py) scores it against the exact kernel
+on synthetic scenarios and the captured 60-second Atlantis stream, at each
+signal's own rate, on what a listener would notice. From
+[practical-results.json](practical-results.json):
+
+| Scenario | Envelope corr. | Level error mean / max | Partials mean / max | Pitch | Notes |
+| --- | ---: | ---: | ---: | ---: | --- |
+| sustained tone | 1.0000 | 0.00 / 0.03 dB | 0.29 / 0.56 dB | 0.4 c | |
+| pitch sweep, blocks 2-6 | 0.9975 | 0.04 / 0.50 dB | 0.32 / 0.77 dB | 3.4 c at 73 Hz (0.14 Hz) | |
+| envelopes, both types | 0.9999 | 0.10 / 1.88 dB | 1.51 / 4.56 dB | 0.4 c | partial error is inside slow attacks |
+| feedback 0-7 | 0.9970 | 0.06 / 1.52 dB | 0.42 / 1.31 dB | 0.5 c | |
+| four waveforms, both connections | 0.9995 | 0.08 / 1.14 dB | 0.39 / 0.76 dB | 0.2 c | |
+| tremolo, both depths | 0.9998 | 0.01 / 0.69 dB | | | depth 1.72 vs 1.70 dB, 5.33 vs 5.21 dB |
+| vibrato, both depths | 0.9998 | 0.01 / 0.56 dB | | | depth 11.5 vs 13.5 c, 26.4 vs 27.1 c, period 165 ms both |
+| nine-channel polyphony | 0.9947 | 0.07 / 0.81 dB | | | |
+| Atlantis, 60 s | 0.9733 | 0.86 / 9.78 dB | | | mix of coincident partials; +3.4 dB in 8-15 kHz |
+
+The onset skew is at most 1.6 ms on the synthetic scenarios and 7.5 ms on
+the trace, where the exact chip starts a slow attack on its next rate tick.
+The polyphonic peak errors come from partials of different channels adding
+with phases the block quantization shifts, not from levels.
+
+## The practical DSP kernel and its cost
+
+[dsp/oplrt.asm](dsp/oplrt.asm) implements that kernel as a memory-image
+machine: the host writes operator and channel records, the DSP runs the
+per-block boundary pass and the per-frame stages. The stages are the
+sibling kernel's shapes with OPL semantics: the phase in accumulator B with
+the mask constant doubling as the increment multiplicand, the waveform held
+as linear samples so the envelope is one multiply, feedback history in
+internal X and Y with an alternating gain pair, four to twelve instructions
+per frame per operator. Silent channels are skipped and idle operators
+short-circuit the boundary pass.
+
+[rt-bench-gate.py](rt-bench-gate.py) renders on the emulated Falcon,
+compares every output word with the host reference and attributes Hatari's
+DSP profile by code range. From [rt-bench-results.json](rt-bench-results.json):
+
+| | Nine feedback FM channels, tremolo and vibrato, held | Atlantis, first 4 s |
+| --- | ---: | ---: |
+| Frames compared | 32,768 | 131,104 |
+| Mismatches | 0 | 0 |
+| Stages (per-frame) | 187.6 | 133.6 |
+| Per-operator boundary pass | 97.0 | 84.6 |
+| Loaders, modes, driver | 23.8 | 21.9 |
+| Block and channel boundary | 22.2 | 20.8 |
+| Emit, clear, events | 7.0 | 7.1 |
+| **Instruction cycles per frame** | **338.2** | **268.7** |
+| Share of the 489.4-cycle budget | 69% | 55% |
+
+The boundary pass is the obvious next optimization (it walks the record
+with indexed accesses), but the budget no longer needs it. The whole
+program is 1,221 words; the stages and the operator pass live in the 512
+words of internal program RAM, everything else in external.
+
+## Stream mode
+
+The same program owns the codec in production: a 1,920-word SSI ring holds
+two 480-frame periods of interleaved stereo, transmitted under interrupt
+through r6, and each period arrives from the host as events plus 160 mono
+PCM samples at a third of the codec rate, expanded by linear interpolation
+and added to the FM mix under a master gain. The DSP acknowledges a payload
+before rendering it, with its period and late counters in the
+acknowledgement, so the host stays one period ahead; a period that is not
+ready in time repeats and is counted.
+
+[m68k/oplplay.s](m68k/oplplay.s) drives that protocol with direct host-port
+writes, and [rt-stream-gate.py](rt-stream-gate.py) checks the emitted words
+by checksum against the host reference. From
+[rt-stream-results.json](rt-stream-results.json): 20 s of the Atlantis
+stream, 1,365 periods submitted and rendered, none late, checksum equal.
+
+## In the game
+
+The ScummVM build wires it in without touching the AdLib driver:
+
+- `backends/platform/atari/atari-dsp.cpp` boots the kernel through the
+  two-stage loader (`dsp-opl-image.h`, generated by `build-dsp.sh`),
+  uploads the tables, routes the DSP's SSI to the DAC at 32.780 kHz and
+  delivers periods from an MFP Timer A interrupt at about 1 kHz: announce,
+  READY, a paced blast, acknowledgement. The main loop only produces, up
+  to sixteen periods (234 ms) ahead, so the game's stalls at scene changes
+  cost a period only when they last longer than that.
+- `backends/platform/atari/dsp-opl.cpp` is the `OPL::OPL` backend
+  (`opl_driver=atari_dsp`, OPL2 only): register writes go through the
+  decoder into the period being produced, and the driver's 250 Hz callbacks
+  run inside period production on the audio clock, so each callback's
+  writes land in the block that corresponds to its time.
+- `AtariMixerManager` in DSP mode mixes speech and effects at 10,927 Hz
+  mono into the period's PCM and forwards the music volume as the kernel's
+  master gain. `atari_dsp_audio=false` restores DMA playback.
+
+[game-gate.py](game-gate.py) runs Atlantis on the emulated Falcon with that
+build, records Hatari's DAC output and reads the transport's counters from
+the log. From [game-results.json](game-results.json): the kernel boots, the
+game starts, 4,608 periods stream through its opening with no protocol
+error and two late (two to five across runs: one at the game's start, the
+rest in a stall longer than the buffered 234 ms), and the recording
+carries the opening music at -12 dBFS peak. Before delivery moved to the interrupt the same run
+had 171 late periods, 3.7%. The emulator's DSP timing is a model; nothing
+here ran on hardware, and the recording was checked for presence and
+level, not auditioned.
+
 ## What this does not establish
 
-- No audio was rendered and nothing was compared against an OPL reference.
-  Step 3 of the sequence still owns that.
-- No DSP kernel exists, so no synthesis, transport or deadline cost was
-  measured, on hardware or in emulation.
+- Nothing ran on hardware: every cycle figure and every deadline is Hatari's
+  model, which charges Falcon external memory zero wait states and calls its
+  DSP emulation instruction-wise correct rather than cycle accurate.
+- No listening test. The practical kernel's quality is the perceptual gate's
+  numbers; the game recording was checked for presence and level, not heard.
 - One unattended opening sequence, with no player input and no other scenes.
-  Scene changes and overlapping cues are present; dense gameplay, menus,
-  save/load and MIDI-driven effects outside this sequence are not.
-- Sam & Max data was not available here, so the layered OPL3 path the plan
-  asks for separately remains unmeasured.
-- Register counts are not instruction counts. Nothing here predicts what a
-  68030 or a DSP56001 would spend servicing this stream.
-- The kernel's sample equality holds at the chip's native 49,716 Hz. No
-  conversion to a Falcon codec rate is modelled, and no audio was auditioned.
+  Dense gameplay, menus, save/load and MIDI-driven effects outside it are
+  not covered, and the 68030's load in the game is not measured: the
+  transport's polling from the main loop is where a starved period would
+  show, and the game gate saw none in its opening.
+- Sam & Max data was not available here, so the layered OPL3 path remains
+  unmeasured; the kernel and decoder support eighteen channels, the DSP
+  image is built for nine.
+- The exact kernel's sample equality holds at the chip's native 49,716 Hz;
+  the practical kernel is not sample exact by design.
 
 ## Reproducing
 
@@ -283,3 +428,31 @@ python3 devtools/atari-falcon030/tools/foa-opl3/kernel-gate.py \
   --trace build-falcon030/opl3-capture/run-a/opl-writes.ev \
   --output build-falcon030/opl3-kernel
 ```
+
+The practical kernel's gates, in the same tree:
+
+```sh
+make -C devtools/atari-falcon030/tools/foa-opl3/build/headless \
+  -f Makefile -f ../../kernel.mk opl-practical-test opl-rt-fixture
+python3 devtools/atari-falcon030/tools/foa-opl3/practical-gate.py \
+  --trace <opl-writes.ev> --seconds 60 --wav --output build-falcon030/opl3-practical
+sh devtools/atari-falcon030/tools/foa-opl3/build-dsp.sh
+python3 devtools/atari-falcon030/tools/foa-opl3/rt-bench-gate.py \
+  --trace <opl-writes.ev> --seconds 4 --output build-falcon030/opl3-rt-bench
+python3 devtools/atari-falcon030/tools/foa-opl3/rt-stream-gate.py \
+  --trace <opl-writes.ev> --seconds 20 --output build-falcon030/opl3-rt-stream
+```
+
+`build-dsp.sh` also regenerates `backends/platform/atari/dsp-opl-image.h`,
+which the Falcon build embeds; after a kernel change rebuild ScummVM with
+`backends/platform/atari/build-falcon030.sh` and run the game gate:
+
+```sh
+python3 devtools/atari-falcon030/tools/foa-opl3/game-gate.py \
+  --game /path/to/atlantis-cd --seconds 60 --output build-falcon030/opl3-game
+```
+
+The game needs Falcon TOS 4.04 under Hatari (TOS 4.02, which the kernel
+benches boot, dies in the game's video mode switch); `--fpu 68882` is
+required by the build. `--wav` on the practical gate keeps WAV files of
+both kernels for auditioning, and the game gate keeps Hatari's recording.

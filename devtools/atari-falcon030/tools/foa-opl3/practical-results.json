@@ -1,0 +1,502 @@
+{
+  "date": "2026-09-16",
+  "gate": "practical block-rate OPL kernel against the exact kernel, perceptual metrics",
+  "scummvm_commit": "73e3306a98b94472c66af1309b2300a8acd4c35a",
+  "scummvm_worktree_dirty": true,
+  "source_sha256": {
+    "opl-practical.h": "6c680fb240fa59e114611de88b923af899ef90e47d8b79e59b35cf7ce777c474",
+    "practical-test.cpp": "3de4ff8cce69e11dd0cee0c202e413f728595f34562100455473bb5bd1b758cd",
+    "practical-gate.py": "49dc7291f35c4494450b106c30efaec0c02514e5a53df8e1409677c1c7d7e320",
+    "generate-tables.py": "ce204a3fb5813effe3e21d6c2bdd8fd210645b310778ec5347d16ce7f1540387",
+    "opl-kernel.h": "ccfb0a922d71981e728be957240b789a99ce1abb28ef1053ec701e8d5cf5759d"
+  },
+  "trace_sha256": "883bae533b8338fb9ca9714216412705853f52248b75ff970f8f4ddc666a893f",
+  "thresholds": {
+    "envelope_correlation_min": 0.985,
+    "polyphonic_envelope_correlation_min": 0.95,
+    "envelope_db_mean_abs_max": 1.0,
+    "envelope_db_max_abs_max": 6.0,
+    "onset_skew_ms_max": 10.0,
+    "pitch_cents_max": 3.0,
+    "partial_db_mean_abs_max": 2.0,
+    "partial_db_max_abs_max": 6.0,
+    "alias_db_max": -30.0,
+    "rms_ratio_min": 0.9,
+    "rms_ratio_max": 1.1,
+    "hf_excess_db_max": 4.0,
+    "tremolo_depth_db_max": 0.4,
+    "vibrato_depth_cents_max": 3.0
+  },
+  "method": {
+    "exact_reference": "opl-kernel.h at 49,716 Hz, bit exact against Nuked-OPL3",
+    "candidate": "opl-practical.h at 32,779.9479 Hz, 32-frame blocks, block-rate envelope and LFO, writes applied at block boundaries",
+    "envelope": "RMS per 20 ms window in dBFS at each signal's own rate, each exact window compared with the range the practical envelope spans over the neighbouring three windows; correlation, mean and max absolute dB difference over windows above -60 dBFS; onset skew from the first sample above -40 dBFS after silence",
+    "spectrum": "Hann 4,096-point spectra 150 ms into each loud stretch; the reference's partials (peaks within 48 dB of its strongest, to 15 kHz) matched within 20 Hz: level error of partials within 36 dB of the strongest, pitch of the strongest partial in cents, and unmatched candidate peaks (aliases) above -40 dB relative to its own strongest partial"
+  },
+  "results": [
+    {
+      "name": "tone",
+      "seconds": 2.0,
+      "envelope_windows": 99,
+      "envelope_correlation": 1.0,
+      "envelope_db_mean_abs": 0.001,
+      "envelope_db_max_abs": 0.034,
+      "onsets_paired": 0,
+      "onset_skew_ms_mean": 0.0,
+      "onset_skew_ms_max": 0.0,
+      "rms_ratio": 1.0197,
+      "spectral_windows": [
+        {
+          "partials": 12,
+          "graded": 5,
+          "partial_db_mean_abs": 0.289,
+          "partial_db_max_abs": 0.562,
+          "aliases": [],
+          "alias_db_max": -99.0,
+          "exact_hz": 875.26,
+          "cents": 0.42,
+          "at_s": 0.3,
+          "hf_db_exact": -55.23,
+          "hf_db_practical": -48.11
+        }
+      ],
+      "partial_db_mean_abs_max": 0.289,
+      "partial_db_max_abs": 0.562,
+      "alias_db_max": -99.0,
+      "pitch_cents_max_abs": 0.42,
+      "pitch_hz_max_abs": 0.21236515945288612,
+      "hf_excess_db_max": 7.12,
+      "register_writes": 15,
+      "failures": []
+    },
+    {
+      "name": "pitch",
+      "seconds": 3.5999879314506398,
+      "envelope_windows": 179,
+      "envelope_correlation": 0.9975,
+      "envelope_db_mean_abs": 0.038,
+      "envelope_db_max_abs": 0.499,
+      "onsets_paired": 0,
+      "onset_skew_ms_mean": 0.0,
+      "onset_skew_ms_max": 0.0,
+      "rms_ratio": 1.0093,
+      "spectral_windows": [
+        {
+          "partials": 14,
+          "graded": 5,
+          "partial_db_mean_abs": 0.319,
+          "partial_db_max_abs": 0.769,
+          "aliases": [],
+          "alias_db_max": -99.0,
+          "exact_hz": 72.97,
+          "cents": 3.35,
+          "at_s": 0.3,
+          "hf_db_exact": -47.43,
+          "hf_db_practical": -44.15
+        }
+      ],
+      "partial_db_mean_abs_max": 0.319,
+      "partial_db_max_abs": 0.769,
+      "alias_db_max": -99.0,
+      "pitch_cents_max_abs": 3.35,
+      "pitch_hz_max_abs": 0.14133626937016067,
+      "hf_excess_db_max": 3.28,
+      "register_writes": 39,
+      "failures": []
+    },
+    {
+      "name": "envelope",
+      "seconds": 11.999979885751067,
+      "envelope_windows": 599,
+      "envelope_correlation": 0.9999,
+      "envelope_db_mean_abs": 0.101,
+      "envelope_db_max_abs": 1.882,
+      "onsets_paired": 8,
+      "onset_skew_ms_mean": 0.83,
+      "onset_skew_ms_max": 1.64,
+      "rms_ratio": 1.0426,
+      "spectral_windows": [
+        {
+          "partials": 9,
+          "graded": 4,
+          "partial_db_mean_abs": 0.362,
+          "partial_db_max_abs": 0.596,
+          "aliases": [],
+          "alias_db_max": -99.0,
+          "exact_hz": 875.26,
+          "cents": 0.42,
+          "at_s": 0.3,
+          "hf_db_exact": -55.17,
+          "hf_db_practical": -48.63
+        },
+        {
+          "partials": 5,
+          "graded": 4,
+          "partial_db_mean_abs": 1.509,
+          "partial_db_max_abs": 4.559,
+          "aliases": [],
+          "alias_db_max": -99.0,
+          "exact_hz": 875.26,
+          "cents": 0.42,
+          "at_s": 6.3,
+          "hf_db_exact": -54.05,
+          "hf_db_practical": -46.93
+        },
+        {
+          "partials": 2,
+          "graded": 1,
+          "partial_db_mean_abs": 0.0,
+          "partial_db_max_abs": 0.0,
+          "aliases": [],
+          "alias_db_max": -99.0,
+          "exact_hz": 437.61,
+          "cents": 0.24,
+          "at_s": 7.5,
+          "hf_db_exact": -52.55,
+          "hf_db_practical": -49.1
+        }
+      ],
+      "partial_db_mean_abs_max": 1.509,
+      "partial_db_max_abs": 4.559,
+      "alias_db_max": -99.0,
+      "pitch_cents_max_abs": 0.42,
+      "pitch_hz_max_abs": 0.21236515945288612,
+      "hf_excess_db_max": 7.12,
+      "register_writes": 141,
+      "failures": []
+    },
+    {
+      "name": "feedback",
+      "seconds": 5.59998793145064,
+      "envelope_windows": 279,
+      "envelope_correlation": 0.997,
+      "envelope_db_mean_abs": 0.06,
+      "envelope_db_max_abs": 1.52,
+      "onsets_paired": 0,
+      "onset_skew_ms_mean": 0.0,
+      "onset_skew_ms_max": 0.0,
+      "rms_ratio": 1.015,
+      "spectral_windows": [
+        {
+          "partials": 20,
+          "graded": 8,
+          "partial_db_mean_abs": 0.424,
+          "partial_db_max_abs": 1.31,
+          "aliases": [
+            [
+              398,
+              -38.6
+            ],
+            [
+              123,
+              -40.0
+            ]
+          ],
+          "alias_db_max": -38.6,
+          "exact_hz": 735.66,
+          "cents": 0.48,
+          "at_s": 0.3,
+          "hf_db_exact": -43.67,
+          "hf_db_practical": -44.64
+        }
+      ],
+      "partial_db_mean_abs_max": 0.424,
+      "partial_db_max_abs": 1.31,
+      "alias_db_max": -38.6,
+      "pitch_cents_max_abs": 0.48,
+      "pitch_hz_max_abs": 0.20399654055881802,
+      "hf_excess_db_max": -0.97,
+      "register_writes": 113,
+      "failures": []
+    },
+    {
+      "name": "waveforms",
+      "seconds": 5.59998793145064,
+      "envelope_windows": 279,
+      "envelope_correlation": 0.9995,
+      "envelope_db_mean_abs": 0.075,
+      "envelope_db_max_abs": 1.135,
+      "onsets_paired": 0,
+      "onset_skew_ms_mean": 0.0,
+      "onset_skew_ms_max": 0.0,
+      "rms_ratio": 1.0148,
+      "spectral_windows": [
+        {
+          "partials": 11,
+          "graded": 7,
+          "partial_db_mean_abs": 0.393,
+          "partial_db_max_abs": 0.761,
+          "aliases": [],
+          "alias_db_max": -99.0,
+          "exact_hz": 437.61,
+          "cents": 0.23,
+          "at_s": 0.3,
+          "hf_db_exact": -54.4,
+          "hf_db_practical": -45.76
+        }
+      ],
+      "partial_db_mean_abs_max": 0.393,
+      "partial_db_max_abs": 0.761,
+      "alias_db_max": -99.0,
+      "pitch_cents_max_abs": 0.23,
+      "pitch_hz_max_abs": 0.05814175513016172,
+      "hf_excess_db_max": 8.64,
+      "register_writes": 113,
+      "failures": []
+    },
+    {
+      "name": "tremolo",
+      "seconds": 5.59998793145064,
+      "envelope_windows": 279,
+      "envelope_correlation": 0.9998,
+      "envelope_db_mean_abs": 0.009,
+      "envelope_db_max_abs": 0.685,
+      "onsets_paired": 0,
+      "onset_skew_ms_mean": 0.0,
+      "onset_skew_ms_max": 0.0,
+      "rms_ratio": 1.0025,
+      "spectral_windows": [
+        {
+          "partials": 4,
+          "graded": 2,
+          "partial_db_mean_abs": 0.176,
+          "partial_db_max_abs": 0.352,
+          "aliases": [],
+          "alias_db_max": -99.0,
+          "exact_hz": 437.61,
+          "cents": 0.24,
+          "at_s": 0.3,
+          "hf_db_exact": -60.15,
+          "hf_db_practical": -53.89
+        }
+      ],
+      "partial_db_mean_abs_max": 0.176,
+      "partial_db_max_abs": 0.352,
+      "alias_db_max": -99.0,
+      "pitch_cents_max_abs": 0.24,
+      "pitch_hz_max_abs": 0.06066983275219084,
+      "hf_excess_db_max": 6.26,
+      "lfo": [
+        {
+          "exact": {
+            "depth_db": 1.724,
+            "period_s": 0.015
+          },
+          "practical": {
+            "depth_db": 1.704,
+            "period_s": 0.015
+          }
+        },
+        {
+          "exact": {
+            "depth_db": 5.332,
+            "period_s": 0.13
+          },
+          "practical": {
+            "depth_db": 5.212,
+            "period_s": 0.13
+          }
+        }
+      ],
+      "register_writes": 31,
+      "failures": []
+    },
+    {
+      "name": "vibrato",
+      "seconds": 5.59998793145064,
+      "envelope_windows": 279,
+      "envelope_correlation": 0.9998,
+      "envelope_db_mean_abs": 0.007,
+      "envelope_db_max_abs": 0.558,
+      "onsets_paired": 0,
+      "onset_skew_ms_mean": 0.0,
+      "onset_skew_ms_max": 0.0,
+      "rms_ratio": 1.0025,
+      "spectral_windows": [
+        {
+          "partials": 4,
+          "graded": 2,
+          "partial_db_mean_abs": 0.089,
+          "partial_db_max_abs": 0.177,
+          "aliases": [],
+          "alias_db_max": -99.0,
+          "exact_hz": 517.92,
+          "cents": 1.14,
+          "at_s": 0.3,
+          "hf_db_exact": -57.31,
+          "hf_db_practical": -55.99
+        }
+      ],
+      "partial_db_mean_abs_max": 0.089,
+      "partial_db_max_abs": 0.177,
+      "alias_db_max": -99.0,
+      "pitch_cents_max_abs": 1.14,
+      "pitch_hz_max_abs": 0.34115736036510347,
+      "hf_excess_db_max": 1.32,
+      "lfo": [
+        {
+          "exact": {
+            "depth_cents": 11.54,
+            "period_s": 0.165,
+            "mean_hz": 517.375
+          },
+          "practical": {
+            "depth_cents": 13.46,
+            "period_s": 0.165,
+            "mean_hz": 517.371
+          }
+        },
+        {
+          "exact": {
+            "depth_cents": 26.44,
+            "period_s": 0.165,
+            "mean_hz": 517.382
+          },
+          "practical": {
+            "depth_cents": 27.07,
+            "period_s": 0.165,
+            "mean_hz": 517.385
+          }
+        }
+      ],
+      "register_writes": 31,
+      "failures": []
+    },
+    {
+      "name": "polyphony",
+      "seconds": 6.5099967817201705,
+      "envelope_windows": 325,
+      "envelope_correlation": 0.9947,
+      "envelope_db_mean_abs": 0.069,
+      "envelope_db_max_abs": 0.806,
+      "onsets_paired": 0,
+      "onset_skew_ms_mean": 0.0,
+      "onset_skew_ms_max": 0.0,
+      "rms_ratio": 1.0109,
+      "spectral_windows": [
+        {
+          "partials": 83,
+          "graded": 29,
+          "partial_db_mean_abs": 4.846,
+          "partial_db_max_abs": 41.578,
+          "aliases": [
+            [
+              8940,
+              -26.1
+            ],
+            [
+              7284,
+              -26.9
+            ],
+            [
+              994,
+              -28.2
+            ],
+            [
+              14396,
+              -28.2
+            ]
+          ],
+          "alias_db_max": -26.1,
+          "exact_hz": 218.95,
+          "cents": 1.02,
+          "at_s": 0.3,
+          "hf_db_exact": -16.0,
+          "hf_db_practical": -16.5
+        }
+      ],
+      "partial_db_mean_abs_max": 4.846,
+      "partial_db_max_abs": 41.578,
+      "alias_db_max": -26.1,
+      "pitch_cents_max_abs": 1.02,
+      "pitch_hz_max_abs": 0.12903789813184297,
+      "hf_excess_db_max": -0.5,
+      "register_writes": 181,
+      "failures": []
+    },
+    {
+      "name": "atlantis",
+      "seconds": 60.0,
+      "envelope_windows": 2998,
+      "envelope_correlation": 0.9733,
+      "envelope_db_mean_abs": 0.86,
+      "envelope_db_max_abs": 9.782,
+      "onsets_paired": 2,
+      "onset_skew_ms_mean": 3.79,
+      "onset_skew_ms_max": 7.53,
+      "rms_ratio": 0.9808,
+      "spectral_windows": [
+        {
+          "partials": 143,
+          "graded": 18,
+          "partial_db_mean_abs": 6.136,
+          "partial_db_max_abs": 49.03,
+          "aliases": [
+            [
+              756,
+              -30.7
+            ],
+            [
+              1059,
+              -33.2
+            ],
+            [
+              1549,
+              -36.7
+            ]
+          ],
+          "alias_db_max": -30.7,
+          "exact_hz": 109.04,
+          "cents": 0.53,
+          "at_s": 0.74,
+          "hf_db_exact": -31.57,
+          "hf_db_practical": -30.56
+        },
+        {
+          "partials": 318,
+          "graded": 45,
+          "partial_db_mean_abs": 5.09,
+          "partial_db_max_abs": 36.906,
+          "aliases": [
+            [
+              6433,
+              -26.2
+            ],
+            [
+              1999,
+              -26.2
+            ],
+            [
+              8962,
+              -26.6
+            ],
+            [
+              11320,
+              -26.9
+            ]
+          ],
+          "alias_db_max": -26.2,
+          "exact_hz": 387.83,
+          "cents": -6.13,
+          "at_s": 34.36,
+          "hf_db_exact": -17.75,
+          "hf_db_practical": -14.34
+        }
+      ],
+      "partial_db_mean_abs_max": 6.136,
+      "partial_db_max_abs": 49.03,
+      "alias_db_max": -26.2,
+      "pitch_cents_max_abs": 6.13,
+      "pitch_hz_max_abs": 1.3708105426198178,
+      "hf_excess_db_max": 3.41,
+      "register_writes": 12240,
+      "failures": []
+    }
+  ],
+  "passed": true,
+  "failed_scenarios": [],
+  "not_established": [
+    "No Falcon or DSP was involved; this scores the host reference of the practical kernel",
+    "Perceptual thresholds are engineering targets, not listening-test results"
+  ]
+}

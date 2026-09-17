@@ -316,7 +316,7 @@ static inline int16_t clipSample(int32_t sample) {
 
 // One native-rate stereo frame. The right output trails the left by one
 // sample, exactly as the chip model does.
-void generate(Chip *chip, int16_t *left, int16_t *right) {
+static inline void generate(Chip *chip, int16_t *left, int16_t *right) {
 	*right = clipSample(chip->rightPending);
 
 	for (uint8_t index = 0; index < chip->channels; ++index) {
@@ -399,7 +399,7 @@ static void setConnection(Chip *chip, Channel *channel) {
 	chip->slot[channel->slot1].modSource = channel->connection ? kModZero : kModPartner;
 }
 
-void reset(Chip *chip, uint8_t channels) {
+static inline void reset(Chip *chip, uint8_t channels) {
 	memset(chip, 0, sizeof(*chip));
 	chip->channels = channels;
 	chip->tremoloShift = 4;
@@ -421,7 +421,7 @@ void reset(Chip *chip, uint8_t channels) {
 	}
 }
 
-void writeRegister(Chip *chip, uint16_t reg, uint8_t value) {
+static inline void writeRegister(Chip *chip, uint16_t reg, uint8_t value) {
 	const uint8_t high = (uint8_t)((reg >> 8) & 1);
 	const uint8_t low = (uint8_t)(reg & 0xff);
 	const int8_t addressed = kAddressSlot[low & 0x1f];

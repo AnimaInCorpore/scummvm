@@ -1,0 +1,101 @@
+{
+  "date": "2026-09-16",
+  "gate": "practical OPL kernel on the emulated Falcon DSP56001: exactness and cycle cost",
+  "scummvm_commit": "73e3306a98b94472c66af1309b2300a8acd4c35a",
+  "scummvm_worktree_dirty": true,
+  "source_sha256": {
+    "dsp/oplrt.asm": "c2a40e80d0311cd698a25105076eece0b25e54ee591db97ffb13ddfb04f5102e",
+    "m68k/oplrt.s": "fad94cb18f7c515580e622e8a35bf5e8ac8d658a6199d95da42aeb3cec155490",
+    "rt-fixture.cpp": "3ccc14b52ab9be793cce34bf7a37734b197426e8c5fc31113eaa5d7822f602e0",
+    "opl-practical.h": "6d220757a63e572504985525d862fa45eccc1b490079f5d5593517798f282478",
+    "rt-bench-gate.py": "a83f321f4de6b18388598ae816629c2552e0c25055c74e014d041f0a2ea783fa",
+    "generate-tables.py": "ce204a3fb5813effe3e21d6c2bdd8fd210645b310778ec5347d16ce7f1540387"
+  },
+  "trace_sha256": "883bae533b8338fb9ca9714216412705853f52248b75ff970f8f4ddc666a893f",
+  "dsp_program_words": 1221,
+  "reference": "opl-practical.h, scored against the exact kernel by practical-gate.py",
+  "cases": [
+    {
+      "scenario": "stress",
+      "seconds": 1.0,
+      "frames": 32768,
+      "blocks": 1024,
+      "chunks": 8,
+      "register_writes": 146,
+      "parameter_events": 336,
+      "peak_events_per_chunk": 273,
+      "frame_words_compared": 32768,
+      "mismatches_against_host_kernel": 0,
+      "first_mismatch_frame": null,
+      "bit_exact": true,
+      "instruction_cycles_per_frame": 338.23,
+      "instruction_cycles_per_frame_by_range": {
+        "stages": 187.59,
+        "op_boundary": 96.99,
+        "stream_emit": 0.0,
+        "render_driver": 9.97,
+        "loaders_and_modes": 13.78,
+        "clear_mix": 1.19,
+        "emit": 5.28,
+        "block_and_channel_boundary": 22.18,
+        "render_block": 0.72,
+        "apply_events": 0.53
+      },
+      "budget_cycles_per_frame": 489.4,
+      "budget_use_percent": 69.1
+    },
+    {
+      "scenario": "atlantis",
+      "seconds": 4.0,
+      "frames": 131104,
+      "blocks": 4097,
+      "chunks": 33,
+      "register_writes": 257,
+      "parameter_events": 562,
+      "peak_events_per_chunk": 223,
+      "frame_words_compared": 131104,
+      "mismatches_against_host_kernel": 0,
+      "first_mismatch_frame": null,
+      "bit_exact": true,
+      "instruction_cycles_per_frame": 268.65,
+      "instruction_cycles_per_frame_by_range": {
+        "stages": 133.61,
+        "op_boundary": 84.57,
+        "stream_emit": 0.0,
+        "render_driver": 9.97,
+        "loaders_and_modes": 11.9,
+        "clear_mix": 1.19,
+        "emit": 5.28,
+        "block_and_channel_boundary": 20.8,
+        "render_block": 0.72,
+        "apply_events": 0.61
+      },
+      "budget_cycles_per_frame": 489.4,
+      "budget_use_percent": 54.9
+    }
+  ],
+  "budget_basis": {
+    "oscillator_hz": 32084988,
+    "clocks_per_instruction_cycle": 2,
+    "codec_rate_hz": 32779.9479,
+    "note": "Cycles are attributed by code range from Hatari's DSP profile; the host-port waits of the bench transport are excluded, SSI output and a production transport are not yet included"
+  },
+  "implemented": [
+    "block-rate envelope with the chip's rates retimed to the codec rate",
+    "tremolo and vibrato at block rate",
+    "feedback, FM and additive connections",
+    "all four OPL2 waveforms",
+    "channel skipping when silent",
+    "parameter events applied at block boundaries"
+  ],
+  "not_implemented": [
+    "SSI output and the period-paced host transport",
+    "PCM mixing",
+    "four-operator mode",
+    "rhythm mode"
+  ],
+  "not_established": [
+    "No hardware run: every cycle figure is Hatari's model",
+    "No audio was auditioned from the DSP; the practical kernel's quality is the host gate's"
+  ]
+}

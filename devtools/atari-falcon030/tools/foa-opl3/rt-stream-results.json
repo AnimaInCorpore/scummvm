@@ -1,0 +1,26 @@
+{
+  "date": "2026-09-16",
+  "gate": "practical OPL kernel stream mode on the emulated Falcon: transport, timing, exactness",
+  "source_sha256": {
+    "dsp/oplrt.asm": "c2a40e80d0311cd698a25105076eece0b25e54ee591db97ffb13ddfb04f5102e",
+    "m68k/oplplay.s": "ec7642957deb94fe372adbd5522efaa77a04f4935b275eac36e433f187fd8ce3",
+    "rt-fixture.cpp": "3ccc14b52ab9be793cce34bf7a37734b197426e8c5fc31113eaa5d7822f602e0",
+    "opl-practical.h": "6d220757a63e572504985525d862fa45eccc1b490079f5d5593517798f282478"
+  },
+  "trace_sha256": "883bae533b8338fb9ca9714216412705853f52248b75ff970f8f4ddc666a893f",
+  "seconds": 20.0,
+  "periods_submitted": 1365,
+  "periods_rendered": 1365,
+  "late_periods": 0,
+  "register_writes": 2554,
+  "parameter_events": 6053,
+  "checksum_expected": 7819011,
+  "checksum_dsp": 7819011,
+  "word_exact": true,
+  "on_time": true,
+  "not_established": [
+    "No audio captured or auditioned from the emulator; the checksum proves the rendered words",
+    "The 68030 here does nothing but submit periods; a game's load is not modelled",
+    "No hardware run"
+  ]
+}
