@@ -55,6 +55,9 @@ EXACT_DIVISORS = {11025: 0xA5, 22050: 0xD2}
 # backends/platform/atari/atari-dsp.h kPcmRateHz: what the mixer runs at, so
 # anything above it is downsampled on the way out and can alias.
 PCM_RATE_HZ = 12292
+# VCTL header, VOC file header, block header, divisor and codec, terminator:
+# everything in a record that is not the tags or the samples.
+FRAMING_BYTES = 8 + VOC_HEADER_SIZE + 4 + 2 + 1
 
 
 def voc_divisor(rate):
@@ -144,6 +147,49 @@ def decode(flac, data):
     return done.stdout
 
 
+def voc_rates(cap):
+    """[(rate, divisor)] a VOC block 1 can name, at or below cap, best first.
+
+    getSampleRateFromVOCRate turns one byte into a rate, so only a coarse set
+    exists; 11,025 and 22,050 are special-cased there and are not otherwise
+    reachable.
+    """
+    found = {}
+    for divisor in range(256):
+        rate = 1000000 // (256 - divisor)
+        if rate <= cap:
+            found.setdefault(rate, divisor)
+    for exact, divisor in EXACT_DIVISORS.items():
+        if exact <= cap:
+            found[exact] = divisor
+    return sorted(found.items(), reverse=True)
+
+
+def refit(ffmpeg, data, frames, source_rate, cap, room):
+    """Resample one FLAC stream down to the best rate that fits its budget.
+
+    The Ultimate Talkie editions remaster the speech - 16-bit at about 48 kHz -
+    but their index still points into the layout of the original 8-bit game
+    file, and the new takes are longer than the ones they replace, so nothing
+    fits at the original rate and the audio has to come down. Since it is being
+    resampled anyway it goes straight to what the Falcon mixer can use, with a
+    proper filter here rather than the mixer's unfiltered interpolation, and a
+    line too long for its budget even then drops another step rather than being
+    cut short.
+    """
+    for rate, _ in voc_rates(cap):
+        if room is not None and round(frames * rate / source_rate) > room:
+            continue
+        done = subprocess.run([ffmpeg, "-v", "error", "-f", "flac", "-i", "-",
+                               "-ar", str(rate), "-ac", "1", "-f", "u8", "-"],
+                              input=data, capture_output=True)
+        if done.returncode != 0:
+            raise RuntimeError(f"ffmpeg failed: {done.stderr.decode(errors='replace').strip()}")
+        if room is None or len(done.stdout) <= room:
+            return done.stdout, rate
+    raise ValueError(f"no rate at or below {cap} Hz fits {room} bytes")
+
+
 def build_record(tags, pcm, rate):
     """The bytes that belong at org_offset: VCTL block, then a one-block VOC."""
     voc = (VOC_DESC + struct.pack("<HHH", VOC_HEADER_SIZE, VOC_VERSION, VOC_ID)
@@ -151,6 +197,37 @@ def build_record(tags, pcm, rate):
            + bytes((voc_divisor(rate), 0))   # divisor, codec 0 = 8-bit unsigned PCM
            + pcm + b"\x00")                  # terminator block
     return b"VCTL" + struct.pack(">I", len(tags) + 8) + tags + voc
+
+
+def make_record(args, entries, order, source, position):
+    """(org_offset, the bytes that belong there, the rate they play at)."""
+    org, new, num_tags, comp = entries[order[position]]
+    tags = source[new:new + num_tags]
+    data = source[new + num_tags:new + num_tags + comp]
+    rate, channels, bits, frames = read_streaminfo(data)
+    # What the next sample's offset leaves for this one.
+    room = (entries[order[position + 1]][0] - org) if position + 1 < len(order) else None
+    budget = None if room is None else room - (len(tags) + FRAMING_BYTES)
+
+    if args.refit:
+        pcm, rate = refit(args.ffmpeg, data, frames, rate, args.refit, budget)
+    else:
+        if channels != 1:
+            raise ValueError(f"sample at {org}: {channels} channels. A VOC block 1 is mono; "
+                             "rebuild with --refit, which downmixes")
+        if bits != 8:
+            raise ValueError(f"sample at {org}: {bits} bits. A VOC block 1 holds 8-bit "
+                             "audio, and this file's samples are not what the offsets were "
+                             "sized for - rebuild it with --refit")
+        pcm = decode(args.flac, data)
+        if args.lowpass and rate > PCM_RATE_HZ:
+            pcm = lowpass(args.ffmpeg, pcm, rate, args.lowpass)
+
+    record = build_record(tags, pcm, rate)
+    if room is not None and len(record) > room:
+        raise ValueError(f"sample at {org}: rebuilt to {len(record)} bytes "
+                         f"but only {room} are free before the next one")
+    return org, record, rate
 
 
 def main():
@@ -167,6 +244,12 @@ def main():
                         help="band-limit samples that the Falcon mixer will have to downsample "
                              f"(those above {PCM_RATE_HZ} Hz), so they do not alias in ScummVM's "
                              "unfiltered rate conversion; default 6100 Hz, just under its 6,146 Hz Nyquist")
+    parser.add_argument("--refit", type=int, nargs="?", const=12345, metavar="MAX_HZ",
+                        help="resample every sample to the best rate at or below MAX_HZ that fits "
+                             "its offset budget, instead of restoring it unchanged. Needed for the "
+                             "Ultimate Talkie editions, whose remastered 16-bit 48 kHz takes do not "
+                             "fit the original layout their index points into; default 12345 Hz, the "
+                             "highest a VOC block 1 can name at or below the mixer's rate")
     parser.add_argument("--ffmpeg", default="ffmpeg", help="the ffmpeg CLI to filter with")
     parser.add_argument("--verify", type=int, nargs="?", const=200, metavar="N",
                         help="after writing, read N random samples back out of the .sou and "
@@ -180,11 +263,11 @@ def main():
     except (OSError, subprocess.CalledProcessError):
         parser.error(f"cannot run {args.flac!r}; install flac or pass --flac")
 
-    if args.lowpass:
+    if args.lowpass or args.refit:
         try:
             subprocess.run([args.ffmpeg, "-version"], capture_output=True, check=True)
         except (OSError, subprocess.CalledProcessError):
-            parser.error(f"cannot run {args.ffmpeg!r}; install ffmpeg or drop --lowpass")
+            parser.error(f"cannot run {args.ffmpeg!r}; install ffmpeg, or drop --lowpass/--refit")
 
     entries = read_index(args.input)
     print(f"{args.input.name}: {len(entries)} samples, "
@@ -201,23 +284,7 @@ def main():
     with args.output.open("wb") as out, \
          concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
         def work(position):
-            index = order[position]
-            org, new, num_tags, comp = entries[index]
-            tags = source[new:new + num_tags]
-            data = source[new + num_tags:new + num_tags + comp]
-            rate, channels, bits, _ = read_streaminfo(data)
-            if channels != 1 or bits != 8:
-                raise ValueError(f"sample at {org}: {channels} channels, {bits} bits; "
-                                 "a VOC block 1 holds 8-bit mono only")
-            pcm = decode(args.flac, data)
-            if args.lowpass and rate > PCM_RATE_HZ:
-                pcm = lowpass(args.ffmpeg, pcm, rate, args.lowpass)
-            record = build_record(tags, pcm, rate)
-            room = (entries[order[position + 1]][0] - org) if position + 1 < len(order) else None
-            if room is not None and len(record) > room:
-                raise ValueError(f"sample at {org}: rebuilt to {len(record)} bytes "
-                                 f"but only {room} are free before the next one")
-            return org, record, rate
+            return make_record(args, entries, order, source, position)
 
         for done, (org, record, rate) in enumerate(pool.map(work, range(limit)), 1):
             out.seek(org)
@@ -254,14 +321,7 @@ def verify(args, entries, order, source, picks):
     bad = 0
     with args.output.open("rb") as out:
         for position in picks:
-            org, new, num_tags, comp = entries[order[position]]
-            tags = source[new:new + num_tags]
-            data = source[new + num_tags:new + num_tags + comp]
-            rate, _, _, _ = read_streaminfo(data)
-            pcm = decode(args.flac, data)
-            if args.lowpass and rate > PCM_RATE_HZ:
-                pcm = lowpass(args.ffmpeg, pcm, rate, args.lowpass)
-            expected = build_record(tags, pcm, rate)
+            org, expected, _ = make_record(args, entries, order, source, position)
             out.seek(org)
             if out.read(len(expected)) != expected:
                 print(f"  sample at {org} does not match")

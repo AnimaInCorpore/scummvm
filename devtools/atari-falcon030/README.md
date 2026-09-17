@@ -240,6 +240,19 @@ leaves the region just above Nyquist barely touched, and that residue
 shimmers on long, bright vowels. Atlantis never showed any of this because
 11,025 Hz is upsampled instead.
 
+**The Ultimate Talkie editions need `--refit` instead.** Monkey Island 2
+remasters its speech to 16-bit at about 48 kHz, but its index still points
+into the layout of the original 8-bit 22,050 Hz file, and the new takes are
+longer than the ones they replace: nothing fits, not even at the original
+rate (6,805 of 6,807 overrun). That audio cannot be restored, only rebuilt
+at a lower rate, so `--refit` resamples each sample to the best rate a VOC
+block 1 can name at or below 12,345 Hz - just over the mixer's own rate, so
+the resampling happens here with a proper filter rather than in the mixer's
+unfiltered interpolation. 6,795 of 6,808 land at 12,345 Hz; the 13 that are
+still too long step down rather than being cut short, one as far as 6,134 Hz.
+The result is 268 MB in 53 s, and its gate passes with speech on: no late
+period, no protocol error, and no offset the game asks for that is missing.
+
 ## MT-32 on the same machine
 
 **Current direction: compiled MIDI/iMUSE and MT-32 data, synthesized live.**
