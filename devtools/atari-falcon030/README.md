@@ -217,6 +217,24 @@ synthesis and delivery run from an interrupt, so the game's loop stalls at
 scene changes (seconds) no longer freeze the music. Nothing has run on
 hardware. See the same directory's README for every figure.
 
+**Speech needs an uncompressed `monster.sou`.** The build defines no codec -
+the DSP is busy with the OPL kernel and the 68030 has nothing spare beside
+the game loop - so `Sound::setupSfxFile` is left with the `sou` entry alone.
+Of the four games only Atlantis ships one; the other three ship FLAC.
+[`tools/monster-sou-rebuild.py`](tools/monster-sou-rebuild.py) rebuilds the
+`.sou` from a `.sof`, which works because the compressed file's index carries
+each sample's original offset and FLAC is lossless, so every record is exactly
+the size it occupied before. Day of the Tentacle rebuilds to 269 MB in 34 s
+and plays on the emulated Falcon with no late period.
+
+Its `--lowpass` matters as much as the rebuild. That game's speech is mostly
+22,050 Hz against the mixer's 12,292, and `audio/rate.cpp` resamples by linear
+interpolation with no anti-alias filter, so everything above 6,146 Hz folds
+back into the speech band - bright voices come out smeared, which is the same
+blur the OPL kernel had at 32.78 kHz. Band-limiting the source at 5.8 kHz
+costs nothing at run time and leaves the sample count, and so every offset,
+untouched. Atlantis never showed this because 11,025 Hz is upsampled instead.
+
 ## MT-32 on the same machine
 
 **Current direction: compiled MIDI/iMUSE and MT-32 data, synthesized live.**
