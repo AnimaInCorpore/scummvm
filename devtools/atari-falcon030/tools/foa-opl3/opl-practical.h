@@ -3,8 +3,8 @@
 //
 // The exact kernel in opl-kernel.h costs about twice the DSP's budget because
 // the chip's envelope advances every sample. This kernel gives that up: it
-// renders at the Falcon codec's 32,779.9479 Hz in operator-major blocks of
-// 32 frames, advances every envelope and the LFO once per block, and applies
+// renders at the Falcon codec's 49,169.92 Hz in operator-major blocks of
+// 64 frames, advances every envelope and the LFO once per block, and applies
 // register writes at block boundaries. Everything else keeps the chip's
 // arithmetic: the 1,024-step waveforms, the log-domain envelope in the same
 // 0.1875 dB units, the feedback and modulation depth, f-number pitch.
@@ -231,7 +231,7 @@ static void opBoundary(Chip *chip, int channel, int which) {
 	switch (w[OP_STATE]) {
 	case kAttack:
 		env = mpyHi(env, (int32_t)kOplAttackBlock[w[OP_RATE_A]]);
-		if (env < (1 << 12)) {
+		if (env < OPL_PRACTICAL_ATTACK_DONE) {
 			env = 0;
 			w[OP_STATE] = kDecay;
 		}

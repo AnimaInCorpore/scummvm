@@ -30,11 +30,11 @@
  * The Falcon030 DSP as the audio output: the practical OPL kernel of
  * devtools/atari-falcon030/tools/foa-opl3 owns the codec, synthesizes the
  * AdLib voices in blocks and adds the host's PCM mix, and the 68030 feeds
- * it one 480-frame period at a time through the host port.
+ * it one 768-frame period at a time through the host port.
  *
  * A period is a payload of parameter events for the kernel's operator and
- * channel records, stamped with the block (of 15) they land in, plus 160
- * mono samples at a third of the 32,780 Hz codec rate. The DSP acknowledges
+ * channel records, stamped with the block (of 12) they land in, plus 192
+ * mono samples at a quarter of the 49,170 Hz codec rate. The DSP acknowledges
  * a payload before rendering it, so the 68030 stays one period ahead; a
  * period that arrives late repeats the previous one and is counted.
  *
@@ -65,15 +65,15 @@
 class AtariDspAudio {
 public:
 	enum {
-		kCodecRateHz = 32780,        // 25.175 MHz / 4 / 192, rounded
-		kPeriodFrames = 480,
-		kPeriodBlocks = 15,
-		kBlockFrames = 32,
-		kPcmPerPeriod = 160,
-		kPcmRateHz = 10927,          // a third of the codec rate, rounded
+		kCodecRateHz = 49170,        // 25.175 MHz / 256 / 2, rounded: within 1.1% of the chip's own rate
+		kPeriodFrames = 768,
+		kPeriodBlocks = 12,
+		kBlockFrames = 64,
+		kPcmPerPeriod = 192,
+		kPcmRateHz = 12292,          // a quarter of the codec rate, rounded
 		kMaxEvents = 2048,           // the kernel's table holds 4,096; a period never needs half
 		kPayloadWords = 1 + 2 * kMaxEvents + 1 + kPcmPerPeriod,
-		kProduceAhead = 4,           // periods queued ahead of delivery: 58 ms of tolerance
+		kProduceAhead = 4,           // periods queued ahead of delivery: 62 ms of tolerance
 		kExtendBelow = 2,            // refused production extends while fewer than this are queued
 		kPeriods = kProduceAhead + 2 // buffers: the queue, one in flight, one being filled
 	};

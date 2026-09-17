@@ -30,7 +30,7 @@ TOS = MXDRV / "third_party/f030dsp3d/tools/tos402.rom"
 
 OSCILLATOR = 32084988
 CLOCKS_PER_CYCLE = 2
-CODEC_RATE = 32779.9479
+CODEC_RATE = 25175000.0 / 512.0   # 49,169.92 Hz
 BUDGET = OSCILLATOR / CLOCKS_PER_CYCLE / CODEC_RATE
 
 LABEL_RE = re.compile(r"^\s*\d+\s+([A-Za-z_][A-Za-z0-9_]*):\s*(;.*)?$")

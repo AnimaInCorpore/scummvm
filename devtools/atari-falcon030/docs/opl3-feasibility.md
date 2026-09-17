@@ -6,9 +6,11 @@ reproduction of F030MXDRV measurements and a capture of the game's own OPL
 register stream; it now also records the outcome.
 
 **Outcome, 2026-09-16 (see [Outcome](#outcome) at the end).** An exact OPL
-renderer does not fit the DSP, but a practical block-rate one does: measured
-at 55% of the 32.780 kHz budget on the Atlantis stream and 69% with nine
-feedback FM channels held with tremolo and vibrato, word exact against its
+renderer does not fit the DSP, but a practical block-rate one does. Since
+2026-09-17 it runs at the codec's 49.17 kHz, next to the chip's own rate,
+because at 32.78 kHz its aliasing was audible: measured at 62% of that
+budget on the Atlantis stream and 80% with nine feedback FM channels held
+with tremolo and vibrato (55% and 69% at 32.78 kHz), word exact against its
 host reference, streaming through the SSI without a late period, and
 playing the game's opening on the emulated Falcon from the ScummVM build
 (`opl_driver=atari_dsp`). It preserves the AdLib arrangement and live
@@ -434,14 +436,14 @@ each with a gate and a committed result file. In short:
 
 | Measurement | Result |
 | --- | ---: |
-| Practical kernel against the exact one, sustained tones | levels within 0.1 dB, partials within 0.8 dB, pitch within 0.5 cent |
-| Envelope contour correlation, Atlantis 60 s | 0.973, mean level error 0.86 dB |
-| Aliasing, brightest Atlantis passage | +3.4 dB in the 8-15 kHz band |
-| DSP cost, Atlantis first 4 s | 268.7 cycles per frame, 55% of budget, word exact |
-| DSP cost, nine feedback FM channels with LFO held | 338.2 cycles per frame, 69% of budget, word exact |
-| Stream mode, Atlantis 20 s through the SSI | 1,365 periods, none late, checksum equal |
-| The game on the emulated Falcon | 6,383 periods through 90 s of the opening, one late (the first), 111 extension periods (1.6 s of sequencer slip inside resource loads), opening music recorded |
-| Day of the Tentacle, Monkey Island 1 and 2 on the same build | 6,345 / 6,337 periods in 90 s, 8,348 in 120 s; one late each (the first); 91 / 91 / 68 extension periods; opening music recorded |
+| Practical kernel against the exact one, sustained tones | levels within 0.1 dB, partials within 0.6 dB, pitch within 0.7 cent |
+| Envelope contour correlation, Atlantis 60 s | 0.982, mean level error 0.71 dB, onset skew at most 2.8 ms |
+| Aliasing: energy above 3 kHz against the exact kernel, Atlantis 60 s | +0.9 dB at 49.17 kHz (+2.7 dB at 32.78 kHz, heard as blurred instruments) |
+| DSP cost at 49.17 kHz, Atlantis first 4 s | 201.1 cycles per frame, 62% of budget, word exact |
+| DSP cost at 49.17 kHz, nine feedback FM channels with LFO held | 262.1 cycles per frame, 80% of budget, word exact |
+| Stream mode through the SSI | Atlantis 20 s: 1,280 periods; worst-case load 10 s: 640 periods; none late, checksums equal |
+| The game on the emulated Falcon | 6,166 periods through 90 s of the opening, none late, 98 extension periods (1.5 s of sequencer slip inside resource loads), opening music recorded |
+| Day of the Tentacle, Monkey Island 1 and 2 on the same build | 6,137 / 6,179 periods in 90 s, 7,716 in 120 s; none late; 80 / 97 / 60 extension periods; opening music recorded |
 
 Steps 2 through 4 of the sequence above are therefore done in emulation
 with the practical kernel; step 5 (Sam & Max's layered path, hardware) is
@@ -451,8 +453,8 @@ as the transport's PCM underrun count shows) no longer touch the music;
 extension periods cover the stretches where the interrupt may not run
 iMUSE, at the cost of 14.6 ms of sequencer slip each. The remaining
 engineering items are the per-operator boundary pass (the second-largest
-DSP cost, unoptimized), the first period (the kernel starts transmitting
-before it has one), a listening pass that includes the slips, and a
+DSP cost, unoptimized, and the margin now that the rate is 49.17 kHz), a
+listening pass that includes the slips, and a
 hardware run with the same counters.
 
 ## Evidence and reproduction

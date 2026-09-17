@@ -14,8 +14,8 @@ and its own committed result file.
 | Exact host kernel, bit exact against Nuked-OPL3 | [kernel-results.json](kernel-results.json) | `kernel-gate.py` |
 | Exact DSP synthesis loop: 209% of budget | [bench-results.json](bench-results.json) | `bench-gate.py` |
 | Practical kernel against the exact one | [practical-results.json](practical-results.json) | `practical-gate.py` |
-| Practical DSP kernel: word exact, 55-69% of budget | [rt-bench-results.json](rt-bench-results.json) | `rt-bench-gate.py` |
-| Stream mode through the SSI: word exact, no late period | [rt-stream-results.json](rt-stream-results.json) | `rt-stream-gate.py` |
+| Practical DSP kernel at 49.17 kHz: word exact, 62-80% of budget | [rt-bench-results.json](rt-bench-results.json) | `rt-bench-gate.py` |
+| Stream mode through the SSI: word exact, no late period, also under the worst-case load | [rt-stream-results.json](rt-stream-results.json), [rt-stream-stress-results.json](rt-stream-stress-results.json) | `rt-stream-gate.py` |
 | Atlantis on the emulated Falcon with the DSP build | [game-results.json](game-results.json) | `game-gate.py` |
 | Day of the Tentacle on the same build | [game-results-tentacle.json](game-results-tentacle.json) | `game-gate.py --gameid tentacle` |
 | The Secret of Monkey Island (Ultimate Talkie) on the same build | [game-results-monkey.json](game-results-monkey.json) | `game-gate.py --gameid monkey` |
@@ -252,20 +252,31 @@ and no output-rate conversion is modelled.
 its feedback and modulation depth and its f-number pitch, and gives up
 sample equality in three places:
 
-- **Codec-rate synthesis.** It runs at the Falcon codec's 32,779.9479 Hz
-  instead of the chip's 49,716 Hz, with the phase, envelope and LFO clocks
+- **Codec-rate synthesis.** It runs at the Falcon codec's 49,169.92 Hz,
+  1.1% below the chip's 49,716 Hz, with the phase, envelope and LFO clocks
   retimed (`generate-tables.py` measures every envelope rate on the exact
-  machine and folds it into one step per block). Partials above 16.4 kHz
-  alias; in the brightest Atlantis passage the 8-15 kHz band carries 3.4 dB
-  more energy than the exact kernel's.
+  machine and folds it into one step per block). It first ran at the
+  codec's 32,780 Hz, which the budget made comfortable; but the bright
+  patches (full-level modulators with feedback 4 to 7) put enough energy
+  above 16.4 kHz that it folded back as a haze the first listener called
+  blurry. Against the exact kernel the Atlantis stream was 2.7 dB louder
+  above 3 kHz on average and 8 to 15 dB in the worst stretches; the same
+  kernel rendered at twice the rate lost the excess, which made it
+  aliasing rather than arithmetic. At 49.17 kHz the fold sits where the
+  chip's own does: the excess is 0.9 dB and the mean third-octave
+  difference 1.8 dB, from 2.9.
 - **Block-rate control.** Envelopes, tremolo and vibrato advance once per
-  32-frame block (0.98 ms), which is what lets each operator run as one
+  64-frame block (1.30 ms), which is what lets each operator run as one
   hardware loop over the block, operator-major, the way the sibling YM2151
-  kernel does. Attack is a per-block retention factor, decay and release a
-  per-block step; sustain level, key scaling, the envelope-type flag, the
-  silence snap and the instant attack keep their chip semantics.
+  kernel does. Decay and release are a per-block step; attack is a
+  per-block retention factor fitted to the audible part of the chip's curve
+  (full attenuation down to -6 dB) and ended four units above zero, because
+  the chip's attack is an exponential with a slow linear tail and a factor
+  fitted to its total time started a slow attack 10 ms early. Sustain
+  level, key scaling, the envelope-type flag, the silence snap and the
+  instant attack keep their chip semantics.
 - **Block-boundary writes.** A register write takes effect at the start of
-  the block it falls in, so up to 0.98 ms early. Key-on edges are counted,
+  the block it falls in, so up to 1.30 ms early. Key-on edges are counted,
   not sampled, so an off-then-on inside one block still retriggers.
 
 Register decoding stays on the 68030 in the same header (`Decoder`): each
@@ -280,20 +291,20 @@ signal's own rate, on what a listener would notice. From
 
 | Scenario | Envelope corr. | Level error mean / max | Partials mean / max | Pitch | Notes |
 | --- | ---: | ---: | ---: | ---: | --- |
-| sustained tone | 1.0000 | 0.00 / 0.03 dB | 0.29 / 0.56 dB | 0.4 c | |
-| pitch sweep, blocks 2-6 | 0.9975 | 0.04 / 0.50 dB | 0.32 / 0.77 dB | 3.4 c at 73 Hz (0.14 Hz) | |
-| envelopes, both types | 0.9999 | 0.10 / 1.88 dB | 1.51 / 4.56 dB | 0.4 c | partial error is inside slow attacks |
-| feedback 0-7 | 0.9970 | 0.06 / 1.52 dB | 0.42 / 1.31 dB | 0.5 c | |
-| four waveforms, both connections | 0.9995 | 0.08 / 1.14 dB | 0.39 / 0.76 dB | 0.2 c | |
-| tremolo, both depths | 0.9998 | 0.01 / 0.69 dB | | | depth 1.72 vs 1.70 dB, 5.33 vs 5.21 dB |
-| vibrato, both depths | 0.9998 | 0.01 / 0.56 dB | | | depth 11.5 vs 13.5 c, 26.4 vs 27.1 c, period 165 ms both |
-| nine-channel polyphony | 0.9947 | 0.07 / 0.81 dB | | | |
-| Atlantis, 60 s | 0.9733 | 0.86 / 9.78 dB | | | mix of coincident partials; +3.4 dB in 8-15 kHz |
+| sustained tone | 1.0000 | 0.00 / 0.05 dB | 0.24 / 0.59 dB | 0.6 c | |
+| pitch sweep, blocks 2-6 | 0.9981 | 0.03 / 0.64 dB | 0.25 / 0.36 dB | 0.6 c | |
+| envelopes, both types | 0.9999 | 0.09 / 1.35 dB | 1.42 / 4.43 dB | 0.7 c | partial error is inside slow attacks |
+| feedback 0-7 | 0.9991 | 0.04 / 0.80 dB | 0.66 / 1.37 dB | 0.7 c | |
+| four waveforms, both connections | 0.9996 | 0.09 / 0.99 dB | 0.16 / 0.58 dB | 0.7 c | |
+| tremolo, both depths | 1.0000 | 0.01 / 0.16 dB | | | depth 1.72 vs 1.71 dB, 5.33 vs 5.22 dB |
+| vibrato, both depths | 1.0000 | 0.01 / 0.13 dB | | | depth 11.5 vs 13.7 c, 26.4 vs 27.3 c, period 165 ms both |
+| nine-channel polyphony | 0.9946 | 0.07 / 0.88 dB | | | |
+| Atlantis, 60 s | 0.9817 | 0.71 / 7.91 dB | | | mix of coincident partials; +0.4 dB in 8-15 kHz |
 
-The onset skew is at most 1.6 ms on the synthetic scenarios and 7.5 ms on
-the trace, where the exact chip starts a slow attack on its next rate tick.
-The polyphonic peak errors come from partials of different channels adding
-with phases the block quantization shifts, not from levels.
+The onset skew is at most 2.7 ms on the synthetic scenarios and 2.8 ms on
+the trace (10.4 ms before the attack factor was refitted). The polyphonic
+peak errors come from partials of different channels adding with phases
+the block quantization shifts, not from levels.
 
 ## The practical DSP kernel and its cost
 
@@ -313,37 +324,50 @@ DSP profile by code range. From [rt-bench-results.json](rt-bench-results.json):
 
 | | Nine feedback FM channels, tremolo and vibrato, held | Atlantis, first 4 s |
 | --- | ---: | ---: |
-| Frames compared | 32,768 | 131,104 |
+| Frames compared | 49,152 | 196,672 |
 | Mismatches | 0 | 0 |
-| Stages (per-frame) | 187.6 | 133.6 |
-| Per-operator boundary pass | 97.0 | 84.6 |
-| Loaders, modes, driver | 23.8 | 21.9 |
-| Block and channel boundary | 22.2 | 20.8 |
-| Emit, clear, events | 7.0 | 7.1 |
-| **Instruction cycles per frame** | **338.2** | **268.7** |
-| Share of the 489.4-cycle budget | 69% | 55% |
+| Stages (per-frame) | 183.8 | 130.6 |
+| Per-operator boundary pass | 48.5 | 42.3 |
+| Loaders, modes, driver | 11.9 | 11.0 |
+| Block and channel boundary | 11.1 | 10.4 |
+| Emit, clear, events | 6.9 | 6.9 |
+| **Instruction cycles per frame** | **262.1** | **201.1** |
+| Share of the 326.3-cycle budget at 49.17 kHz | 80% | 62% |
 
-The boundary pass is the obvious next optimization (it walks the record
-with indexed accesses), but the budget no longer needs it. The whole
-program is 1,221 words; the stages and the operator pass live in the 512
-words of internal program RAM, everything else in external.
+Everything but the stages is per-block work, and that is why the block is
+64 frames. At 48 frames (the 0.98 ms of the first version's 32 frames at
+32.78 kHz) the same two cases cost 88% and 69%, which bit-exactness and the
+budget arithmetic accepted and the transport did not: the kernel idles for
+a millisecond or so per period while the host's 1 kHz tick notices READY
+and sends the payload, so the stress case overran in the stream gate, and
+so did Atlantis's densest passage in the game. The boundary pass still
+walks the record with indexed accesses and remains the obvious next
+optimization. The whole program is 1,246 words; the stages and the
+operator pass live in the 512 words of internal program RAM, everything
+else in external.
 
 ## Stream mode
 
-The same program owns the codec in production: a 1,920-word SSI ring holds
-two 480-frame periods of interleaved stereo, transmitted under interrupt
-through r6, and each period arrives from the host as events plus 160 mono
-PCM samples at a third of the codec rate, expanded by linear interpolation
-and added to the FM mix under a master gain. The DSP acknowledges a payload
-before rendering it, with its period and late counters in the
-acknowledgement, so the host stays one period ahead; a period that is not
-ready in time repeats and is counted.
+The same program owns the codec in production: a 3,072-word SSI ring holds
+two 768-frame periods (15.62 ms each) of interleaved stereo, transmitted
+under interrupt through r6, and each period arrives from the host as events
+plus 192 mono PCM samples at a quarter of the codec rate (12,292 Hz),
+expanded by linear interpolation and added to the FM mix under a master
+gain. The DSP acknowledges a payload before rendering it, with its period
+and late counters in the acknowledgement, so the host stays one period
+ahead; a period that is not ready in time repeats and is counted. The
+first period waits until the transmitter has just entered the ring half it
+is about to render, so it gets a whole half like every later one and the
+stream does not open with a late period.
 
 [m68k/oplplay.s](m68k/oplplay.s) drives that protocol with direct host-port
 writes, and [rt-stream-gate.py](rt-stream-gate.py) checks the emitted words
 by checksum against the host reference. From
 [rt-stream-results.json](rt-stream-results.json): 20 s of the Atlantis
-stream, 1,365 periods submitted and rendered, none late, checksum equal.
+stream, 1,280 periods submitted and rendered, none late, checksum equal;
+and from [rt-stream-stress-results.json](rt-stream-stress-results.json),
+`--scenario stress`: 10 s of nine feedback FM channels with both LFOs held,
+640 periods, none late, checksum equal.
 
 ## In the game
 
@@ -351,7 +375,7 @@ The ScummVM build wires it in without touching the AdLib driver:
 
 - `backends/platform/atari/atari-dsp.cpp` boots the kernel through the
   two-stage loader (`dsp-opl-image.h`, generated by `build-dsp.sh`),
-  uploads the tables, routes the DSP's SSI to the DAC at 32.780 kHz and
+  uploads the tables, routes the DSP's SSI to the DAC at 49.170 kHz and
   runs both delivery and production from an MFP Timer A interrupt at about
   1 kHz. Delivery takes one protocol step per tick: announce, READY, a
   paced blast, acknowledgement. Production runs whenever fewer than four
@@ -364,14 +388,14 @@ The ScummVM build wires it in without touching the AdLib driver:
   resource load holds SCUMM's resource mutex for over 100 ms) or a
   production call runs long (iMUSE spends up to a quarter second in one
   callback at a jump), the tick submits extension periods without
-  callbacks: the voices carry on and the sequencer slips 14.6 ms each,
+  callbacks: the voices carry on and the sequencer slips 15.6 ms each,
   where the kernel would otherwise loop its last period.
 - `backends/platform/atari/dsp-opl.cpp` is the `OPL::OPL` backend
   (`opl_driver=atari_dsp`, OPL2 only): register writes go through the
   decoder into the period being produced, and the driver's 250 Hz callbacks
   run inside period production on the audio clock, so each callback's
   writes land in the block that corresponds to its time.
-- `AtariMixerManager` in DSP mode mixes speech and effects at 10,927 Hz
+- `AtariMixerManager` in DSP mode mixes speech and effects at 12,292 Hz
   mono on the main loop, eight period chunks ahead into a ring the
   interrupt takes from (the mixer's read path streams speech from disk,
   which only the main loop can do), and forwards the music volume as the
@@ -382,18 +406,17 @@ The ScummVM build wires it in without touching the AdLib driver:
 [game-gate.py](game-gate.py) runs Atlantis on the emulated Falcon with that
 build, records Hatari's DAC output and reads the transport's counters from
 the log. From [game-results.json](game-results.json): the kernel boots, the
-game starts, 6,383 periods stream through 90 s of its opening with no
-protocol error and one late period, the first (the kernel starts
-transmitting before the host has a period for it); after that no tick found
-the queue empty. The loop stalled for 2,930 periods of PCM (43 s, nearly all
+game starts, 6,166 periods stream through 90 s of its opening with no
+protocol error and no late period, and no tick found the queue empty once
+the stream was running. The loop stalled for 2,708 periods of PCM (42 s, nearly all
 of it engine start-up before the first scene, the rest scene changes) while
-the music went on, and 111 extension periods (1.6 s of sequencer slip)
-covered resource loads of up to 149 ms and one iMUSE callback of 246 ms.
+the music went on, and 98 extension periods (1.5 s of sequencer slip)
+covered resource loads of up to 143 ms and one iMUSE callback of 244 ms.
 The recording carries the opening music at -12 dBFS peak.
 
 The build's profile admits three more DOS games on the same AdLib driver,
 and each runs the same gate on the same binary with the same shape of
-result: one late period, the first; no tick with an empty queue after it;
+result: no late period; no tick with an empty queue once the stream runs;
 no protocol error; its opening music in the recording. Speech is off in all
 of them (the gate mutes it, and these editions ship theirs as FLAC, which
 this build does not decode). Monkey Island 2 opens on a difficulty screen
@@ -404,9 +427,9 @@ game got to.
 
 | Game | Periods | Extension periods | Music peak | Results |
 | --- | ---: | ---: | ---: | --- |
-| Day of the Tentacle, CD | 6,345 in 90 s | 91 | -24 dBFS | [game-results-tentacle.json](game-results-tentacle.json) |
-| The Secret of Monkey Island, Ultimate Talkie | 6,337 in 90 s | 91 | -24 dBFS | [game-results-monkey.json](game-results-monkey.json) |
-| Monkey Island 2, Ultimate Talkie | 8,348 in 120 s | 68 | -17 dBFS | [game-results-monkey2.json](game-results-monkey2.json) |
+| Day of the Tentacle, CD | 6,137 in 90 s | 80 | -24 dBFS | [game-results-tentacle.json](game-results-tentacle.json) |
+| The Secret of Monkey Island, Ultimate Talkie | 6,179 in 90 s | 97 | -25 dBFS | [game-results-monkey.json](game-results-monkey.json) |
+| Monkey Island 2, Ultimate Talkie | 7,716 in 120 s | 60 | -18 dBFS | [game-results-monkey2.json](game-results-monkey2.json) |
 
 So a v6 game and the two Monkey Islands fit in the 14 MB beside the DSP
 transport at least through their openings.
@@ -443,7 +466,7 @@ presence and level, not auditioned.
   registers; the fault has not recurred in the nine runs since, across all
   four games, but its cause was not established.
 - The sequencer's slips are not audited: an extension period delays iMUSE
-  by 14.6 ms, 1.5 s over the opening, inside resource loads and a long
+  by 15.6 ms, 1.5 s over the opening, inside resource loads and a long
   callback, and nobody has listened for them. Running iMUSE in interrupt
   context rests on the same guarantee the threaded backends rely on, that
   everything it shares with the engine sits behind a mutex; the Atari's

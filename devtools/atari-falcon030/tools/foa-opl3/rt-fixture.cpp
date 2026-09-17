@@ -140,7 +140,9 @@ int main(int argc, char **argv) {
 	const char *trace = nullptr;
 	const char *play = nullptr;
 	double seconds = 4.0;
-	uint32 chunkBlocks = 128;
+	// The bench output area holds 4,096 frames.
+	const uint32 kMaxChunkBlocks = 4096 / P::kBlockFrames;
+	uint32 chunkBlocks = kMaxChunkBlocks;
 	for (int i = 4; i < argc; ++i) {
 		if (!std::strcmp(argv[i], "--trace") && i + 1 < argc)
 			trace = argv[++i];
@@ -151,8 +153,8 @@ int main(int argc, char **argv) {
 		else if (!std::strcmp(argv[i], "--play") && i + 1 < argc)
 			play = argv[++i];
 	}
-	if (chunkBlocks < 1 || chunkBlocks > 128)
-		fail("chunk blocks must be 1..128");
+	if (chunkBlocks < 1 || chunkBlocks > kMaxChunkBlocks)
+		fail("chunk blocks exceed the bench output area");
 
 	std::vector<RegisterWrite> writes;
 	if (scenario == "stress")
@@ -266,7 +268,7 @@ int main(int argc, char **argv) {
 	std::fclose(expect.file);
 
 	// ---- stream-mode periods and their checksum, from a fresh reference
-	const uint32 periodBlocks = 15;
+	const uint32 periodBlocks = OPL_PRACTICAL_PERIOD_BLOCKS;
 	const uint32 periods = totalBlocks / periodBlocks;
 	uint32 checksum = 0;
 	if (play) {

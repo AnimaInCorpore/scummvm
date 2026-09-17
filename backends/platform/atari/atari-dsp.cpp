@@ -36,6 +36,13 @@
 #include "backends/platform/atari/dsp-opl-image.h"
 #include "devtools/atari-falcon030/tools/foa-opl3/opl-practical.h"
 
+// The transport's constants are literals in the header so that it needs no
+// kernel header; they must be the kernel's.
+static_assert(AtariDspAudio::kBlockFrames == OPL_PRACTICAL_BLOCK_FRAMES, "block frames differs from the kernel");
+static_assert(AtariDspAudio::kPeriodBlocks == OPL_PRACTICAL_PERIOD_BLOCKS, "period blocks differs from the kernel");
+static_assert(AtariDspAudio::kPeriodFrames == OPL_PRACTICAL_BLOCK_FRAMES * OPL_PRACTICAL_PERIOD_BLOCKS, "period frames differs from the kernel");
+static_assert(AtariDspAudio::kPcmPerPeriod * OPL_PRACTICAL_PCM_DIVIDER == AtariDspAudio::kPeriodFrames, "pcm per period differs from the kernel");
+
 // The interrupt handler's assembly refers to these by name.
 extern "C" {
 void *atari_dsp_saved_stack;
@@ -432,7 +439,7 @@ bool AtariDspAudio::startStream() {
 	Settracks(0, 0);
 	Setmontracks(0);
 	Dsptristate(1, 0);
-	Devconnect(DSPXMIT, DAC, CLK25M, CLK33K, NO_SHAKE);
+	Devconnect(DSPXMIT, DAC, CLK25M, CLK50K, NO_SHAKE);
 
 	uint32 reply;
 	exchange(kCmdStreamStart, reply);

@@ -1,7 +1,7 @@
 ; Falcon host for the practical OPL DSP kernel's stream mode.
 ;
 ; Boots dsp/oplrt.asm through the two-stage loader, uploads the tables and
-; records from OPLDATA.BIN, routes the DSP's SSI to the DAC at 32.780 kHz,
+; records from OPLDATA.BIN, routes the DSP's SSI to the DAC at 49.170 kHz,
 ; and streams the periods of PLAYDATA.BIN through the production refill
 ; protocol with direct host-port writes paced on TXDE. At the end it stops
 ; the stream, queries the period, late and checksum counters, and writes
@@ -36,7 +36,7 @@ SOUND_STEREO16  equ     1
 SOUND_DSP_XMIT  equ     1
 SOUND_DAC       equ     8
 SOUND_CLK25M    equ     0
-SOUND_CLK33K    equ     2
+SOUND_CLK50K    equ     1
 SOUND_NO_SHAKE  equ     1
 SOUND_ADDERIN   equ     4
 SOUND_MATRIXIN  equ     2
@@ -103,7 +103,7 @@ blocks_done:
         bne     fail_magic
         move.l  (a3)+,period_count
 
-        ; ---- the codec: the DSP transmits to the DAC at 32.780 kHz
+        ; ---- the codec: the DSP transmits to the DAC at 49.170 kHz
         Locksnd
         cmpi.l  #1,d0
         bne     fail_sound
@@ -114,7 +114,7 @@ blocks_done:
         Settracks #0,#0
         Setmontracks #0
         Dsptristate #1,#0
-        Devconnect #SOUND_DSP_XMIT,#SOUND_DAC,#SOUND_CLK25M,#SOUND_CLK33K,#SOUND_NO_SHAKE
+        Devconnect #SOUND_DSP_XMIT,#SOUND_DAC,#SOUND_CLK25M,#SOUND_CLK50K,#SOUND_NO_SHAKE
 
         move.l  #CMD_STREAM_START,d0
         bsr     dsp_exchange

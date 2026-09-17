@@ -2,7 +2,7 @@
 ;
 ; The DSP side of opl-practical.h: a memory-image machine whose operator and
 ; channel records the 68030 writes, and whose output must match that host
-; reference word for word. It renders 32-frame blocks at the codec rate,
+; reference word for word. It renders 64-frame blocks at the codec rate,
 ; operator-major: each operator runs one hardware loop over the block, the
 ; modulator writing an internal ring the carrier consumes. Envelopes and the
 ; LFO advance once per block, at the boundary, from tables the host uploads.
@@ -15,11 +15,11 @@
 ;   P internal $0080-$01ff  stages, render driver, per-operator boundary pass
 ;   P external $2000-       start, command loop, per-block and per-channel code
 ;   X internal $0000-$003f  scalars ($10-$13 host-written)
-;   X internal $0040-$005f  modulation ring, 32 words
-;   X internal $0060-$0071  feedback history, newer product, 18 channels
-;   Y internal $0000-$001f  mix ring, 32 words
-;   Y internal $0020-$0043  gain pairs of feedback modulators, [history, onward]
-;   Y internal $0060-$0071  feedback history, older product
+;   X internal $0040-$007f  modulation ring, 64 words
+;   X internal $0080-$0091  feedback history, newer product, 18 channels
+;   Y internal $0000-$003f  mix ring, 64 words
+;   Y internal $0040-$0063  gain pairs of feedback modulators, [history, onward]
+;   Y internal $0080-$0091  feedback history, older product
 ;   X external $0200-$03ff  gain table 2^(-envOut/32), 512 words
 ;   X external $0400-$087f  operator records, 32 words each, 36 operators
 ;   X external $0900-$09ff  channel records, 8 words each
@@ -41,7 +41,7 @@
 ;   output     the mix doubled and limited; the 16-bit sample is the top
 
         include 'ioequ.inc'
-        include 'oplrttab.inc'          ; OPL_TREMOLO_STEP, OPL_VIBRATO_STEP (8.3 for the DOS assembler)
+        include 'oplrttab.inc'          ; the generated block, period and LFO constants (8.3 for the DOS assembler)
 
 ; ---------------------------------------------------------------- layout
 
@@ -59,17 +59,18 @@ FRAME_BASE      equ     $2000
 EVENT_BASE      equ     $3000
 STREAM_EVENT_BASE equ   $2000           ; stream mode: the bench output area, 4,096 events
 
-PCM_STAGE       equ     $0c00           ; expanded PCM of one period, 480 words
+PCM_STAGE       equ     $0c00           ; expanded PCM of one period, 768 words
 SSI_RING        equ     $1000           ; two periods of interleaved stereo
-SSI_HALF_WORDS  equ     960
-SSI_RING_WORDS  equ     1920
-PERIOD_BLOCKS   equ     15              ; 480 frames, 14.64 ms
-PCM_PER_PERIOD  equ     160             ; host PCM at a third of the codec rate
+BLOCK_FRAMES    equ     OPL_BLOCK_FRAMES ; 64: 1.30 ms at the codec's 49,170 Hz
+PERIOD_BLOCKS   equ     OPL_PERIOD_BLOCKS ; 12: 768 frames, 15.62 ms
+SSI_HALF_WORDS  equ     2*BLOCK_FRAMES*PERIOD_BLOCKS
+SSI_RING_WORDS  equ     2*SSI_HALF_WORDS
+PCM_PER_PERIOD  equ     OPL_PCM_PER_PERIOD ; 192: host PCM at a quarter of the codec rate
 
-MOD_RING        equ     $0040           ; X internal
-HIST_BASE       equ     $0060           ; X and Y internal
-MIX_RING        equ     $0000           ; Y internal
-GAIN_RING       equ     $0020           ; Y internal, two words per channel
+MOD_RING        equ     $0040           ; X internal, BLOCK_FRAMES words
+HIST_BASE       equ     $0080           ; X and Y internal
+MIX_RING        equ     $0000           ; Y internal, BLOCK_FRAMES words
+GAIN_RING       equ     $0040           ; Y internal, two words per channel
 
 ; operator record offsets, in the order the boundary pass walks them
 OPR_PHASE       equ     0
@@ -95,7 +96,7 @@ CHR_FBMUL       equ     2
 
 ENV_SNAP        equ     $1f8000         ; 0x1f8 << 12
 ENV_SILENT      equ     $1ff000
-ATTACK_DONE     equ     $001000         ; one attenuation unit
+ATTACK_DONE     equ     OPL_ATTACK_DONE ; the attack ends this close to zero
 
 CMD_PING        equ     $01
 CMD_WRITE_X     equ     $02             ; address word, count word, then the data
@@ -157,6 +158,7 @@ checksum:       ds      1
 periods_rendered: ds    1
 late_periods:   ds      1
 ssi_status:     ds      1
+stream_primed:  ds      1               ; nonzero once the first period is rendered
 
 ; ------------------------------------------------------------ entry vectors
 
@@ -185,14 +187,14 @@ ssi_status:     ds      1
 ; whose y0 is a temporary). The ring pointers are set per stage.
 
 ; An unmodulated operator writing the modulation ring: y0 = ring gain.
-; Software-pipelined: the first store lands in the unused slot 31 under
-; m3 = 31, and the epilogue commits the last product.
+; Software-pipelined: the first store lands in the ring's last slot under
+; a modulo of the block length, and the epilogue commits the last product.
 stage_mod_plain:
-        move    #MOD_RING+31,r3
-        move    #31,m3
+        move    #MOD_RING+BLOCK_FRAMES-1,r3
+        move    #BLOCK_FRAMES-1,m3
         and     y1,b
         move    b1,n0
-        do      #32,smp_done
+        do      #BLOCK_FRAMES,smp_done
         mac     x1,y1,b   y:(r0+n0),x0
         and     y1,b      a,x:(r3)+
         move    b1,n0
@@ -208,7 +210,7 @@ stage_indep_mix:
         move    #MIX_RING,r5
         and     y1,b
         move    b1,n0
-        do      #32,sim_done
+        do      #BLOCK_FRAMES,sim_done
         mac     x1,y1,b   y:(r0+n0),x0
         and     y1,b      y:(r5),a
         move    b1,n0
@@ -224,7 +226,7 @@ stage_serial_mix:
         move    #MIX_RING,r5
         nop
         move    x:(r3)+,a
-        do      #32,ssm_done
+        do      #BLOCK_FRAMES,ssm_done
         add     b,a
         and     y1,a
         move    a1,n0
@@ -250,7 +252,7 @@ stage_mod_fb:
         move    #1,m5
         nop
         move    y:(r5)+,y0
-        do      #32,smf_done
+        do      #BLOCK_FRAMES,smf_done
         move    x:(r2),x0 y:(r4),a
         add     x0,a      x0,y:(r4)
         add     b,a
@@ -276,7 +278,7 @@ stage_mod_fb_mix:
         move    #1,m5
         nop
         move    y:(r5)+,y0
-        do      #32,smfm_done
+        do      #BLOCK_FRAMES,smfm_done
         move    x:(r2),x0 y:(r4),a
         add     x0,a      x0,y:(r4)
         add     b,a
@@ -498,7 +500,7 @@ emit_block_stream:
         move    x:pcm_present,a
         tst     a
         jeq     ebs_silent
-        do      #32,ebs_done
+        do      #BLOCK_FRAMES,ebs_done
         move    x:(r1)+,x0 y:(r5)+,y1
         mpy     y0,y1,a                 ; the mix scaled by the master gain
         add     x0,a
@@ -511,7 +513,7 @@ ebs_done:
         move    r1,x:pcm_read
         jmp     ebs_store
 ebs_silent:
-        do      #32,ebs_silent_done
+        do      #BLOCK_FRAMES,ebs_silent_done
         move    y:(r5)+,y1
         mpy     y0,y1,a
         asl     a
@@ -878,7 +880,7 @@ mode_mod_only_plain:
 clear_mix:
         move    #MIX_RING,r5
         clr     a
-        rep     #32
+        rep     #BLOCK_FRAMES
         move    a,y:(r5)+
         rts
 
@@ -889,7 +891,7 @@ emit_block:
         move    x:frame_pointer,r1
         move    #MIX_RING,r5
         move    x:master_gain,y0
-        do      #32,eb_done
+        do      #BLOCK_FRAMES,eb_done
         move    y:(r5)+,y1
         mpy     y0,y1,a
         asl     a
@@ -1136,6 +1138,7 @@ command_stream_start:
 css_cleared:
         move    a1,x:periods_rendered
         move    a1,x:late_periods
+        move    a1,x:stream_primed
         move    a1,x:checksum
         move    a1,x:pcm_previous
         move    a1,x:pcm_present
@@ -1212,12 +1215,12 @@ refill_pcm_done:
         jsr     render_period
         jmp     stream_loop
 
-; 160 samples, each 16 bits in bits 7-22 of its word, expanded to 480
+; 192 samples, each 16 bits in bits 7-22 of its word, expanded to 768
 ; frames by linear interpolation from the previous sample.
 receive_pcm:
         move    #PCM_STAGE,r1
         move    x:pcm_previous,b
-        move    #>$2aaaab,y0            ; one third
+        move    #>$200000,y0            ; one quarter
         do      #PCM_PER_PERIOD,rp_done
         jclr    #0,x:m_hsr,*
         movep   x:m_hrx,a
@@ -1225,8 +1228,10 @@ receive_pcm:
         sub     b,a
         move    a1,x1                   ; difference
         mpy     x1,y0,a
-        move    a1,x1                   ; a third of it
+        move    a1,x1                   ; a quarter of it
         move    b1,a
+        add     x1,a
+        move    a1,x:(r1)+
         add     x1,a
         move    a1,x:(r1)+
         add     x1,a
@@ -1239,7 +1244,30 @@ rp_done:
 
 ; Wait for the transmitter to leave the half about to be rendered, render
 ; the period into it, and count it late if the transmitter caught up.
+;
+; The first period arrives whenever the host gets round to it, with the
+; transmitter anywhere in the silent ring. It first waits for the
+; transmitter to be inside the half it will render, so that the wait below
+; hands it a whole half like every later period; otherwise the stream would
+; always open with a late period.
 render_period:
+        move    x:stream_primed,a
+        tst     a
+        jne     rp_wait
+        move    #>1,a
+        move    a1,x:stream_primed
+rp_first:
+        move    x:stream_next_half,b
+        move    r6,a
+        move    #>SSI_RING+SSI_HALF_WORDS,x0
+        tst     b
+        jeq     rp_first_a
+        cmp     x0,a                    ; rendering B: wait until r6 is in B
+        jlt     rp_first
+        jmp     rp_wait
+rp_first_a:
+        cmp     x0,a                    ; rendering A: wait until r6 is in A
+        jge     rp_first
 rp_wait:
         move    x:stream_next_half,b
         move    r6,a

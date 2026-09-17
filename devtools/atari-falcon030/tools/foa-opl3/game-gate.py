@@ -6,9 +6,8 @@ came out of it.
 The game runs unattended through its opening; the ScummVM build synthesizes
 the AdLib score on the DSP (backends/platform/atari/dsp-opl.cpp) and feeds
 speech and effects through the same stream. The transport logs its counters
-every 512 periods; this gate allows one late period, the first (the kernel
-starts transmitting before the host has a period for it), and no protocol
-error, and scores the recording: the music must be present at a sane level.
+every 512 periods; this gate allows no late period and no protocol error,
+and scores the recording: the music must be present at a sane level.
 The kernel counts one late per starvation, not per period, so a late is a
 freeze of the music, however long; the PCM underrun and extension counts in
 the same line are where the game's loop stalls show.
@@ -35,6 +34,8 @@ ROOT = HERE.parents[3]
 HATARI = Path.home() / "Work/F030Arcade/third_party/hatari/build/src/hatari"
 # The game needs TOS 4.04 (4.02 dies in its video mode switch); the kernel benches run on 4.02.
 TOS = Path.home() / "Work/F030Arcade/third_party/tos/tos404.img"
+# The transport's period: 768 frames at the codec's 49,170 Hz, 15.62 ms.
+PERIODS_PER_SECOND = 25175000.0 / 512.0 / 768.0
 
 
 def main():
@@ -49,11 +50,17 @@ def main():
     parser.add_argument("--speech", action="store_true", help="leave speech on (off keeps the music clean)")
     parser.add_argument("--opl", default="atari_dsp", help="opl_driver for the run (diagnosis: null)")
     parser.add_argument("--no-dsp-audio", action="store_true", help="diagnosis: DMA playback instead of the DSP")
-    parser.add_argument("--sound-rate", default="32780", help="Hatari host sound rate, or off")
+    parser.add_argument("--sound-rate", default="49170", help="Hatari host sound rate, or off")
     parser.add_argument("--monitor", default="rgb", help="Hatari monitor type")
     parser.add_argument("--no-natfeats", action="store_true", help="diagnosis: leave NatFeats off")
     parser.add_argument("--no-cpu-exact", action="store_true", help="diagnosis: default CPU model")
     parser.add_argument("--ini-extra", default="", help="extra lines for the [scummvm] section, semicolon separated")
+    parser.add_argument("--profile", action="store_true",
+                        help="profile the 68030 from program start and print the top symbols before quitting; "
+                             "use the unstripped binary so Hatari has symbols")
+    parser.add_argument("--play", action="store_true",
+                        help="open a Hatari window at real-time speed with host sound and leave the game to the "
+                             "user; the run ends when Hatari is closed, and the counters are reported as usual")
     parser.add_argument("--no-press", action="store_true",
                         help="calibration: move the cursor for each --click and screenshot, but do not press")
     parser.add_argument("--click", action="append", default=[], metavar="SECONDS:X:Y",
@@ -87,17 +94,28 @@ def main():
     (case / "args.bin").write_bytes(args.gameid.encode() + b"\0")
     (case / "start.ini").write_text(f"b pc = text :once :trace :quiet :file {case / 'basepage.ini'}\n")
     (case / "basepage.ini").write_text(
-        f"setopt dec\nw 'basepage+0x80' {len(args.gameid)}\nl {case / 'args.bin'} 'basepage+0x81'\n")
+        f"setopt dec\nw 'basepage+0x80' {len(args.gameid)}\nl {case / 'args.bin'} 'basepage+0x81'\n"
+        # Hatari closes a profile only when the debugger is entered, so the
+        # run ends on a breakpoint: VBLs count from power-on at 60 Hz, and the
+        # game starts about 38 s in.
+        + (f"symbols prg\nprofile on\nb VBL > {int((args.seconds + 38) * 60)} :once :quiet :file {case / 'end.ini'}\n"
+           if args.profile else ""))
+    (case / "end.ini").write_text(f"profile symbols 80\nprofile save {case / 'cpu-profile.txt'}\nquit 0\n")
     fifo = case / "control.fifo"
     command = [str(HATARI), "--machine", "falcon", "--monitor", args.monitor, "--memsize", "14",
                "--cpuclock", "16", "--fpu", "68882", "--dsp", "emu", "--tos", str(TOS), "--harddrive", str(hd),
-               "--fast-boot", "on", "--fast-forward", "on", "--sound", args.sound_rate,
+               "--fast-boot", "on", "--fast-forward", "off" if args.play else "on",
+               "--sound", "48000" if args.play else args.sound_rate,
                "--confirm-quit", "off", "--conout", "2", "--cmd-fifo", str(fifo),
                "--natfeats", "off" if args.no_natfeats else "on", "--screenshot-dir", str(case),
                "--cpu-exact", "off" if args.no_cpu_exact else "on", "--compatible", "off" if args.no_cpu_exact else "on",
                "--run-vbls", str(int(args.seconds * 50) * 4 + 12000),
                "--parse", "prg:" + str(case / "start.ini"), "--auto", "C:\\SCUMMVM\\SCUMMVM.PRG"]
-    env = dict(os.environ, SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy")
+    env = dict(os.environ) if args.play else dict(os.environ, SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy")
+    if args.play:
+        # No VBL limit and no recording: the user closes the window.
+        limit = command.index("--run-vbls")
+        del command[limit:limit + 2]
     started = time.monotonic()
     with (case / "hatari.log").open("w") as log:
         proc = subprocess.Popen(command, cwd=case, env=env, stdout=log, stderr=subprocess.STDOUT)
@@ -117,7 +135,9 @@ def main():
                 with os.fdopen(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK), "w") as control:
                     control.write(text + "\n")
 
-            if args.sound_rate != "off":
+            if args.play:
+                proc.wait()
+            elif args.sound_rate != "off":
                 send(f"hatari-path soundout {case / 'output.wav'}")
                 time.sleep(0.1)
                 send("hatari-shortcut recsound")
@@ -125,10 +145,10 @@ def main():
             # nothing while playing, so the transport's own period counter
             # (68.3 periods per second of audio) paces the run; quitting
             # through the control FIFO finalizes the recording.
-            target = int(args.seconds * 32780.0 / 480.0)
-            clicks = sorted((float(c.split(":")[0]) * 32780.0 / 480.0, int(c.split(":")[1]), int(c.split(":")[2]))
+            target = int(args.seconds * PERIODS_PER_SECOND)
+            clicks = sorted((float(c.split(":")[0]) * PERIODS_PER_SECOND, int(c.split(":")[1]), int(c.split(":")[2]))
                             for c in args.click)
-            deadline = time.monotonic() + 900
+            deadline = time.monotonic() + (3600 if args.profile else 900)
             while proc.poll() is None:
                 text = (case / "hatari.log").read_text(errors="replace")
                 submitted = [int(line.split("AtariDspAudio: ")[1].split()[0]) for line in text.splitlines()
@@ -149,7 +169,7 @@ def main():
                     time.sleep(0.3)
                     send("hatari-event leftup")
                     time.sleep(0.3)
-                if submitted and submitted[-1] >= target:
+                if submitted and submitted[-1] >= target and not args.profile:
                     # A screenshot of where the game got to, then quit.
                     send("hatari-shortcut screenshot")
                     time.sleep(1.5)
@@ -162,7 +182,7 @@ def main():
                 if time.monotonic() > deadline:
                     raise RuntimeError("Hatari timeout")
                 time.sleep(1.0)
-            proc.wait(timeout=30)
+            proc.wait(timeout=3600 if args.profile else 30)
         finally:
             if proc.poll() is None:
                 proc.kill()
@@ -225,9 +245,9 @@ def main():
         "audio": audio,
         "screenshot": next((p.name for p in sorted(case.glob("grab*.png"))), None),
         "kernel_counter_reports_fresh": len(fresh),
-        "late_allowed": 1,
+        "late_allowed": 0,
         "passed": bool(booted and picked and last and fresh
-                       and late_max <= 1
+                       and late_max == 0
                        and last["protocol_errors"] == 0 and audio and audio["loud_seconds"] >= 10),
     }
     (case / "results.json").write_text(json.dumps(result, indent=2) + "\n")
@@ -235,7 +255,7 @@ def main():
     if audio:
         print("audio:", {k: v for k, v in audio.items() if k != "dbfs_per_second"})
         print("dBFS per second:", audio["dbfs_per_second"][:60])
-    if not result["passed"]:
+    if not result["passed"] and not args.play:
         raise SystemExit("the game run did not pass")
 
 

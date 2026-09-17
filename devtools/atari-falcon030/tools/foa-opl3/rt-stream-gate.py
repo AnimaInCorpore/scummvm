@@ -4,7 +4,7 @@ production transport on the emulated Falcon, and check that every period
 rendered on time and that the emitted words reproduce the host reference.
 
 The stream host boots the kernel, routes the DSP's SSI to the DAC at
-32.780 kHz, and submits one 15-block period per refill through the real
+49.170 kHz, and submits one 15-block period per refill through the real
 protocol: READY handshake, paced host-port blast of the events and PCM
 flag, acknowledgement. The kernel counts periods it could not render before
 the transmitter reached them, and sums every emitted word; the fixture
@@ -52,7 +52,9 @@ def listing_symbols(listing):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--trace", type=Path, required=True)
+    parser.add_argument("--trace", type=Path, help="captured opl-writes.ev (the trace scenario)")
+    parser.add_argument("--scenario", choices=("trace", "stress"), default="trace",
+                        help="stress: nine feedback FM channels with tremolo and vibrato held, the kernel's worst case")
     parser.add_argument("--seconds", type=float, default=10.0)
     parser.add_argument("--vbls", type=int, default=20000)
     args = parser.parse_args()
@@ -61,10 +63,10 @@ def main():
     args.output.mkdir(parents=True, exist_ok=False)
     case = args.output
 
-    fixture = subprocess.run([str(HERE / "build/headless/opl-rt-fixture"), "trace",
-                              str(case / "OPLDATA.BIN"), str(case / "EXPECT.BIN"),
-                              "--trace", str(args.trace.resolve()), "--seconds", str(args.seconds),
-                              "--play", str(case / "PLAYDATA.BIN")],
+    fixture = subprocess.run([str(HERE / "build/headless/opl-rt-fixture"), args.scenario,
+                              str(case / "OPLDATA.BIN"), str(case / "EXPECT.BIN")]
+                             + (["--trace", str(args.trace.resolve())] if args.scenario == "trace" else [])
+                             + ["--seconds", str(args.seconds), "--play", str(case / "PLAYDATA.BIN")],
                              capture_output=True, text=True, check=True)
     shape = json.loads(fixture.stdout)
     shutil.copy(HERE / "build/OPLPLAY.TOS", case)
@@ -95,7 +97,8 @@ def main():
         "gate": "practical OPL kernel stream mode on the emulated Falcon: transport, timing, exactness",
         "source_sha256": {name: hashlib.sha256((HERE / name).read_bytes()).hexdigest()
                           for name in ("dsp/oplrt.asm", "m68k/oplplay.s", "rt-fixture.cpp", "opl-practical.h")},
-        "trace_sha256": hashlib.sha256(args.trace.read_bytes()).hexdigest(),
+        "scenario": args.scenario,
+        "trace_sha256": hashlib.sha256(args.trace.read_bytes()).hexdigest() if args.trace else None,
         "seconds": shape["seconds"],
         "periods_submitted": shape["periods"],
         "periods_rendered": periods_rendered,

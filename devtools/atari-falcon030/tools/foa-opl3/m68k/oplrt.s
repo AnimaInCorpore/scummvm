@@ -116,7 +116,7 @@ chunk_loop:
 
         ; ---- read the frames back, one word each
         move.l  chunk_blocks,d7
-        lsl.l   #5,d7                   ; 32 frames per block
+        lsl.l   #6,d7                   ; 64 frames per block
         lea     frame_buffer,a4
         move.l  #FRAME_BASE,d6
         move.l  d7,d5

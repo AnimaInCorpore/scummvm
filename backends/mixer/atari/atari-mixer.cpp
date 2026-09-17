@@ -269,7 +269,7 @@ void AtariMixerManager::updateDsp() {
 		}
 		_dspPcmTail = (_dspPcmTail + 1) % kDspPcmChunks;
 	}
-	// About every seven seconds, the transport's view of the stream.
+	// About every eight seconds, the transport's view of the stream.
 	const uint32 submitted = _dsp->periodsSubmitted();
 	if (submitted - _dspLoggedPeriods >= 512) {
 		_dspLoggedPeriods = submitted;

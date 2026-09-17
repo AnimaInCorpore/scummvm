@@ -202,12 +202,14 @@ kernel reproduces the reference word for word at nine and eighteen channels.
 
 **The exact kernel does not fit**: synthesis alone costs 1,025 instruction
 cycles per frame for Atlantis's own nine-channel arrangement, 209% of the
-32.780 kHz budget. **The practical kernel does.** It renders at the codec
-rate in 32-frame blocks with block-rate envelopes and LFO, is scored against
-the exact kernel by a perceptual gate (sustained tones within a dB and half a
-cent), costs 55% of the budget on the Atlantis stream and 69% with nine
-feedback FM channels held, word exact against its host reference on the
-emulated DSP, and streams through the SSI with no late period. The Falcon
+32.780 kHz budget. **The practical kernel does.** It renders at the codec's
+49.17 kHz, next to the chip's own rate (at 32.78 kHz its aliasing was audible
+as blurred instruments), in 64-frame blocks with block-rate envelopes and
+LFO, is scored against the exact kernel by a perceptual gate (sustained tones
+within a dB and a cent), costs 62% of the budget on the Atlantis stream and
+80% with nine feedback FM channels held, word exact against its host
+reference on the emulated DSP, and streams through the SSI with no late
+period even under that worst case. The Falcon
 build embeds it: `opl_driver=atari_dsp` synthesizes the AdLib score on the
 DSP, which also carries the mixer's speech and effects, and `game-gate.py`
 runs the game with it on the emulated Falcon and records the music. Both
