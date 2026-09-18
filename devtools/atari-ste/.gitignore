@@ -1,0 +1,10 @@
+# Generated output and data derived from game files stay out of git.
+/monkey-bar/*
+!/monkey-bar/README.md
+!/monkey-bar/monkey-viewer.s
+!/monkey-bar/hardware-test/
+/monkey-bar/hardware-test/*
+!/monkey-bar/hardware-test/README.md
+/raster-test/*.bin
+/raster-test/*.lst
+/raster-test/*.PRG

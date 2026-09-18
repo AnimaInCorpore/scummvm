@@ -32,6 +32,8 @@
 #include "atari-screen.h"
 #include "atari-supervidel.h"
 
+class AtariSteSceneRenderer;
+
 #define MAX_HZ_SHAKE 16 // Falcon only
 #define MAX_V_SHAKE  16
 
@@ -90,8 +92,8 @@ public:
 	void clearOverlay() override;
 	void grabOverlay(Graphics::Surface &surface) const override;
 	void copyRectToOverlay(const void *buf, int pitch, int x, int y, int w, int h) override;
-	int16 getOverlayHeight() const override { return 480; }
-	int16 getOverlayWidth() const override { return _vgaMonitor ? 640 : 640*1.2; }
+	int16 getOverlayHeight() const override { return _ste ? 200 : 480; }
+	int16 getOverlayWidth() const override { return _ste ? 320 : (_vgaMonitor ? 640 : 640*1.2); }
 
 	bool showMouse(bool visible) override;
 	void warpMouse(int x, int y) override;
@@ -128,11 +130,11 @@ private:
 	void freeSurfaces();
 
 #ifndef DISABLE_FANCY_THEMES
-	int16 getMaximumScreenHeight() const { return 480; }
-	int16 getMaximumScreenWidth() const { return _tt ? 320 : (_vgaMonitor ? 640 : 640*1.2); }
+	int16 getMaximumScreenHeight() const { return _tt ? 480 : (_ste ? 200 : 480); }
+	int16 getMaximumScreenWidth() const { return _tt ? 320 : (_ste ? 320 : (_vgaMonitor ? 640 : 640*1.2)); }
 #else
-	int16 getMaximumScreenHeight() const { return _tt ? 480 : 240; }
-	int16 getMaximumScreenWidth() const { return _tt ? 320 : (_vgaMonitor ? 320 : 320*1.2); }
+	int16 getMaximumScreenHeight() const { return _tt ? 480 : (_ste ? 200 : 240); }
+	int16 getMaximumScreenWidth() const { return _tt ? 320 : (_ste ? 320 : (_vgaMonitor ? 320 : 320*1.2)); }
 #endif
 
 	void addDirtyRectToScreens(const Graphics::Surface &dstSurface,
@@ -159,6 +161,7 @@ private:
 
 	bool _vgaMonitor = true;
 	bool _tt = false;
+	bool _ste = false;
 
 	struct GraphicsState {
 		GraphicsState()
@@ -196,7 +199,7 @@ private:
 	};
 	Screen *_screen[kBufferCount] = {};
 
-	Graphics::Surface _chunkySurface;
+	AtariSurface _chunkySurface;
 	Graphics::Surface _chunkySurfaceOffsetted;
 
 	enum {
@@ -206,8 +209,9 @@ private:
 	};
 	int _overlayState = kOverlayHidden;
 	bool _ignoreHideOverlay = true;
-	Graphics::Surface _overlaySurface;
+	AtariSurface _overlaySurface;
 	bool _ignoreCursorChanges = false;
+	AtariSteSceneRenderer *_steSceneRenderer = nullptr;
 
 	Palette _palette;
 	Palette _overlayPalette;

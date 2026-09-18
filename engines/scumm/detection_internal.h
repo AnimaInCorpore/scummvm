@@ -411,10 +411,15 @@ static void computeGameSettingsFromMD5(const Common::FSList &fslist, const GameF
 					if ((!md5Lfl903.empty() && md5Lfl903 == "54d4e17df08953b483d17416043345b9") ||
 					    (!md5Disk03.empty() && md5Disk03 == "a8ab7e8eaa322d825beb6c5dee28f17d") ||
 					    (!md5Disk04.empty() && md5Disk04 == "f338cc1d3117c1077a3a9d0c1d70b1e8")) {
+#ifdef ATARI_STE_GAME_ONLY
+						warning("This version of Monkey Island can't be played, because Limited Run Games "
+						    "provided corrupted DISK03.LEC, DISK04.LEC and 903.LFL files.");
+#else
 						::GUI::displayErrorDialog(_("This version of Monkey Island can't be played, because Limited Run Games "
 						    "provided corrupted DISK03.LEC, DISK04.LEC and 903.LFL files.\n\nPlease contact their technical "
 						    "support for replacement files, or look online for some guides which can help you recover valid "
 						    "files from the KryoFlux dumps that Limited Run Games also provided."));
+#endif
 						continue;
 					}
 				}

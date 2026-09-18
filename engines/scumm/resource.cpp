@@ -244,8 +244,10 @@ void ScummEngine::askForDisk(const Common::Path &filename, int disknum) {
 #endif
 	} else {
 		Common::sprintf_s(buf, "Cannot find file: '%s'", filename.toString(Common::Path::kNativeSeparator).c_str());
+#ifndef ATARI_STE_GAME_ONLY
 		InfoDialog dialog(this, Common::U32String(buf));
 		runDialog(dialog);
+#endif
 		error("Cannot find file: '%s'", filename.toString(Common::Path::kNativeSeparator).c_str());
 	}
 }

@@ -30,7 +30,9 @@
 #include "common/system.h"
 #include "common/translation.h"
 
+#ifndef ATARI_STE_GAME_ONLY
 #include "engines/dialogs.h"
+#endif
 
 #include "graphics/scaler.h"
 #include "graphics/managed_surface.h"
@@ -454,12 +456,19 @@ void MetaEngine::registerDefaultSettings(const Common::String &) const {
 }
 
 GUI::OptionsContainerWidget *MetaEngine::buildEngineOptionsWidget(GUI::GuiObject *boss, const Common::String &name, const Common::String &target) const {
+#ifdef ATARI_STE_GAME_ONLY
+	(void)boss;
+	(void)name;
+	(void)target;
+	return nullptr;
+#else
 	const ExtraGuiOptions engineOptions = getExtraGuiOptions(target);
 	if (engineOptions.empty()) {
 		return nullptr;
 	}
 
 	return new GUI::ExtraGuiOptionsWidget(boss, name, target, engineOptions);
+#endif
 }
 
 bool MetaEngine::removeSaveState(const char *target, int slot) const {

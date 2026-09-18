@@ -25,7 +25,9 @@
 #include <stdlib.h>
 #include <time.h>
 
+#ifndef ATARI_STE_GAME_ONLY
 #include <gem.h>
+#endif
 #include <mint/cookie.h>
 #include <mint/falcon.h>
 #include <mint/osbind.h>
@@ -56,6 +58,7 @@
 #endif
 #include "backends/saves/default/default-saves.h"
 #include "backends/timer/default/default-timer.h"
+#include "backends/graphics/atari/atari-ste-raster.h"
 #include "base/main.h"
 #include "common/config-manager.h"
 #include "common/debug.h"
@@ -79,7 +82,9 @@ extern "C" KBDVEC atari_old_mousevec;
 extern void nf_init(void);
 extern void nf_print(const char* msg);
 
+#ifndef ATARI_STE_GAME_ONLY
 static int s_app_id = -1;
+#endif
 static void (*s_old_procterm)(void) = nullptr;
 
 static char s_lastErrorMessage[1024+1];
@@ -150,19 +155,23 @@ static void critical_restore() {
 	// somehow manipulates the same memory area used for the critical handler's stack
 	// what causes v_clsvwk() never returning and leading to a bus error (and another
 	// critical_restore() called...)
+	#ifndef ATARI_STE_GAME_ONLY
 	if (s_app_id != -1) {
 		// ok, restore mouse cursor at least
 		graf_mouse(M_ON, NULL);
 	}
+	#endif
 #endif
 
 	// avoid infinite recursion if either of the shutdown procedures fails
 	(void)Setexc(VEC_PROCTERM, s_old_procterm);
 
-	extern void AtariAudioShutdown();
 	extern void AtariGraphicsShutdown();
 
+	#ifndef ATARI_STE_GAME_ONLY
+	extern void AtariAudioShutdown();
 	AtariAudioShutdown();
+	#endif
 	AtariGraphicsShutdown();
 }
 
@@ -194,8 +203,8 @@ OSystem_Atari::OSystem_Atari() {
 	Getcookie(C__VDO, &vdo);
 	vdo >>= 16;
 
-	if (vdo != VDO_TT && vdo != VDO_FALCON) {
-		fprintf(stderr, "ScummVM requires Atari TT/Falcon compatible video\n");
+	if (vdo != VDO_STE && vdo != VDO_TT && vdo != VDO_FALCON) {
+		fprintf(stderr, "ScummVM requires Atari STE/TT/Falcon compatible video\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -276,6 +285,7 @@ OSystem_Atari::~OSystem_Atari() {
 		atari_old_kbdvec = atari_old_mousevec = nullptr;
 	}
 
+	#ifndef ATARI_STE_GAME_ONLY
 	if (s_app_id != -1) {
 		//wind_update(END_UPDATE);
 
@@ -287,6 +297,7 @@ OSystem_Atari::~OSystem_Atari() {
 		appl_exit();
 		s_app_id = -1;
 	}
+	#endif
 
 	// graceful exit
 	(void)Setexc(VEC_PROCTERM, s_old_procterm);
@@ -295,6 +306,7 @@ OSystem_Atari::~OSystem_Atari() {
 void OSystem_Atari::initBackend() {
 	debug("OSystem_Atari::initBackend()");
 
+	#ifndef ATARI_STE_GAME_ONLY
 	s_app_id = appl_init();
 	if (s_app_id != -1) {
 		// get the ID of the current physical screen workstation
@@ -327,6 +339,7 @@ void OSystem_Atari::initBackend() {
 		//wind_update(BEG_UPDATE);
 #endif
 	}
+	#endif
 
 	_timerManager = new DefaultTimerManager();
 	_savefileManager = new DefaultSaveFileManager("saves");
@@ -428,8 +441,10 @@ Common::MutexInternal *OSystem_Atari::createMutex() {
 }
 
 uint32 OSystem_Atari::getMillis(bool skipRecord) {
-	// CLOCKS_PER_SEC is 200, so no need to use floats
-	return 1000 * (counter_200hz - _startTime) / CLOCKS_PER_SEC;
+	// CLOCKS_PER_SEC is 200, so no need to use floats. The STE palette raster
+	// masks interrupts for most of the visible frame and accounts for the
+	// 200 Hz ticks that could not be delivered meanwhile.
+	return 1000 * (counter_200hz + atari_ste_raster_lost_ticks - _startTime) / CLOCKS_PER_SEC;
 }
 
 void OSystem_Atari::delayMillis(uint msecs) {

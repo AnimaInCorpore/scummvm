@@ -38,6 +38,9 @@
 #include "gui/ThemeEngine.h"
 
 #include "atari-surface.h"
+#include "atari-ste-raster.h"
+#include "atari-ste-scene.h"
+#include "backends/platform/atari/ste-benchmark.h"
 
 #define SCREEN_ACTIVE
 
@@ -70,14 +73,34 @@ static void shrinkVidelVisibleArea() {
 }
 
 static bool s_tt;
+static bool s_ste;
 static int s_shakeXOffset;
 static int s_shakeYOffset;
 static int s_aspectRatioCorrectionYOffset;
 static bool s_shrinkVidelVisibleArea;
 static bool s_setScreenOffsets;
 static AtariSurface *s_screenSurf;
+static Screen *s_steScreens[3] = {};
+
+static Screen *findSteScreen(AtariSurface *surface) {
+	for (Screen *screen : s_steScreens) {
+		if (screen && screen->surf.get() == surface)
+			return screen;
+	}
+	return nullptr;
+}
 
 static void VblHandler() {
+	if (s_ste) {
+		// The STE presents its screens from the raster's own VBL vector hook
+		// (atari-ste-raster.S), which also runs while the TOS VBL queue is
+		// locked; nothing of the Falcon/TT handling below applies.
+		s_screenSurf = nullptr;
+		s_setScreenOffsets = false;
+		s_shrinkVidelVisibleArea = false;
+		return;
+	}
+
 	// for easier querying
 	static AtariSurface *surf;
 
@@ -86,7 +109,8 @@ static void VblHandler() {
 
 	if (s_screenSurf || s_setScreenOffsets) {
 #ifdef SCREEN_ACTIVE
-		uintptr p = (unsigned long)surf->getBasePtr(0, MAX_V_SHAKE + s_shakeYOffset + s_aspectRatioCorrectionYOffset);
+		const int baseY = MAX_V_SHAKE + s_shakeYOffset + s_aspectRatioCorrectionYOffset;
+		uintptr p = (unsigned long)surf->getBasePtr(0, baseY);
 
 		if (!s_tt) {
 			const int bitsPerPixel = (surf->format == PIXELFORMAT_RGB121 ? 4 : 8);
@@ -162,6 +186,8 @@ static void *s_oldPhysbase = nullptr;
 static Palette s_oldPalette;
 
 void AtariGraphicsShutdown() {
+	if (s_ste)
+		Supexec(atari_ste_raster_uninstall);
 	Supexec(UninstallVblHandler);
 
 	AtariSurfaceDeinit();
@@ -215,19 +241,23 @@ AtariGraphicsManager::AtariGraphicsManager(OSystem_Atari *system)
 	vdo >>= 16;
 
 	_tt = (vdo == VDO_TT);
+	_ste = (vdo == VDO_STE);
 	s_tt = _tt;
+	s_ste = _ste;
 
-	if (!_tt)
+	if (!_tt && !_ste)
 		_vgaMonitor = VgetMonitor() == MON_VGA;
 
 	// no BDF scaling please
 	ConfMan.registerDefault("gui_disable_fixed_font_scaling", true);
 
+#ifndef ATARI_STE_GAME_ONLY
 	// make the standard GUI renderer default (!DISABLE_FANCY_THEMES implies anti-aliased rendering in ThemeEngine.cpp)
 	// (and without DISABLE_FANCY_THEMES we can't use 640x480 themes)
 	const char *standardThemeEngineName = GUI::ThemeEngine::findModeConfigName(GUI::ThemeEngine::kGfxStandard);
 	if (!ConfMan.hasKey("gui_renderer"))
 		ConfMan.set("gui_renderer", standardThemeEngineName);
+#endif
 
 	// make the built-in theme default to avoid long loading times
 	if (!ConfMan.hasKey("gui_theme"))
@@ -263,11 +293,11 @@ AtariGraphicsManager::AtariGraphicsManager(OSystem_Atari *system)
 	}
 	_overlayPalette.entries = overlayPaletteSize;
 
-	if (_tt) {
+	if (_tt || _ste) {
 		s_oldRez = Getrez();
 		// EgetPalette / EsetPalette doesn't care about current resolution's number of colors
-		s_oldPalette.entries = 256;
-		EgetPalette(0, 256, s_oldPalette.tt);
+		s_oldPalette.entries = _ste ? 16 : 256;
+		EgetPalette(0, s_oldPalette.entries, s_oldPalette.tt);
 	} else {
 		s_oldMode = VsetMode(VM_INQUIRE);
 		switch (s_oldMode & NUMCOLS) {
@@ -299,6 +329,9 @@ AtariGraphicsManager::AtariGraphicsManager(OSystem_Atari *system)
 		error("VBL handler was not installed");
 	}
 
+	if (_ste)
+		Supexec(atari_ste_raster_install);
+
 	g_system->getEventManager()->getEventDispatcher()->registerObserver(this, 10, false);
 }
 
@@ -309,6 +342,8 @@ AtariGraphicsManager::~AtariGraphicsManager() {
 
 	// this must be done here, too otherwise freeSurfaces() could release a surface
 	// still accessed by the vbl handler
+	if (_ste)
+		Supexec(atari_ste_raster_uninstall);
 	Supexec(UninstallVblHandler);
 
 	freeSurfaces();
@@ -472,13 +507,14 @@ OSystem::TransactionError AtariGraphicsManager::endGFXTransaction() {
 			c2pWidth = (c2pWidth + 15) & -16;
 		}
 
-		_chunkySurface.init(c2pWidth, _currentState.height, c2pWidth,
-			_chunkySurface.getPixels(), _currentState.format);
+		Graphics::Surface *chunkySurface = _chunkySurface.surfacePtr();
+		chunkySurface->init(c2pWidth, _currentState.height, c2pWidth,
+			chunkySurface->getPixels(), _currentState.format);
 
 		const int xOffset = (c2pWidth - _currentState.width) / 2;
 
 		_chunkySurfaceOffsetted.init(_currentState.width, _currentState.height, c2pWidth,
-			_chunkySurface.getBasePtr(xOffset, 0), _currentState.format);
+			chunkySurface->getBasePtr(xOffset, 0), _currentState.format);
 
 		_screen[kFrontBuffer]->reset(c2pWidth, _currentState.height, _chunkySurfaceOffsetted);
 		if (_currentState.mode > kSingleBuffering) {
@@ -542,6 +578,16 @@ void AtariGraphicsManager::setPalette(const byte *colors, uint start, uint num) 
 		}
 	}
 
+	if (_ste) {
+		// On the STE the palette is baked into the quantized frame, so a palette
+		// change invalidates every buffer's converted pixels, not just the ones
+		// the engine marked dirty.
+		for (int i : { kFrontBuffer, kBackBuffer1, kBackBuffer2 }) {
+			if (_screen[i])
+				_screen[i]->fullRedraw = true;
+		}
+	}
+
 	_pendingScreenChanges.queuePalette();
 }
 
@@ -580,7 +626,7 @@ void AtariGraphicsManager::copyRectToScreen(const void *buf, int pitch, int x, i
 		x, y, w, h,
 		directRendering);
 
-	if (directRendering && !g_hasSuperVidel) {
+	if (directRendering && !g_hasSuperVidel && !_ste) {
 		copyRectToAtariSurface(
 			*_screen[kFrontBuffer]->offsettedSurf,
 			(const byte *)buf, pitch, x, y, w, h);
@@ -592,7 +638,7 @@ void AtariGraphicsManager::copyRectToScreen(const void *buf, int pitch, int x, i
 Graphics::Surface *AtariGraphicsManager::lockScreen() {
 	//debug("lockScreen");
 
-	return _currentState.mode == kDirectRendering
+	return !_ste && _currentState.mode == kDirectRendering
 		? _screen[kFrontBuffer]->offsettedSurf->surfacePtr()
 		: &_chunkySurfaceOffsetted;
 }
@@ -646,7 +692,7 @@ void AtariGraphicsManager::updateScreen() {
 	if (_overlayState == kOverlayVisible || _overlayState == kOverlayIgnoredHide) {
 		workScreen = _screen[kOverlayBuffer];
 		if (!isOverlayDirectRendering())
-			srcSurface = &_overlaySurface;
+			srcSurface = _overlaySurface.surfacePtr();
 	} else {
 		switch (_currentState.mode) {
 		case kDirectRendering:
@@ -654,16 +700,22 @@ void AtariGraphicsManager::updateScreen() {
 			break;
 		case kSingleBuffering:
 			workScreen = _screen[kFrontBuffer];
-			srcSurface = &_chunkySurface;
+			srcSurface = _chunkySurface.surfacePtr();
 			break;
 		case kTripleBuffering:
 			workScreen = _screen[kBackBuffer1];
-			srcSurface = &_chunkySurface;
+			srcSurface = _chunkySurface.surfacePtr();
 			break;
 		default:
 			warning("Unknown graphics mode %d", _currentState.mode);
 		}
 	}
+
+	// The STE always receives the finished chunky frame. This keeps direct
+	// rendering as an engine option without letting 8-bit indices be written
+	// directly into the four-plane screen surface.
+	if (_ste && _overlayState == kOverlayHidden)
+		srcSurface = _chunkySurface.surfacePtr();
 
 	assert(workScreen);
 
@@ -685,7 +737,8 @@ void AtariGraphicsManager::updateScreen() {
 		// - check if BACK_BUFFER2 has been displayed, if so, switch
 		//   BACK_BUFFER2 and FRONT_BUFFER and make previous BACK_BUFFER2 work screen
 
-		if (s_screenSurf == nullptr) {
+		const bool presented = _ste ? (atari_ste_pending_screen == nullptr) : (s_screenSurf == nullptr);
+		if (presented) {
 			// BACK_BUFFER2 has been set; guard it from overwriting while presented
 			Screen *tmp = _screen[kBackBuffer2];
 			_screen[kBackBuffer2] = _screen[kFrontBuffer];
@@ -707,7 +760,19 @@ void AtariGraphicsManager::updateScreen() {
 #endif
 
 	if (_pendingScreenChanges.screenSurface()) {
-		s_screenSurf = _pendingScreenChanges.screenSurface();
+		if (_ste) {
+			// Consumed by the raster's VBL hook. The palette has to be in
+			// place before the screen address marks the pair as pending.
+			AtariSurface *surf = _pendingScreenChanges.screenSurface();
+			Screen *screen = findSteScreen(surf);
+			const bool sceneLive = screen && screen->stePaletteGeneration != 0
+				&& _overlayState == kOverlayHidden;
+			atari_ste_pending_palette = sceneLive ? screen->stePalettes() : nullptr;
+			atari_ste_pending_screen2 = sceneLive && screen->mixSurf() ? screen->mixSurf()->getBasePtr(0, 0) : nullptr;
+			atari_ste_pending_screen = surf->getBasePtr(0, 0);
+		} else {
+			s_screenSurf = _pendingScreenChanges.screenSurface();
+		}
 		_pendingScreenChanges.setScreenSurface(nullptr);
 	}
 	if (_pendingScreenChanges.aspectRatioCorrectionYOffset().second)
@@ -799,7 +864,7 @@ void AtariGraphicsManager::hideOverlay() {
 
 Graphics::PixelFormat AtariGraphicsManager::getOverlayFormat() const {
 #ifndef DISABLE_FANCY_THEMES
-	return _tt ? PIXELFORMAT_RGB121 : PIXELFORMAT_RGB332;
+	return (_tt || _ste) ? PIXELFORMAT_RGB121 : PIXELFORMAT_RGB332;
 #else
 	return PIXELFORMAT_RGB121;
 #endif
@@ -896,7 +961,7 @@ void AtariGraphicsManager::grabOverlay(Graphics::Surface &surface) const {
 		assert(surface.h >= _overlaySurface.h);
 		assert(surface.format.bytesPerPixel == _overlaySurface.format.bytesPerPixel);
 
-		surface.copyRectToSurface(_overlaySurface, 0, 0, Common::Rect(_overlaySurface.w, _overlaySurface.h));
+		surface.copyRectToSurface(_overlaySurface.rawSurface(), 0, 0, Common::Rect(_overlaySurface.w, _overlaySurface.h));
 	}
 }
 
@@ -927,7 +992,7 @@ Graphics::Surface *AtariGraphicsManager::lockOverlay() {
 
 	return isOverlayDirectRendering()
 		? _screen[kOverlayBuffer]->offsettedSurf->surfacePtr()
-		: &_overlaySurface;
+		: _overlaySurface.surfacePtr();
 }
 
 bool AtariGraphicsManager::showMouse(bool visible) {
@@ -1071,15 +1136,70 @@ Common::Keymap *AtariGraphicsManager::getKeymap() const {
 }
 
 void AtariGraphicsManager::allocateSurfaces() {
-	for (int i : { kFrontBuffer, kBackBuffer1, kBackBuffer2 }) {
-		_screen[i] = new Screen(_tt, getMaximumScreenWidth(), getMaximumScreenHeight(), PIXELFORMAT_CLUT8, &_palette);
+	const Graphics::PixelFormat screenFormat = _ste ? PIXELFORMAT_RGB121 : PIXELFORMAT_CLUT8;
+	int steScheduleWords = 0;
+	bool steMix = false;
+
+	if (_ste) {
+		// Display lines the beam-timed palette raster covers; the lines below
+		// (the SCUMM verb interface in Monkey Island and Atlantis) share one
+		// palette and cost the engine no CPU time.
+		ConfMan.registerDefault("ste_raster_lines", 144);
+		ConfMan.registerDefault("ste_raster_60hz", false);
+		// The beam-timed per-line palette loop (verified pixel-exact by
+		// devtools/atari-ste/raster-test/timerb-raster-test.s). Set ste_raster=false
+		// in the INI to fall back to one stable 16-colour palette per frame.
+		ConfMan.registerDefault("ste_raster", true);
+
+		const int lines = CLIP<int>(ConfMan.getInt("ste_raster_lines"),
+			ATARI_STE_RASTER_MIN_LINES, ATARI_STE_RASTER_MAX_LINES);
+		atari_ste_raster_lines = lines;
+		atari_ste_raster_60hz = ConfMan.getBool("ste_raster_60hz") ? 1 : 0;
+		atari_ste_raster_enable = ConfMan.getBool("ste_raster") ? 1 : 0;
+		steScheduleWords = AtariSteSceneRenderer::scheduleWords(lines);
+
+		_steSceneRenderer = new AtariSteSceneRenderer();
+		_steSceneRenderer->setSceneLines(lines);
+
+		// Temporal colour mixing is the default STE display: a table from
+		// devtools/atari-ste/tools/monkey-flicker-compare.mjs maps every
+		// source colour to a pair of palette entries, and the VBL hook
+		// alternates the two fields of each buffer. Without ste_mix_lut the
+		// table is MIX\DUAL20.BIN next to the program, whose two palettes
+		// alternate; an empty ste_mix_lut, or a table that cannot be loaded,
+		// keeps the per-line raster. Without ste_mix_pattern, one-palette
+		// tables use the checkerboard. Graphics are set up before a game domain
+		// is active, so the keys belong in [scummvm].
+		ConfMan.registerDefault("ste_mix_lut", "MIX/DUAL20.BIN");
+		const Common::Path mixLut = ConfMan.getPath("ste_mix_lut");
+		if (!mixLut.empty()) {
+			const Common::String pattern = ConfMan.get("ste_mix_pattern");
+			const AtariSteSceneRenderer::MixPattern mixPattern =
+				pattern == "alternate" ? AtariSteSceneRenderer::kMixAlternate
+				: pattern == "static" ? AtariSteSceneRenderer::kMixStatic
+				: AtariSteSceneRenderer::kMixChecker;
+			steMix = _steSceneRenderer->loadMix(mixLut, mixPattern);
+			if (steMix) {
+				if (_steSceneRenderer->mixDual() && !pattern.empty() && mixPattern != AtariSteSceneRenderer::kMixAlternate)
+					warning("STE mix: two palettes can only alternate per field");
+				atari_ste_raster_enable = 0;
+				atari_ste_mix_split = _steSceneRenderer->mixSplit() ? 1 : 0;
+			} else {
+				warning("STE mix: keeping the per-line raster");
+			}
+		}
 	}
-	_screen[kOverlayBuffer] = new Screen(_tt, getOverlayWidth(), getOverlayHeight(), getOverlayFormat(), &_overlayPalette);
+
+	for (int i : { kFrontBuffer, kBackBuffer1, kBackBuffer2 }) {
+		_screen[i] = new Screen(_tt, _ste, getMaximumScreenWidth(), getMaximumScreenHeight(), screenFormat, &_palette, steScheduleWords, steMix);
+		s_steScreens[i] = _screen[i];
+	}
+	_screen[kOverlayBuffer] = new Screen(_tt, _ste, getOverlayWidth(), getOverlayHeight(), getOverlayFormat(), &_overlayPalette, 0);
 	// initial position
 	_screen[kOverlayBuffer]->cursor.setPosition(getOverlayWidth() / 2, getOverlayHeight() / 2);
 
 	_chunkySurface.create(getMaximumScreenWidth(), getMaximumScreenHeight(), PIXELFORMAT_CLUT8);
-	_chunkySurfaceOffsetted = _chunkySurface;
+	_chunkySurfaceOffsetted = *_chunkySurface.surfacePtr();
 	_overlaySurface.create(getOverlayWidth(), getOverlayHeight(), getOverlayFormat());
 }
 
@@ -1089,9 +1209,13 @@ void AtariGraphicsManager::freeSurfaces() {
 		_screen[i] = nullptr;
 	}
 
+	_chunkySurfaceOffsetted.init(0, 0, 0, nullptr, Graphics::PixelFormat());
 	_chunkySurface.free();
-	_chunkySurfaceOffsetted = _chunkySurface;
 	_overlaySurface.free();
+	delete _steSceneRenderer;
+	_steSceneRenderer = nullptr;
+	for (Screen *&screen : s_steScreens)
+		screen = nullptr;
 }
 
 void AtariGraphicsManager::addDirtyRectToScreens(const Graphics::Surface &dstSurface, int x, int y, int w, int h, bool directRendering) {
@@ -1113,6 +1237,52 @@ bool AtariGraphicsManager::updateScreenInternal(Screen *dstScreen, const Graphic
 	bool updated = false;
 
 	LockSuperBlitter();
+
+	if (_ste && _overlayState == kOverlayHidden && srcSurface) {
+		// Keep both extents of this buffer's accumulated dirty rectangles.
+		// Collapsing them to dirty rows makes a narrow actor repaint all 320
+		// pixels of every affected line. Full redraws still convert everything.
+		if (!dstScreen->fullRedraw && dirtyRects.empty()) {
+			UnlockSuperBlitter();
+			return false;
+		}
+
+#ifdef ATARI_STE_GAME_ONLY
+		atari_ste_last_source = srcSurface->getPixels();
+		atari_ste_last_palette = _palette.falcon;
+		if (atari_ste_bench_state.enabled) {
+			atari_ste_bench_state.rendererActive = 1;
+			++atari_ste_bench_state.conversions;
+			atari_ste_bench_mark(3);
+		}
+#endif
+		if (dstScreen->mixSurf())
+			_steSceneRenderer->convertMix(*srcSurface, *dstScreen->offsettedSurf, *dstScreen->mixSurf(),
+				_palette.falcon, dstScreen->stePalettes(), dstScreen->stePaletteGeneration,
+				dstScreen->fullRedraw ? nullptr : &dirtyRects);
+		else
+			_steSceneRenderer->convert(*srcSurface, *dstScreen->offsettedSurf,
+				_palette.falcon, dstScreen->stePalettes(), dstScreen->stePaletteGeneration,
+				dstScreen->fullRedraw ? nullptr : &dirtyRects);
+#ifdef ATARI_STE_GAME_ONLY
+		if (atari_ste_bench_state.enabled) {
+			atari_ste_bench_state.rendererActive = 0;
+			atari_ste_bench_mark(4);
+		}
+#endif
+		dstScreen->clearDirtyRects();
+		UnlockSuperBlitter();
+
+		static uint32 steUpdates;
+		if ((++steUpdates & 63) == 0) {
+			debug("STE raster: updates %lu, vbl %lu, frames %lu, resynced %lu, skipped %lu, lost ticks %lu, millis %lu",
+				(unsigned long)steUpdates, (unsigned long)atari_ste_vbl_count,
+				(unsigned long)atari_ste_raster_frames, (unsigned long)atari_ste_raster_resynced,
+				(unsigned long)atari_ste_raster_skipped, (unsigned long)atari_ste_raster_lost_ticks,
+				(unsigned long)g_system->getMillis());
+		}
+		return true;
+	}
 
 	if (cursor.isChanged()) {
 		const Common::Rect cursorBackgroundRect = cursor.flushBackground(Common::Rect(), srcSurface == nullptr);

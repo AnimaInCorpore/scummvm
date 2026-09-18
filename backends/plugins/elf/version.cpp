@@ -20,13 +20,16 @@
  */
 
 #include "base/version.h"
+#define INCLUDED_FROM_BASE_VERSION_CPP
+#include "base/internal_version.h"
 #include "backends/plugins/elf/version.h"
 
 #ifdef USE_ELF_LOADER
-	const char *gScummVMPluginBuildDate __attribute__((visibility("hidden"))) =
+	static const char kScummVMPluginBuildDate[] =
 #if defined(RELEASE_BUILD)
-		gScummVMVersion;
+		SCUMMVM_VERSION SCUMMVM_REVISION;
 #else
 		__DATE__ " " __TIME__;
 #endif
+	const char *gScummVMPluginBuildDate __attribute__((visibility("hidden"))) = kScummVMPluginBuildDate;
 #endif

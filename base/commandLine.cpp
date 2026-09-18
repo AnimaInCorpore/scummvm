@@ -41,7 +41,9 @@
 #include "common/tokenizer.h"
 #include "common/zip-set.h"
 
+#ifndef ATARI_STE_GAME_ONLY
 #include "gui/ThemeEngine.h"
+#endif
 
 #include "audio/musicplugin.h"
 
@@ -1595,6 +1597,7 @@ static Common::Error listSaves(const Common::String &singleTarget) {
 	return result;
 }
 
+#ifndef ATARI_STE_GAME_ONLY
 /** Lists all usable themes */
 static void listThemes() {
 	typedef Common::List<GUI::ThemeEngine::ThemeDescriptor> ThList;
@@ -1607,6 +1610,7 @@ static void listThemes() {
 	for (const auto &theme : thList)
 		printf("%-14s %s\n", theme.id.c_str(), theme.name.c_str());
 }
+#endif
 
 /** Lists all output devices */
 static void listAudioDevices() {
@@ -2098,7 +2102,11 @@ bool processSettings(Common::String &command, Common::StringMap &settings, Commo
 		err = listSaves(settings["game"]);
 		return cmdDoExit;
 	} else if (command == "list-themes") {
+#ifdef ATARI_STE_GAME_ONLY
+		warning("Theme listing is not available in the 4 MiB Atari STE build");
+#else
 		listThemes();
+#endif
 		return cmdDoExit;
 	} else if (command == "list-audio-devices") {
 		listAudioDevices();

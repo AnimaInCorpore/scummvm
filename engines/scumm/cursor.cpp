@@ -425,8 +425,10 @@ void ScummEngine::updateCursor() {
 	int hotspotY = _cursor.hotspotY;
 	int transColor = (_game.heversion >= 80) ? 5 : (_game.platform == Common::kPlatformNES ? cursor[63] : 255);
 
+	#ifndef ATARI_STE_GAME_ONLY
 	if (_macScreen && _game.version == 6 && _game.heversion == 0)
 		mac_scaleCursor(cursor, hotspotX, hotspotY, width, height);
+	#endif
 
 	Graphics::PixelFormat format = _system->getScreenFormat();
 	if (_game.heversion == 70) {
@@ -567,8 +569,10 @@ void ScummEngine_v7::updateCursor() {
 	int hotspotX = _cursor.hotspotX;
 	int hotspotY = _cursor.hotspotY;
 
+	#ifndef ATARI_STE_GAME_ONLY
 	if (_macScreen)
 		mac_scaleCursor(cursor, hotspotX, hotspotY, width, height);
+	#endif
 
 	Graphics::PixelFormat format = _system->getScreenFormat();
 	CursorMan.replaceCursor(cursor, width, height,

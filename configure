@@ -4279,12 +4279,38 @@ case $_backend in
 			_sdlnet=no
 		fi
 		;;
-	atari)
-		append_var DEFINES "-DATARI"
-		define_in_config_if_yes yes "USE_M68K_COSTUME_ASM"
-		define_in_config_if_yes yes "USE_M68K_GFX_ASM"
+		atari)
+			append_var DEFINES "-DATARI"
+			_sdl=no
+			_sdlnet=no
+			_sdlconfig=
+			case "$CXXFLAGS" in
+				*-DATARI_STE_GAME_ONLY*)
+					# The STE game-only profile uses direct XBIOS/IKBD access and
+					# does not open a GEM/VDI workstation.
+					# Monkey Island and Fate of Atlantis use the DOS SCUMM path
+					# in this profile; keep their native STE mixer, but omit the
+					# MIDI, FM-TOWNS and SID component families entirely.
+					_midi=no
+					_fmtowns_pc98_audio=no
+					_sid_audio=no
+					_printing=no
+					;;
+				*)
+					append_var LIBS "-lgem"
+					;;
+			esac
+			case "$CXXFLAGS $ASFLAGS" in
+				*-m68000*)
+					# The stock STE is a 68000 target. The existing Atari
+					# assembly fast paths use 68020 indexed addressing.
+					;;
+				*)
+					define_in_config_if_yes yes "USE_M68K_COSTUME_ASM"
+					define_in_config_if_yes yes "USE_M68K_GFX_ASM"
+					;;
+				esac
 		append_var DEFINES "-DDISABLE_NES_APU"
-		append_var LIBS "-lgem"
 		_ogg=no
 		_vorbis=no
 		_tremor=no
@@ -5343,12 +5369,22 @@ define_in_config_if_yes "$_elf_loader" 'USE_ELF_LOADER'
 if test "$_elf_loader" = yes; then
 	_plugin_prefix=""
 	_plugin_suffix=".plg"
+	_mak_plugins_backend="$_mak_plugins"
 	_mak_plugins='
 PLUGIN_EXTRA_DEPS	= $(EXECUTABLE)
 PLUGIN_LDFLAGS		+= -nostartfiles backends/plugins/elf/version.o -Wl,-q,--retain-symbols-file,$(srcdir)/backends/plugins/elf/plugin.syms -Xlinker --just-symbols -Xlinker $(EXECUTABLE)
-PRE_OBJS_FLAGS		:= -Wl,--whole-archive
+PLUGIN_LDFLAGS		+= -Wl,--undefined=PLUGIN_getBuildDate -Wl,--undefined=PLUGIN_getVersion -Wl,--undefined=PLUGIN_getType -Wl,--undefined=PLUGIN_getTypeVersion -Wl,--undefined=PLUGIN_getObject -Wl,--undefined=PLUGIN_finalize
+'
+	if test "$_backend" = atari && echo "$CXXFLAGS" | grep -q 'ATARI_STE_GAME_ONLY'; then
+		_mak_plugins="$_mak_plugins"'PRE_OBJS_FLAGS		:=
+POST_OBJS_FLAGS		:=
+'
+	else
+		_mak_plugins="$_mak_plugins"'PRE_OBJS_FLAGS		:= -Wl,--whole-archive
 POST_OBJS_FLAGS		:= -Wl,--no-whole-archive
-'"$_mak_plugins"
+'
+	fi
+	_mak_plugins="$_mak_plugins$_mak_plugins_backend"
 fi
 
 #

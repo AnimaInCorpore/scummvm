@@ -62,7 +62,11 @@ public:
 
 protected:
 	/** The mixer implementation */
+#ifdef ATARI_STE_GAME_ONLY
+	Audio::Mixer *_mixer;
+#else
 	Audio::MixerImpl *_mixer;
+#endif
 
 	/** State of the audio system */
 	bool _audioSuspended;

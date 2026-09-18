@@ -357,6 +357,7 @@ Common::Error ScummMetaEngine::createInstance(OSystem *syst, Engine **engine,
 	// Print the MD5 of the game; either verbose using printf, in case of an
 	// unknown MD5, or with a medium debug level in case of a known MD5 (for
 	// debugging purposes).
+#ifndef ATARI_STE_GAME_ONLY
 	if (!findInMD5Table(res.md5.c_str())) {
 		Common::String md5Warning;
 
@@ -373,6 +374,7 @@ Common::Error ScummMetaEngine::createInstance(OSystem *syst, Engine **engine,
 	} else {
 		debug(1, "Using MD5 '%s'", res.md5.c_str());
 	}
+#endif
 
 	bool foundCorruptedFanTranslation = false;
 
@@ -421,9 +423,13 @@ Common::Error ScummMetaEngine::createInstance(OSystem *syst, Engine **engine,
 			!strcmp(res.game.gameid, "baseball2001") ||
 			!strcmp(res.game.gameid, "basketball") ||
 			!strcmp(res.game.gameid, "football")) {
+#ifdef ATARI_STE_GAME_ONLY
+			warning("This re-release version contains patched game scripts, and therefore it might crash or not work properly");
+#else
 			GUI::MessageDialog dialog(_("Warning: this re-release version contains patched game scripts,\n"
 										"and therefore it might crash or not work properly for the time being."));
 			dialog.runModal();
+#endif
 		}
 	}
 
@@ -476,7 +482,6 @@ Common::Error ScummMetaEngine::createInstance(OSystem *syst, Engine **engine,
 	// link. It does not remove v0-v4, which ScummEngine_v5 inherits from, nor
 	// v60he/v70he, which other references still pull in; see
 	// devtools/atari-falcon030/README.md.
-	// Mirrors ATARI_STE_GAME_ONLY on the ste-port branch; unify if both land.
 	if (res.game.platform != Common::kPlatformDOS)
 		return Common::Error(Common::kUnsupportedGameidError);
 	if (res.game.version == 5 && (strcmp(res.game.gameid, "atlantis") == 0 || strcmp(res.game.gameid, "monkey") == 0 ||
@@ -486,6 +491,14 @@ Common::Error ScummMetaEngine::createInstance(OSystem *syst, Engine **engine,
 		*engine = new ScummEngine_v6(syst, res);
 	else
 		return Common::Error(Common::kUnsupportedGameidError);
+#elif defined(ATARI_STE_GAME_ONLY)
+	// The STE build is deliberately a v5/DOS profile for the two supported CD
+	// games. Keeping the generic constructor matrix out of this module removes
+	// every older, HE, and v7/v8 engine family from the resident image.
+	if (res.game.version != 5 || res.game.platform != Common::kPlatformDOS ||
+		(strcmp(res.game.gameid, "monkey") != 0 && strcmp(res.game.gameid, "atlantis") != 0))
+		return Common::Error(Common::kUnsupportedGameidError);
+	*engine = new ScummEngine_v5(syst, res);
 #else
 	switch (res.game.version) {
 	case 0:
@@ -660,6 +673,12 @@ SaveStateDescriptor ScummMetaEngine::querySaveMetaInfos(const char *target, int 
 }
 
 GUI::OptionsContainerWidget *ScummMetaEngine::buildLoomOptionsWidget(GUI::GuiObject *boss, const Common::String &name, const Common::String &target) const {
+#ifdef ATARI_STE_GAME_ONLY
+	(void)boss;
+	(void)name;
+	(void)target;
+	return nullptr;
+#else
 	Common::Platform platform = Common::parsePlatform(ConfMan.get("platform", target));
 	if (platform != Common::kPlatformUnknown && platform != Common::kPlatformDOS && platform != Common::kPlatformMacintosh)
 		return nullptr;
@@ -682,9 +701,16 @@ GUI::OptionsContainerWidget *ScummMetaEngine::buildLoomOptionsWidget(GUI::GuiObj
 	// These EGA Loom settings are only relevant for the EGA
 	// version, since that is the only one that has an overture.
 	return new Scumm::LoomEgaGameOptionsWidget(boss, name, target);
+#endif
 }
 
 GUI::OptionsContainerWidget *ScummMetaEngine::buildMI1OptionsWidget(GUI::GuiObject *boss, const Common::String &name, const Common::String &target) const {
+#ifdef ATARI_STE_GAME_ONLY
+	(void)boss;
+	(void)name;
+	(void)target;
+	return nullptr;
+#else
 	Common::String extra = ConfMan.get("extra", target);
 	Common::Platform platform = Common::parsePlatform(ConfMan.get("platform", target));
 
@@ -695,10 +721,17 @@ GUI::OptionsContainerWidget *ScummMetaEngine::buildMI1OptionsWidget(GUI::GuiObje
 		return new Scumm::MI1CdGameOptionsWidget(boss, name, target);
 
 	return nullptr;
+#endif
 }
 
 
 GUI::OptionsContainerWidget *ScummMetaEngine::buildEngineOptionsWidget(GUI::GuiObject *boss, const Common::String &name, const Common::String &target) const {
+#ifdef ATARI_STE_GAME_ONLY
+	(void)boss;
+	(void)name;
+	(void)target;
+	return nullptr;
+#else
 	Common::String gameid = ConfMan.get("gameid", target);
 	Common::String extra = ConfMan.get("extra", target);
 	Common::Platform platform = Common::parsePlatform(ConfMan.get("platform", target));
@@ -732,6 +765,7 @@ GUI::OptionsContainerWidget *ScummMetaEngine::buildEngineOptionsWidget(GUI::GuiO
 		return new Scumm::ScummGameOptionsWidget(boss, name, target, engineOptions);
 
 	return MetaEngine::buildEngineOptionsWidget(boss, name, target);
+#endif
 }
 
 static const ExtraGuiOption comiObjectLabelsOption = {

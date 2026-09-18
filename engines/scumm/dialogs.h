@@ -43,6 +43,16 @@ struct ResString {
 
 class ScummEngine;
 
+// The 4 MiB Atari STE profile links no GUI. The engine's own in-game interface
+// still needs InfoDialog's resource-string lookup, so the dialog classes survive
+// there as plain objects with no widgets and no modal loop.
+#ifdef ATARI_STE_GAME_ONLY
+class ScummDialog {
+protected:
+	typedef Common::String String;
+	typedef Common::U32String U32String;
+};
+#else
 class ScummDialog : public GUI::Dialog {
 public:
 	ScummDialog(int x, int y, int w, int h);
@@ -52,8 +62,10 @@ protected:
 	typedef Common::String String;
 	typedef Common::U32String U32String;
 };
+#endif
 
 #ifndef DISABLE_HELP
+#ifndef ATARI_STE_GAME_ONLY
 class ScummMenuDialog : public MainMenuDialog {
 public:
 	ScummMenuDialog(ScummEngine *scumm);
@@ -63,6 +75,7 @@ public:
 protected:
 	GUI::Dialog		*_helpDialog;
 };
+#endif
 #endif
 
 /**
@@ -75,8 +88,10 @@ class InfoDialog : public ScummDialog {
 protected:
 	ScummEngine		*_vm;
 	U32String _message;
+#ifndef ATARI_STE_GAME_ONLY
 	GUI::StaticTextWidget *_text;
 	GUI::ThemeEngine::FontStyle _style;
+#endif
 
 public:
 	// arbitrary message
@@ -86,6 +101,7 @@ public:
 
 	void setInfoText(const U32String &message);
 
+#ifndef ATARI_STE_GAME_ONLY
 	void handleMouseDown(int x, int y, int button, int clickCount) override {
 		setResult(0);
 		close();
@@ -96,6 +112,7 @@ public:
 	}
 
 	void reflowLayout() override;
+#endif
 	const char *getPlainEngineString(int stringno, bool forceHardcodedString = false);
 
 protected:
@@ -104,6 +121,10 @@ protected:
 	// Query hard coded string (copied over from the executable)
 	const ResString &getStaticResString(Common::Language lang, int stringno);
 };
+// The 4 MiB Atari STE profile links no GUI, so none of the widget-based
+// dialogs below exist there.
+#ifndef ATARI_STE_GAME_ONLY
+
 
 /**
  * The pause dialog, visible whenever the user activates pause mode. Goes
@@ -448,6 +469,8 @@ private:
 	GUI::StaticTextWidget *_networkVersion = nullptr;
 };
 #endif
+
+#endif // !ATARI_STE_GAME_ONLY
 
 } // End of namespace Scumm
 

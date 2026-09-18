@@ -440,6 +440,8 @@ MODULE_OBJS += \
 	graphics/atari/atari-graphics-asm.o \
 	graphics/atari/atari-pendingscreenchanges.o \
 	graphics/atari/atari-screen.o \
+	graphics/atari/atari-ste-raster.o \
+	graphics/atari/atari-ste-scene.o \
 	graphics/atari/atari-supervidel.o \
 	graphics/atari/atari-surface.o \
 	mixer/atari/atari-mixer.o

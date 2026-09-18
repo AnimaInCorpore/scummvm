@@ -50,9 +50,14 @@ bool BaseBackend::setScaler(const char *name, int factor) {
 }
 
 void BaseBackend::displayMessageOnOSD(const Common::U32String &msg) {
+#ifdef ATARI_STE_GAME_ONLY
+	// The 4 MiB Atari STE profile links no GUI; log instead of showing a dialog.
+	warning("%s", msg.encode().c_str());
+#else
 	// Display the message for 1.5 seconds
 	GUI::TimedMessageDialog dialog(msg, 1500);
 	dialog.runModal();
+#endif
 }
 
 void BaseBackend::initBackend() {

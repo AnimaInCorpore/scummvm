@@ -204,8 +204,14 @@ bool DefaultEventManager::pollEvent(Common::Event &event) {
 				PauseToken pt;
 				if (g_engine)
 					pt = g_engine->pauseEngine();
+#ifdef ATARI_STE_GAME_ONLY
+				// The 4 MiB Atari STE profile links no GUI, so there is no way
+				// to ask; honour the request directly.
+				forwardEvent = _shouldReturnToLauncher = true;
+#else
 				GUI::MessageDialog alert(_("Do you really want to return to the Launcher?\nAny unsaved progress will be lost."), _("Yes"), _("Cancel"));
 				forwardEvent = _shouldReturnToLauncher = (alert.runModal() == GUI::kMessageOK);
+#endif
 			}
 			_confirmExitDialogActive = false;
 		} else
@@ -228,8 +234,12 @@ bool DefaultEventManager::pollEvent(Common::Event &event) {
 			{
 				PauseToken pt;
 				pt = g_engine->pauseEngine();
+#ifdef ATARI_STE_GAME_ONLY
+				forwardEvent = _shouldQuit = true;
+#else
 				GUI::MessageDialog alert(_("Do you really want to quit?\nAny unsaved progress will be lost."), _("Quit"), _("Cancel"));
 				forwardEvent = _shouldQuit = (alert.runModal() == GUI::kMessageOK);
+#endif
 			}
 			_confirmExitDialogActive = false;
 		} else {
@@ -238,12 +248,14 @@ bool DefaultEventManager::pollEvent(Common::Event &event) {
 		break;
 
 	case Common::EVENT_DEBUGGER: {
+#ifndef ATARI_STE_GAME_ONLY
 		GUI::Debugger *debugger = g_engine ? g_engine->getOrCreateDebugger() : nullptr;
 		if (debugger && !debugger->isActive()) {
 			debugger->attach();
 			debugger->onFrame();
 			forwardEvent = false;
 		}
+#endif
 		break;
 	}
 

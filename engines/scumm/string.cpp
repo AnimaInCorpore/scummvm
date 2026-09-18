@@ -165,8 +165,14 @@ void ScummEngine::showMessageDialog(const byte *msg) {
 		else
 			VAR(VAR_KEYPRESS) = showOldStyleBannerAndPause((const char *)msg, _string[3].color, -1).ascii;
 	} else {
+#ifdef ATARI_STE_GAME_ONLY
+		// No GUI in the 4 MiB STE profile; the original in-game banner above is
+		// the only message path.
+		warning("%s", (const char *)msg);
+#else
 		InfoDialog dialog(this, Common::U32String((char *)buf, getDialogCodePage()));
 		VAR(VAR_KEYPRESS) = runDialog(dialog);
+#endif
 	}
 
 }
@@ -498,6 +504,9 @@ bool ScummEngine::handleNextCharsetCode(Actor *a, int *code) {
 			digiTalkieOffset = buffer[0] | (buffer[1] << 8) | (buffer[4] << 16) | (buffer[5] << 24);
 			digiTalkieLength = buffer[8] | (buffer[9] << 8) | (buffer[12] << 16) | (buffer[13] << 24);
 			buffer += 14;
+#ifdef ATARI_STE_GAME_ONLY
+			_sound->talkSound(digiTalkieOffset, digiTalkieLength, DIGI_SND_MODE_TALKIE);
+#else
 			if (_game.heversion >= 60) {
 #ifdef ENABLE_HE
 				((SoundHE *)_sound)->playVoice(_localizer ? _localizer->mapTalk(digiTalkieOffset) : digiTalkieOffset, digiTalkieLength);
@@ -507,6 +516,7 @@ bool ScummEngine::handleNextCharsetCode(Actor *a, int *code) {
 			} else {
 				_sound->talkSound(digiTalkieOffset, digiTalkieLength, DIGI_SND_MODE_TALKIE);
 			}
+#endif
 			_haveActorSpeechMsg = false;
 			break;
 		case 12:
@@ -1142,7 +1152,7 @@ void ScummEngine::displayDialog() {
 	_talkDelay = (VAR_DEFAULT_TALK_DELAY != 0xFF) ? VAR(VAR_DEFAULT_TALK_DELAY) : 60;
 
 	if (!_keepText) {
-#ifndef DISABLE_TOWNS_DUAL_LAYER_MODE
+		#if !defined(DISABLE_TOWNS_DUAL_LAYER_MODE) && !defined(ATARI_STE_GAME_ONLY)
 			if (_game.platform == Common::kPlatformFMTowns)
 				towns_restoreCharsetBg();
 			else
@@ -1215,7 +1225,11 @@ void ScummEngine::displayDialog() {
 			(uint16)numberOfWaits);
 	}
 
+	#ifdef ATARI_STE_GAME_ONLY
+	bool createTextBox = false;
+	#else
 	bool createTextBox = (_macGui && _game.id == GID_INDY3);
+	#endif
 	bool drawTextBox = false;
 
 #ifdef USE_TTS
@@ -1253,8 +1267,10 @@ void ScummEngine::displayDialog() {
 		_charset->_top = _nextTop;
 
 		if (createTextBox) {
+#ifndef ATARI_STE_GAME_ONLY
 			if (!_keepText)
 				_macGui->initTextAreaForActor(a, _charset->getColor());
+#endif
 			createTextBox = false;
 			drawTextBox = true;
 		}
@@ -1321,8 +1337,10 @@ void ScummEngine::displayDialog() {
 	}
 #endif
 
+	#ifndef ATARI_STE_GAME_ONLY
 	if (drawTextBox)
 		mac_drawIndy3TextBox();
+	#endif
 
 #ifndef DISABLE_TOWNS_DUAL_LAYER_MODE
 	if (_game.platform == Common::kPlatformFMTowns && (c == 0 || c == 2 || c == 3))

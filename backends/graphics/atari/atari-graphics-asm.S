@@ -95,18 +95,18 @@ SYM(asm_draw_4bpl_sprite):
 	subq.w	#1,d6				| Adjust for dbra.
 	move.w	d6,d5				| Backup xloopcount in d5.w.
 
-	tst.b	(skip_first_pix16,pc)
+	tst.b	skip_first_pix16
 	jeq	1f
 	subq.w	#1,d5
 1:
-	tst.b	(skip_last_pix16,pc)
+	tst.b	skip_last_pix16
 	jeq	2f
 	subq.w	#1,d5
 2:
 sprite4_yloop:
 	move.w	d5,d6				| Restore xloop counter.
 
-	tst.b	(skip_first_pix16,pc)
+	tst.b	skip_first_pix16
 	jeq	1f
 
 	moveq	#16,d1
@@ -193,7 +193,7 @@ sprite4_xloop:
 	dbra	d6,sprite4_xloop		| Loop until blocks done.
 
 sprite4_xloop_done:
-	tst.b	(skip_last_pix16,pc)
+	tst.b	skip_last_pix16
 	jeq	1f
 
 	moveq	#0xffffffff,d0			| Prepare for maskshifting.
@@ -285,18 +285,18 @@ SYM(asm_draw_8bpl_sprite):
 	subq.w	#1,d6				| Adjust for dbra.
 	move.w	d6,d5				| Backup xloopcount in d5.w.
 
-	tst.b	(skip_first_pix16,pc)
+	tst.b	skip_first_pix16
 	jeq	1f
 	subq.w	#1,d5
 1:
-	tst.b	(skip_last_pix16,pc)
+	tst.b	skip_last_pix16
 	jeq	2f
 	subq.w	#1,d5
 2:
 sprite8_yloop:
 	move.w	d5,d6				| Restore xloop counter.
 
-	tst.b	(skip_first_pix16,pc)
+	tst.b	skip_first_pix16
 	jeq	1f
 
 	moveq	#16,d1
@@ -443,7 +443,7 @@ sprite8_xloop:
 	dbra	d6,sprite8_xloop		| Loop until blocks done.
 
 sprite8_xloop_done:
-	tst.b	(skip_last_pix16,pc)
+	tst.b	skip_last_pix16
 	jeq	1f
 
 	moveq	#0xffffffff,d0			| Prepare for maskshifting.

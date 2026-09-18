@@ -26,10 +26,12 @@
 #include <mint/falcon.h>
 #include <mint/osbind.h>
 #include <mint/ostruct.h>
+#ifndef ATARI_STE_GAME_ONLY
 // https://github.com/mikrosk/usound
 // This build image ships usound.h >= 2, against which usound_compat.h #errors
 // by design. The shim stays in the tree for images still on uSound v1.
 #include <usound.h>
+#endif
 
 #include "common/config-manager.h"
 #include "common/debug.h"
@@ -49,6 +51,10 @@
 extern AtariDspAudio *g_atariDspAudio;
 #endif
 
+#ifdef ATARI_STE_GAME_ONLY
+#include "audio/audiostream.h"
+#endif
+
 #ifdef DISABLE_FANCY_THEMES
 #define DEFAULT_OUTPUT_RATE			11025
 #define DEFAULT_OUTPUT_CHANNELS		1
@@ -59,6 +65,66 @@ extern AtariDspAudio *g_atariDspAudio;
 #define DEFAULT_SAMPLES				1024	// 2 * 46ms (42ms at 24585 Hz) latency
 #endif
 
+#ifdef ATARI_STE_GAME_ONLY
+namespace {
+
+class AtariSilentMixer final : public Audio::Mixer {
+public:
+	bool isReady() const override { return true; }
+	Common::Mutex &mutex() override { return _mutex; }
+
+	void playStream(SoundType, Audio::SoundHandle *, Audio::AudioStream *stream, int,
+				   byte, int8, DisposeAfterUse::Flag dispose, bool, bool) override {
+		if (dispose == DisposeAfterUse::YES)
+			delete stream;
+	}
+
+	void stopAll() override {}
+	void stopID(int) override {}
+	void stopHandle(Audio::SoundHandle) override {}
+	void pauseAll(bool) override {}
+	void pauseID(int, bool) override {}
+	void pauseHandle(Audio::SoundHandle, bool) override {}
+
+	bool isSoundIDActive(int) const override { return false; }
+	int getSoundID(Audio::SoundHandle) const override { return -1; }
+	bool isSoundHandleActive(Audio::SoundHandle) const override { return false; }
+
+	void muteSoundType(SoundType, bool) override {}
+	bool isSoundTypeMuted(SoundType) const override { return true; }
+	void setChannelVolume(Audio::SoundHandle, byte) override {}
+	byte getChannelVolume(Audio::SoundHandle) const override { return 0; }
+	void setChannelBalance(Audio::SoundHandle, int8) override {}
+	int8 getChannelBalance(Audio::SoundHandle) const override { return 0; }
+	void setChannelFaderL(Audio::SoundHandle, uint8) override {}
+	uint8 getChannelFaderL(Audio::SoundHandle) const override { return 0; }
+	void setChannelFaderR(Audio::SoundHandle, uint8) override {}
+	uint8 getChannelFaderR(Audio::SoundHandle) const override { return 0; }
+	void setChannelRate(Audio::SoundHandle, uint32) override {}
+	uint32 getChannelRate(Audio::SoundHandle) const override { return 0; }
+	void resetChannelRate(Audio::SoundHandle) override {}
+
+	uint32 getSoundElapsedTime(Audio::SoundHandle) const override { return 0; }
+	Audio::Timestamp getElapsedTime(Audio::SoundHandle) const override { return Audio::Timestamp(); }
+	void loopChannel(Audio::SoundHandle) override {}
+	bool hasActiveChannelOfType(SoundType) const override { return false; }
+	void setVolumeForSoundType(SoundType, int) override {}
+	int getVolumeForSoundType(SoundType) const override { return 0; }
+
+	uint getOutputRate() const override { return 11025; }
+	bool getOutputStereo() const override { return false; }
+	uint getOutputBufSize() const override { return 0; }
+	uint getOutputBytesPerSample() const override { return 0; }
+	bool getClamping() const override { return false; }
+
+private:
+	Common::Mutex _mutex;
+};
+
+} // namespace
+#endif
+
+#ifndef ATARI_STE_GAME_ONLY
 static USoundContext usoundContext;
 static bool s_usoundActive = false;
 
@@ -151,10 +217,12 @@ static void __attribute__((interrupt)) timerA(void) {
 	// clear in-service bit
 	*((volatile byte *)0xFFFFFA0FL) = ~(1 << 5);
 }
+#endif
 
 AtariMixerManager::AtariMixerManager() : MixerManager() {
 	debug("AtariMixerManager()");
 
+#ifndef ATARI_STE_GAME_ONLY
 	suspendAudio();
 
 	ConfMan.registerDefault("output_rate", DEFAULT_OUTPUT_RATE);
@@ -173,14 +241,17 @@ AtariMixerManager::AtariMixerManager() : MixerManager() {
 		_samples = DEFAULT_SAMPLES;
 
 	g_system->getEventManager()->getEventDispatcher()->registerObserver(this, 10, false);
+#endif
 }
 
 AtariMixerManager::~AtariMixerManager() {
 	debug("~AtariMixerManager()");
 
+#ifndef ATARI_STE_GAME_ONLY
 	g_system->getEventManager()->getEventDispatcher()->unregisterObserver(this);
 
 	AtariAudioShutdown();
+#endif
 
 #ifdef ATARI_DSP_OPL
 	if (_dsp) {
@@ -345,6 +416,12 @@ bool AtariMixerManager::produceDspPeriod(void *context, bool runCallbacks) {
 #endif
 
 void AtariMixerManager::init() {
+#ifdef ATARI_STE_GAME_ONLY
+	// Keep the mixer contract while compiling out all sound playback and
+	// resampling. This leaves the STE scene renderer as the only active output.
+	_mixer = new AtariSilentMixer();
+	_audioSuspended = false;
+#else
 #ifdef ATARI_DSP_OPL
 	if (initDsp())
 		return;
@@ -436,9 +513,13 @@ void AtariMixerManager::init() {
 #endif
 
 	resumeAudio();
+#endif
 }
 
 void AtariMixerManager::suspendAudio() {
+#ifdef ATARI_STE_GAME_ONLY
+	_audioSuspended = true;
+#else
 	debug("suspendAudio");
 
 #ifdef ATARI_DSP_OPL
@@ -450,17 +531,27 @@ void AtariMixerManager::suspendAudio() {
 	Buffoper(0x00);
 	s_playbackState = kPlaybackStopped;
 	_audioSuspended = true;
+#endif
 }
 
 int AtariMixerManager::resumeAudio() {
+#ifdef ATARI_STE_GAME_ONLY
+	_audioSuspended = false;
+	return 0;
+#else
 	debug("resumeAudio");
 
 	_audioSuspended = false;
 	update();
 	return 0;
+#endif
 }
 
 bool AtariMixerManager::notifyEvent(const Common::Event &event) {
+#ifdef ATARI_STE_GAME_ONLY
+	(void)event;
+	return false;
+#else
 	switch (event.type) {
 	case Common::EVENT_QUIT:
 	case Common::EVENT_RETURN_TO_LAUNCHER:
@@ -474,9 +565,13 @@ bool AtariMixerManager::notifyEvent(const Common::Event &event) {
 	}
 
 	return false;
+#endif
 }
 
 void AtariMixerManager::update() {
+#ifdef ATARI_STE_GAME_ONLY
+	return;
+#else
 	if (_audioSuspended) {
 		return;
 	}
@@ -699,5 +794,6 @@ void AtariMixerManager::update() {
 		s_pcmProbe->mixed(probeMixBegin, g_system->getMillis(), processed);
 		s_pcmProbe->service();
 	}
+#endif
 #endif
 }

@@ -29,9 +29,26 @@
 #include "atari-supervidel.h"	// g_hasSuperVidel
 //#include "common/debug.h"
 
-Screen::Screen(bool tt, int width, int height, const Graphics::PixelFormat &format, const Palette *palette_)
+Screen::Screen(bool tt, bool ste, int width, int height, const Graphics::PixelFormat &format, const Palette *palette_, int steScheduleWords, bool steMix)
 	: palette(palette_)
-	, _tt(tt) {
+	, _tt(tt)
+	, _ste(ste) {
+
+	if (steScheduleWords > 0)
+		_stePalettes = new uint16[steScheduleWords]();
+
+	if (steMix) {
+		// The 256 KiB video RAM pool cannot hold three more fields, but every
+		// byte of a stock STE's RAM is displayable, so the second field comes
+		// from the heap. The STE never shakes the screen: exactly 320x200.
+		_mixPixels = new byte[kMixFieldBytes]();
+		_mixSurf.reset(new AtariSurface());
+		_mixSurf->w = 320;
+		_mixSurf->h = 200;
+		_mixSurf->pitch = 160;
+		_mixSurf->format = PIXELFORMAT_RGB121;
+		_mixSurf->setPixels(_mixPixels);
+	}
 
 #ifdef USE_SUPERVIDEL
 	if (g_hasSuperVidel) {
@@ -59,6 +76,12 @@ Screen::Screen(bool tt, int width, int height, const Graphics::PixelFormat &form
 			width, height));
 }
 
+Screen::~Screen() {
+	delete[] _stePalettes;
+	_mixSurf.reset();
+	delete[] _mixPixels;
+}
+
 void Screen::reset(int width, int height, const Graphics::Surface &boundingSurf) {
 	clearDirtyRects();
 
@@ -69,6 +92,8 @@ void Screen::reset(int width, int height, const Graphics::Surface &boundingSurf)
 
 	// erase old screen
 	_offsettedSurf->fillRect(_offsettedSurf->getBounds(), 0);
+	if (_mixPixels)
+		memset(_mixPixels, 0, kMixFieldBytes);
 
 	if (_tt) {
 		if (width <= 320 && height <= 240) {
@@ -82,6 +107,17 @@ void Screen::reset(int width, int height, const Graphics::Surface &boundingSurf)
 			surf->pitch = surf->w * bitsPerPixel / 8;
 			rez = kRezValueTTMid;
 		}
+	} else if (_ste) {
+		// An STE scene is rendered in the native 320x200 low-resolution mode.
+		// The source remains an 8-bit chunky surface; the destination surface is
+		// four bitplanes and is converted once per completed engine frame.
+		if (width > 320 || height > 200)
+			error("Atari STE supports only 320x200 graphics");
+
+		surf->w = 320;
+		surf->h = 200;
+		surf->pitch = surf->w * bitsPerPixel / 8;
+		rez = kRezValueSTLow;
 	} else {
 		mode = VsetMode(VM_INQUIRE) & PAL;
 

@@ -58,6 +58,13 @@
 #define DISABLE_TOWNS_DUAL_LAYER_MODE
 #endif
 
+#ifdef ATARI_STE_GAME_ONLY
+// The STE profile targets only the DOS v5 games and has no FM-TOWNS layer.
+// Defining this here lets every SCUMM translation unit discard the Towns
+// graphics and scrolling implementation consistently.
+#define DISABLE_TOWNS_DUAL_LAYER_MODE
+#endif
+
 namespace GUI {
 class Dialog;
 }

@@ -66,16 +66,19 @@ protected:
 						::: "memory"
 					);
 			    	Super((void *)oldssp);
-			    } else if (mcpu >= 20) {
-			    	long oldssp = Super(SUP_SET);
+				    }
+#if defined(__mc68020__) || defined(__mc68030__) || defined(__mc68040__) || defined(__mc68060__)
+				    else if (mcpu >= 20) {
+				    	long oldssp = Super(SUP_SET);
 			    	__asm__ volatile (
 						"movec	%%cacr,%%d0\n\t"
 						"or.w	#0x0008,%%d0\n\t"	// CI
 						"movec	%%d0,%%cacr"
 						::: "d0", "cc", "memory"
 					);
-			    	Super((void *)oldssp);
-			    }
+				    	Super((void *)oldssp);
+				    }
+#endif
 			}
 		}
 	}

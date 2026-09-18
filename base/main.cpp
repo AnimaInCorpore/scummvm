@@ -53,9 +53,11 @@
 #include "common/text-to-speech.h"
 #include "common/osd_message_queue.h"
 
+#ifndef ATARI_STE_GAME_ONLY
 #include "gui/gui-manager.h"
 #include "gui/error.h"
 #include "gui/message.h"
+#endif
 
 #include "audio/mididrv.h"
 #include "audio/musicplugin.h"  /* for music manager */
@@ -82,7 +84,7 @@
 
 #if defined(__DC__)
 #include "backends/platform/dc/DCLauncherDialog.h"
-#else
+#elif !defined(ATARI_STE_GAME_ONLY)
 #include "gui/launcher.h"
 #endif
 
@@ -98,13 +100,16 @@
 #include "backends/platform/sdl/ps3/ps3.h"
 #endif
 
+#ifndef ATARI_STE_GAME_ONLY
 #include "gui/dump-all-dialogs.h"
+#endif
 
-#ifdef ATARI_FALCON_GAME_ONLY
-// The Falcon build always starts its single target from the command line, so
-// the launcher and everything it drags in (game list, add/edit/remove game,
-// the browser, About, global options) is dead weight. Keeping the function
-// out of this module is what lets the linker leave those objects behind.
+#if defined(ATARI_FALCON_GAME_ONLY) || defined(ATARI_STE_GAME_ONLY)
+// The Atari game-only builds always start their single target without the
+// launcher, so the launcher and everything it drags in (game list,
+// add/edit/remove game, the browser, About, global options) is dead weight.
+// Keeping the function out of this module is what lets the linker leave
+// those objects behind.
 #else
 static bool launcherDialog() {
 
@@ -127,7 +132,7 @@ static bool launcherDialog() {
 	} while (noQuit && nullptr == ConfMan.getActiveDomain());
 	return status;
 }
-#endif // ATARI_FALCON_GAME_ONLY
+#endif // ATARI_FALCON_GAME_ONLY || ATARI_STE_GAME_ONLY
 
 static Common::Error identifyGame(const Common::String &debugLevels, const Plugin **detectionPlugin, DetectedGame &game, const void **descriptor) {
 	assert(detectionPlugin);
@@ -196,9 +201,15 @@ void saveLastLaunchedTarget(const Common::String &target) {
 // TODO: specify the possible return values here
 static Common::Error runGame(const Plugin *enginePlugin, OSystem &system, const DetectedGame &game, const void *meDescriptor) {
 	assert(enginePlugin);
+	#ifdef ATARI_STE_GAME_ONLY
+	printf("Atari STE runGame entered\n");
+	#endif
 
 	// Determine the game data path, for validation and error messages
 	Common::FSNode dir(ConfMan.getPath("path"));
+	#ifdef ATARI_STE_GAME_ONLY
+	printf("Atari STE path node ready\n");
+	#endif
 	Common::String target = ConfMan.getActiveDomainName();
 	Common::Error err = Common::kNoError;
 	Engine *engine = nullptr;
@@ -222,15 +233,27 @@ static Common::Error runGame(const Plugin *enginePlugin, OSystem &system, const 
 	} else if (!dir.isDirectory()) {
 		err = Common::kPathNotDirectory;
 	}
+	#ifdef ATARI_STE_GAME_ONLY
+	printf("Atari STE path checked\n");
+	#endif
 
 	// Create the game's MetaEngine.
 	MetaEngine &metaEngine = enginePlugin->get<MetaEngine>();
+	#ifdef ATARI_STE_GAME_ONLY
+	printf("Atari STE metaengine ready\n");
+	#endif
 	if (err.getCode() == Common::kNoError) {
 		// Set default values for all of the custom engine options
 		// Apparently some engines query them in their constructor, thus we
 		// need to set this up before instance creation.
+		#ifdef ATARI_STE_GAME_ONLY
+		printf("Atari STE before createInstance\n");
+		#endif
 		metaEngine.registerDefaultSettings(target);
 		err = metaEngine.createInstance(&system, &engine, game, meDescriptor);
+		#ifdef ATARI_STE_GAME_ONLY
+		printf("Atari STE after createInstance\n");
+		#endif
 	}
 
 	if (err.getCode() == Common::kNoError) {
@@ -332,6 +355,9 @@ static Common::Error runGame(const Plugin *enginePlugin, OSystem &system, const 
 	system.getEventManager()->purgeMouseEvents();
 
 	// Run the engine
+	#ifdef ATARI_STE_GAME_ONLY
+		printf("Atari STE before engine run\n");
+	#endif
 	Common::Error result = engine->run();
 
 	// Make sure we do not return to the launcher if this is not possible.
@@ -612,9 +638,13 @@ extern "C" int scummvm_main(int argc, const char * const argv[]) {
 	setupGraphics(system);
 
 	if (!configLoadStatus) {
+#ifdef ATARI_STE_GAME_ONLY
+		warning("Bad config file format; continuing with the existing settings");
+#else
 		GUI::MessageDialog alert(_("Bad config file format. overwrite?"), _("Yes"), _("Cancel"));
 		if (alert.runModal() != GUI::kMessageOK)
-   			return 0;
+  			return 0;
+#endif
 	}
 	// Init the different managers that are used by the engines.
 	// Do it here to prevent fragmentation later
@@ -722,11 +752,11 @@ extern "C" int scummvm_main(int argc, const char * const argv[]) {
 	CloudMan.syncSaves();
 #endif
 
-#ifndef ATARI_FALCON_GAME_ONLY
+#if !defined(ATARI_FALCON_GAME_ONLY) && !defined(ATARI_STE_GAME_ONLY)
 	// GUI::dumpAllDialogs() is a theme-debugging feature that instantiates every
 	// dialog there is, so referencing it at all drags the launcher, the global
-	// options, the browsers and the game editor into the image. The Falcon
-	// game-only build leaves it out.
+	// options, the browsers and the game editor into the image. The Atari
+	// game-only builds leave it out.
 	if (ConfMan.hasKey("dump_all_dialogs")) {
 		GUI::dumpAllDialogs();
 	}
@@ -771,8 +801,19 @@ extern "C" int scummvm_main(int argc, const char * const argv[]) {
 		return 1;
 	}
 #else
-	if (nullptr == ConfMan.getActiveDomain() && !ConfMan.hasKey("dump_all_dialogs"))
+	// The 4 MiB STE profile starts the configured target directly. The normal
+	// launcher stores this target in the application-domain setting.
+	if (nullptr == ConfMan.getActiveDomain() && !ConfMan.hasKey("dump_all_dialogs")) {
+#ifdef ATARI_STE_GAME_ONLY
+		const Common::String startupTarget = ConfMan.get("lastselectedgame", Common::ConfigManager::kApplicationDomain);
+		if (!startupTarget.empty() && ConfMan.hasGameDomain(startupTarget))
+			ConfMan.setActiveDomain(startupTarget);
+		else
+			warning("No configured Atari STE startup target; set lastselectedgame in the INI file");
+#else
 		launcherDialog();
+#endif
+	}
 #endif
 
 	// FIXME: We're now looping the launcher. This, of course, doesn't
@@ -857,7 +898,13 @@ extern "C" int scummvm_main(int argc, const char * const argv[]) {
 #endif
 
 			// Try to run the game
+		#ifdef ATARI_STE_GAME_ONLY
+			printf("Atari STE active domain '%s', path '%s'\n", ConfMan.getActiveDomainName().c_str(), ConfMan.get("path").c_str());
+			#endif
 			result = runGame(enginePlugin, system, game, meDescriptor);
+			#ifdef ATARI_STE_GAME_ONLY
+			printf("Atari STE game result: %d (%s)\n", result.getCode(), result.getDesc().c_str());
+			#endif
 			if (ttsMan != nullptr) {
 				ttsMan->popState();
 			}
@@ -883,7 +930,11 @@ extern "C" int scummvm_main(int argc, const char * const argv[]) {
 			// Did an error occur ?
 			if (result.getCode() != Common::kNoError && result.getCode() != Common::kUserCanceled) {
 				// Shows an informative error dialog if starting the selected game failed.
+#ifdef ATARI_STE_GAME_ONLY
+				warning("Error running game: %s", result.getDesc().c_str());
+#else
 				GUI::displayErrorDialog(result, _("Error running game:"));
+#endif
 			}
 
 			// Quit unless an error occurred, or Return to launcher was requested
@@ -932,7 +983,12 @@ extern "C" int scummvm_main(int argc, const char * const argv[]) {
 		} else {
 			DebugMan.removeAllDebugChannels();
 
+#ifdef ATARI_STE_GAME_ONLY
+			printf("Atari STE identify result: %d (%s)\n", result.getCode(), result.getDesc().c_str());
+			warning("Error running game: %s", result.getDesc().c_str());
+#else
 			GUI::displayErrorDialog(result, _("Error running game:"));
+#endif
 
 			// Clear the active domain
 			ConfMan.setActiveDomain("");
@@ -952,7 +1008,7 @@ extern "C" int scummvm_main(int argc, const char * const argv[]) {
 #ifdef ATARI_FALCON_GAME_ONLY
 			// Nothing to return to; leaving the loop quits.
 			break;
-#else
+#elif !defined(ATARI_STE_GAME_ONLY)
 			launcherDialog();
 #endif
 		}
@@ -966,7 +1022,9 @@ extern "C" int scummvm_main(int argc, const char * const argv[]) {
 	Cloud::CloudManager::destroy();
 #endif
 	PluginManager::destroy();
+#ifndef ATARI_STE_GAME_ONLY
 	GUI::GuiManager::destroy();
+#endif
 	Common::ConfigManager::destroy();
 	Common::DebugManager::destroy();
 	Common::OSDMessageQueue::destroy();
