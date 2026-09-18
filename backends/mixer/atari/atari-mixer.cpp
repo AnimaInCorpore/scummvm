@@ -41,6 +41,7 @@
 
 #ifdef ATARI_DSP_OPL
 #include "audio/mixer_intern.h"
+#include "backends/platform/atari/atari-critical.h"
 #include "backends/platform/atari/atari-dsp.h"
 #include "backends/platform/atari/dsp-opl.h"
 #include "devtools/atari-falcon030/tools/foa-opl3/opl-practical.h"
@@ -331,19 +332,27 @@ bool AtariMixerManager::produceDspPeriod(void *context, bool runCallbacks) {
 		if (AtariDspOPL::instance())
 			AtariDspOPL::instance()->producePeriod(period);
 	}
-	// An extension nested in a production that is between reading the ring
-	// head and advancing it takes silence rather than the same chunk twice.
-	if (self->_dspPcmHead != self->_dspPcmTail && !(!runCallbacks && self->_dspPcmTaking)) {
-		self->_dspPcmTaking = true;
-		self->_dsp->setPcm(period, self->_dspPcmRing + self->_dspPcmHead * AtariDspAudio::kPcmPerPeriod);
-		self->_dspPcmHead = (self->_dspPcmHead + 1) % kDspPcmChunks;
-		self->_dspPcmTaking = false;
-	} else {
-		self->_dsp->setPcm(period, nullptr);
-		if (runCallbacks)
-			++self->_dspPcmUnderruns;
+	// Claiming a chunk and queueing the period that carries it are one step,
+	// with the tick held off. This runs with Timer A enabled, and a nested
+	// tick's extension period comes back into this function: landing between
+	// the emptiness check and the claim, it took the last chunk and left this
+	// call to read past the tail, after which the ring looked nearly full and
+	// the main loop stopped refilling it while stale chunks played; landing
+	// between the claim and the submit, it queued a later chunk ahead of this
+	// one. A flag set after the check could close neither window. setPcm is a
+	// pass over 192 samples, well inside the millisecond the tick then waits.
+	{
+		AtariInterruptsOff off;
+		if (self->_dspPcmHead != self->_dspPcmTail) {
+			self->_dsp->setPcm(period, self->_dspPcmRing + self->_dspPcmHead * AtariDspAudio::kPcmPerPeriod);
+			self->_dspPcmHead = (self->_dspPcmHead + 1) % kDspPcmChunks;
+		} else {
+			self->_dsp->setPcm(period, nullptr);
+			if (runCallbacks)
+				++self->_dspPcmUnderruns;
+		}
+		self->_dsp->submit(period);
 	}
-	self->_dsp->submit(period);
 	return true;
 }
 #endif

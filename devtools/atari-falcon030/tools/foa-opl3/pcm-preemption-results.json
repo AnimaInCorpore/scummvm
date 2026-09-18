@@ -1,0 +1,6 @@
+{
+  "gate": "produceDspPeriod under a nested extension at every statement boundary, 0-3 chunks queued",
+  "current_passes": true,
+  "mutant_without_guard_fails": true,
+  "passed": true
+}

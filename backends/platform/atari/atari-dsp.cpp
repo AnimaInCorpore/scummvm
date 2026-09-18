@@ -177,11 +177,7 @@ inline uint32 queued() {
 
 // The producer's queue push and buffer scan against the extension a nested
 // tick may take: both run in supervisor mode, so the level can be raised.
-struct InterruptsOff {
-	unsigned short sr;
-	InterruptsOff() { asm volatile("move.w %%sr,%0\n\tor.w #0x0700,%%sr" : "=d"(sr) : : "memory"); }
-	~InterruptsOff() { asm volatile("move.w %0,%%sr" : : "d"(sr) : "memory"); }
-};
+typedef AtariInterruptsOff InterruptsOff;
 
 inline bool txde() { return (*kHostIsr & 2) != 0; }
 inline bool rxdf() { return (*kHostIsr & 1) != 0; }

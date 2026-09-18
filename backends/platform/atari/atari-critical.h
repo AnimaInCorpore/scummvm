@@ -56,6 +56,19 @@ struct AtariCriticalSection {
 	AtariCriticalSection() { ATARI_CRITICAL_ENTER(); }
 	~AtariCriticalSection() { ATARI_CRITICAL_LEAVE(); }
 };
+
+/**
+ * Holds off every interrupt for a scope, Timer A's tick included.
+ *
+ * Supervisor mode only: reading SR is privileged on the 68030, so this
+ * belongs in code that runs from an interrupt or under Supexec, never in the
+ * main loop, where it would raise a privilege violation.
+ */
+struct AtariInterruptsOff {
+	unsigned short sr;
+	AtariInterruptsOff() { __asm__ volatile("move.w %%sr,%0\n\tor.w #0x0700,%%sr" : "=d"(sr) : : "memory"); }
+	~AtariInterruptsOff() { __asm__ volatile("move.w %0,%%sr" : : "d"(sr) : "memory"); }
+};
 #endif
 
 #endif

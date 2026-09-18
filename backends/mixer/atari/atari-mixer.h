@@ -79,7 +79,6 @@ private:
 	volatile int _dspPcmHead = 0;          // the interrupt's next chunk
 	volatile int _dspPcmTail = 0;          // the main loop's next chunk
 	volatile uint32 _dspPcmUnderruns = 0;  // periods produced with no chunk to take
-	volatile bool _dspPcmTaking = false;   // a production is between reading the head and advancing it
 	int _dspFmVolume = -1;
 	uint32 _dspLoggedPeriods = 0;
 #endif
