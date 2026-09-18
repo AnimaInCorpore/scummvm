@@ -142,7 +142,10 @@ public:
 	                     uint32 &refusedLevel, uint32 &extended, uint32 &produceMax,
 	                     uint32 &emptyTicks, uint32 &emptyStreakMax) const;
 	uint32 protocolErrors() const;
-	/** The kernel's counters, periods rendered and periods rendered late, as of its last acknowledgement. */
+	/**
+	 * The kernel's counters as of its last acknowledgement: periods rendered, and periods the
+	 * transmitter played without a fresh one - caught mid-render, or replayed while no period came.
+	 */
 	bool queryCounters(uint32 &rendered, uint32 &late);
 
 private:

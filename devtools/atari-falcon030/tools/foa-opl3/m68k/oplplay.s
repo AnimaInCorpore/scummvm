@@ -135,14 +135,18 @@ period_loop:
         subq.l  #1,period_count
         bra     period_loop
 periods_done:
+        ; The counters are read before the drain. The kernel answers only
+        ; once the last period is rendered, so this covers the whole stream;
+        ; read after the drain, it would also count the drain itself, which
+        ; the transmitter spends replaying the ring with nothing new to play.
+        move.l  #CMD_STATUS,d0
+        bsr     dsp_exchange
+        move.l  d0,result_status
         ; let the last rendered periods play out before stopping
         move.w  #6,d3
 drain_loop:
         Vsync
         dbra    d3,drain_loop
-        move.l  #CMD_STATUS,d0
-        bsr     dsp_exchange
-        move.l  d0,result_status
         move.l  #CMD_CHECKSUM,d0
         bsr     dsp_exchange
         move.l  d0,result_checksum

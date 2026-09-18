@@ -160,6 +160,15 @@ periods_rendered: ds    1
 late_periods:   ds      1
 ssi_status:     ds      1
 stream_primed:  ds      1               ; nonzero once the first period is rendered
+tracking:       ds      1               ; nonzero while streaming: track_halves runs
+tx_half_seen:   ds      1               ; the half the transmitter was last seen in
+fresh_a:        ds      1               ; a period was rendered into half A in time
+fresh_b:        ds      1               ; the same for half B
+stream_live:    ds      1               ; a rendered period has played: count from here
+th_a2:          ds      1               ; track_halves keeps a and x0 here
+th_a1:          ds      1
+th_a0:          ds      1
+th_x0:          ds      1
 
 ; ------------------------------------------------------------ entry vectors
 
@@ -728,17 +737,17 @@ command_argument:
         rts
 
 host_send:
-        jclr    #1,x:m_hsr,*
+        jsclr   #1,x:m_hsr,wait_tx
         movep   a1,x:m_htx
         rts
 
 host_ack:
-        jclr    #1,x:m_hsr,*
+        jsclr   #1,x:m_hsr,wait_tx
         movep   #>0,x:m_htx
         rts
 
 host_receive:
-        jclr    #0,x:m_hsr,*
+        jsclr   #0,x:m_hsr,wait_rx
         movep   x:m_hrx,a
         rts
 
@@ -1132,8 +1141,8 @@ ae_done:
 ; renders each period into the half the transmitter has just left. A period
 ; arrives from the host as events plus 160 mono PCM samples (a third of the
 ; codec rate, expanded here by linear interpolation) and is rendered as
-; soon as its half is free; a period that is not ready in time simply
-; repeats, and the late counter records it.
+; soon as its half is free. A period that is not ready in time repeats the
+; old audio; track_halves watches the transmitter to count each one.
 
 command_stream_start:
         movep   #0,x:m_crb
@@ -1149,6 +1158,10 @@ css_cleared:
         move    a1,x:periods_rendered
         move    a1,x:late_periods
         move    a1,x:stream_primed
+        move    a1,x:fresh_a
+        move    a1,x:fresh_b
+        move    a1,x:stream_live
+        move    a1,x:tx_half_seen       ; r6 starts in half A
         move    a1,x:checksum
         move    a1,x:pcm_previous
         move    a1,x:pcm_present
@@ -1162,10 +1175,12 @@ css_cleared:
         move    x:(r6)+,a
         movep   a1,x:m_tx
         movep   #$5a00,x:m_crb          ; network, transmit, interrupt
+        move    #>1,a
+        move    a1,x:tracking
         jsr     host_ack
 
 stream_loop:
-        jclr    #0,x:m_hsr,stream_loop
+        jsclr   #0,x:m_hsr,wait_rx
         movep   x:m_hrx,a
         move    a1,x:last_command
         move    a1,x1
@@ -1210,9 +1225,9 @@ command_refill:
         tst     a
         jeq     refill_events_done
         do      a1,refill_events_done
-        jclr    #0,x:m_hsr,*
+        jsclr   #0,x:m_hsr,wait_rx
         movep   x:m_hrx,x:(r0)+
-        jclr    #0,x:m_hsr,*
+        jsclr   #0,x:m_hsr,wait_rx
         movep   x:m_hrx,x:(r0)+
 refill_events_done:
         jsr     host_receive
@@ -1232,7 +1247,7 @@ receive_pcm:
         move    x:pcm_previous,b
         move    #>$200000,y0            ; one quarter
         do      #PCM_PER_PERIOD,rp_done
-        jclr    #0,x:m_hsr,*
+        jsclr   #0,x:m_hsr,wait_rx
         movep   x:m_hrx,a
         move    a1,x0
         sub     b,a
@@ -1253,7 +1268,8 @@ rp_done:
         rts
 
 ; Wait for the transmitter to leave the half about to be rendered, render
-; the period into it, and count it late if the transmitter caught up.
+; the period into it, and mark the half fresh unless the transmitter caught
+; up; track_halves does the counting.
 ;
 ; The first period arrives whenever the host gets round to it, with the
 ; transmitter anywhere in the silent ring. It first waits for the
@@ -1267,6 +1283,7 @@ render_period:
         move    #>1,a
         move    a1,x:stream_primed
 rp_first:
+        jsr     track_halves
         move    x:stream_next_half,b
         move    r6,a
         move    #>SSI_RING+SSI_HALF_WORDS,x0
@@ -1279,6 +1296,7 @@ rp_first_a:
         cmp     x0,a                    ; rendering A: wait until r6 is in A
         jge     rp_first
 rp_wait:
+        jsr     track_halves
         move    x:stream_next_half,b
         move    r6,a
         move    #>SSI_RING+SSI_HALF_WORDS,x0
@@ -1300,27 +1318,28 @@ rp_go:
         move    a1,x:block_index
         do      #PERIOD_BLOCKS,rp_rendered
         jsr     render_block
+        jsr     track_halves            ; so a crossing mid-render is seen within a block
         nop
 rp_rendered:
-        ; late when r6 already entered the half just rendered
+        ; The period is judged against the tracker's own view of the
+        ; transmitter, not a second look at r6, so the two cannot disagree:
+        ; if the transmitter entered this half before the render finished,
+        ; track_halves has seen it and counted the period late on entry;
+        ; otherwise the half is fresh, and its entry is on time whenever it
+        ; comes.
+        jsr     track_halves
         move    x:stream_next_half,b
-        move    r6,a
-        move    #>SSI_RING+SSI_HALF_WORDS,x0
-        cmp     x0,a
+        move    x:tx_half_seen,a
+        cmp     b,a
+        jeq     rp_counted              ; caught mid-render: already late
+        move    #>1,a
         tst     b
-        jeq     rp_late_test_a
-        cmp     x0,a
-        jlt     rp_on_time
-        jmp     rp_late
-rp_late_test_a:
-        cmp     x0,a
-        jge     rp_on_time
-rp_late:
-        move    x:late_periods,a
-        move    #>1,x0
-        add     x0,a
-        move    a1,x:late_periods
-rp_on_time:
+        jeq     rp_fresh_a
+        move    a1,x:fresh_b
+        jmp     rp_counted
+rp_fresh_a:
+        move    a1,x:fresh_a
+rp_counted:
         move    x:stream_next_half,a
         move    #>1,x0
         eor     x0,a
@@ -1352,6 +1371,8 @@ command_checksum:
 
 command_stream_stop:
 stream_stopped:
+        clr     a
+        move    a1,x:tracking
         movep   #0,x:m_crb
         move    #>-1,m6
         clr     a
@@ -1360,6 +1381,85 @@ stream_stopped:
         move    a1,x:emit_routine
         jsr     host_ack
         jmp     command_loop
+
+; ----------------------------------------------------- transmitter tracking
+;
+; The transmitter walks the ring under interrupt and never stops: when the
+; host is late with a period, it plays the old audio in the ring again. Only
+; watching it can count that, since nothing is rendered while the host
+; stalls. track_halves notes each crossing from one half into the other and
+; holds it against that half's flag, which a render sets when it finishes
+; before the transmitter gets there: a fresh half is used up, and any other -
+; a replay while the host stalls, or a period the transmitter caught
+; mid-render - counts one late period. Counting starts once the first
+; rendered period has played, so the silence the stream opens on is not
+; counted.
+;
+; It is called from every wait while streaming and between the blocks of a
+; render, so it never goes a whole half without looking. It keeps a, x0 and
+; every other register, and changes only the condition codes.
+track_halves:
+        jclr    #0,x:tracking,th_off
+        move    a2,x:th_a2
+        move    a1,x:th_a1
+        move    a0,x:th_a0
+        move    x0,x:th_x0
+        move    r6,a
+        move    #>SSI_RING+SSI_HALF_WORDS,x0
+        cmp     x0,a
+        move    #>0,a                   ; a move keeps the comparison's flags
+        jlt     th_half
+        move    #>1,a
+th_half:
+        move    x:tx_half_seen,x0
+        cmp     x0,a
+        jeq     th_done                 ; still in the same half
+        move    a1,x:tx_half_seen
+        tst     a
+        jne     th_entered_b
+        move    x:fresh_a,a
+        tst     a
+        jeq     th_stale
+        clr     a
+        move    a1,x:fresh_a
+        jmp     th_fresh
+th_entered_b:
+        move    x:fresh_b,a
+        tst     a
+        jeq     th_stale
+        clr     a
+        move    a1,x:fresh_b
+th_fresh:
+        move    #>1,a
+        move    a1,x:stream_live
+        jmp     th_done
+th_stale:
+        move    x:stream_live,a
+        tst     a
+        jeq     th_done                 ; still the opening silence
+        move    x:late_periods,a
+        move    #>1,x0
+        add     x0,a
+        move    a1,x:late_periods
+th_done:
+        move    x:th_x0,x0
+        move    x:th_a0,a0
+        move    x:th_a1,a1
+        move    x:th_a2,a2
+th_off:
+        rts
+
+; Waits on the host that keep tracking the transmitter. Reached through
+; jsclr only while the port is not ready, so a ready port costs nothing.
+wait_rx:
+        jsr     track_halves
+        jclr    #0,x:m_hsr,wait_rx
+        rts
+
+wait_tx:
+        jsr     track_halves
+        jclr    #1,x:m_hsr,wait_tx
+        rts
 
 ssi_tx_exception:
         movep   x:m_sr,x:ssi_status

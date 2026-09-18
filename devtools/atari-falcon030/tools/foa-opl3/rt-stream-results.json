@@ -1,11 +1,11 @@
 {
-  "date": "2026-09-16",
+  "date": "2026-09-18",
   "gate": "practical OPL kernel stream mode on the emulated Falcon: transport, timing, exactness",
   "source_sha256": {
-    "dsp/oplrt.asm": "fb337d7d249019e8575b560dff2ca419030bcd6f20782b50f9da98eaf1255a09",
-    "m68k/oplplay.s": "c09744f39bf189b954a3406de2f8077925cd3590280c4543e2aa94c671e95317",
+    "dsp/oplrt.asm": "7efd423d64855c165e983db215bfd4cae4ecaef887777ba120cbf69ea664b2f0",
+    "m68k/oplplay.s": "c411e279a1ec485b3a8f47b4cf5d57d9f2ea5f0284da24eec846816e1345acd4",
     "rt-fixture.cpp": "f6f27bc088116b282c4da191d88e4a959f0ad8a62d3e8b566ad27a56c6f86232",
-    "opl-practical.h": "33fef41a4c0a583477787ad611f17447ca488e519d1be0daae9fcc9145d2b3e6"
+    "opl-practical.h": "85f10bbe5698be9dd285e56e6bf26005e464de94942626792cdbb00d1ec1ebfd"
   },
   "scenario": "trace",
   "trace_sha256": "883bae533b8338fb9ca9714216412705853f52248b75ff970f8f4ddc666a893f",
@@ -19,6 +19,7 @@
   "checksum_dsp": 2644680,
   "word_exact": true,
   "on_time": true,
+  "starvation": null,
   "not_established": [
     "No audio captured or auditioned from the emulator; the checksum proves the rendered words",
     "The 68030 here does nothing but submit periods; a game's load is not modelled",

@@ -17,6 +17,7 @@ and its own committed result file.
 | Practical kernel's register semantics, word for word | [practical-unit-results.json](practical-unit-results.json) | `opl-practical-unit-test` |
 | Practical DSP kernel at 49.17 kHz: word exact, 62-80% of budget | [rt-bench-results.json](rt-bench-results.json) | `rt-bench-gate.py` |
 | Stream mode through the SSI: word exact, no late period, also under the worst-case load | [rt-stream-results.json](rt-stream-results.json), [rt-stream-stress-results.json](rt-stream-stress-results.json) | `rt-stream-gate.py` |
+| A host stall is counted: a 0.995 s silence reads 62 late periods, not 0 | [rt-stream-starved-results.json](rt-stream-starved-results.json) | `rt-stream-gate.py --starve 50` |
 | Atlantis on the emulated Falcon with the DSP build | [game-results.json](game-results.json) | `game-gate.py` |
 | Day of the Tentacle on the same build | [game-results-tentacle.json](game-results-tentacle.json) | `game-gate.py --gameid tentacle` |
 | The Secret of Monkey Island (Ultimate Talkie) on the same build | [game-results-monkey.json](game-results-monkey.json) | `game-gate.py --gameid monkey` |
@@ -474,6 +475,18 @@ and from [rt-stream-stress-results.json](rt-stream-stress-results.json),
 `--scenario stress`: 10 s of nine feedback FM channels with both LFOs held,
 640 periods, none late, checksum equal.
 
+"None late" means more than it once did. The kernel used to judge a period
+only when it finished rendering one, and a host that stops sending renders
+nothing, so a stall of a second read as no late period at all. It now
+watches the transmitter from every wait, and each period played without a
+fresh one - replayed while the host is silent, or caught mid-render - counts.
+[rt-stream-starved-results.json](rt-stream-starved-results.json),
+`--starve 50`: the host withholds every refill for 50 frames halfway through
+the stress stream, a stall of 0.995 s, and the kernel counts 62 late periods
+by its end against 62.7 expected, with the checksum still equal. The old
+kernel counts 0 there, and the gate fails on it. The host reads its counters
+before letting the last periods play out, since that drain is replays too.
+
 ## In the game
 
 The ScummVM build wires it in without touching the AdLib driver:
@@ -558,9 +571,12 @@ transport at least through their openings.
 
 Two earlier stages of the Atlantis run are worth keeping in mind. With
 production on the main loop and delivery from the interrupt it reported two
-late periods; but the kernel counts one late per starvation, not per
-period, so each of those was the music frozen for the length of a scene
-change, which the PCM underrun count now makes visible. With everything on
+late periods; but the kernel then counted a late only when a render
+finished behind the transmitter, at most one per starvation, so each of
+those was the music frozen for the length of a scene change, which the PCM
+underrun count now makes visible. It now counts every period played
+without a fresh one, stall or not (see the stream gate's starvation
+scenario). With everything on
 the main loop it had 171 late periods, 3.7%. The emulator's DSP timing is a
 model; nothing here ran on hardware, and the recording was checked for
 presence and level, not auditioned.

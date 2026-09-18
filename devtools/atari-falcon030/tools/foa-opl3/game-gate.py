@@ -8,9 +8,13 @@ the AdLib score on the DSP (backends/platform/atari/dsp-opl.cpp) and feeds
 speech and effects through the same stream. The transport logs its counters
 every 512 periods; this gate allows no late period and no protocol error,
 and scores the recording: the music must be present at a sane level.
-The kernel counts one late per starvation, not per period, so a late is a
-freeze of the music, however long; the PCM underrun and extension counts in
-the same line are where the game's loop stalls show.
+The kernel counts every period the transmitter played without a fresh
+one, so a late is 15.6 ms of the music repeating, and a stall of a second
+shows as about 64. It once counted only a render that finished behind the
+transmitter, and a stall renders nothing, so it could read 0 through a
+second of silence; before that fix a late period meant a freeze of unknown
+length. The PCM underrun and extension counts in the same line are where
+the game's loop stalls show.
 
 Established: the integrated build boots the DSP, streams, and the game runs
 with it under Hatari. Not established: any comparison against the exact
