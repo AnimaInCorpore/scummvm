@@ -285,14 +285,16 @@ void AtariMixerManager::updateDsp() {
 		      submitted, rendered, late, _dsp->protocolErrors(), _dspPcmUnderruns,
 		      extended, refusedStreak, refusedMutex, refusedAllocator, refusedLevel, produceMax,
 		      produceLoops, produceEvents, callbackTicks, callbacks, emptyTicks, emptyStreak);
-		uint32 pcAddr[5], pcHits[5], pcLost = 0, pcRef = 0;
-		const uint32 pcTotal = _dsp->pcSamples(pcAddr, pcHits, 5, pcLost, pcRef);
-		if (pcTotal) {
-			debug("AtariDspAudio: %u pc samples in long productions (%u lost), tick at 0x%08x",
-			      pcTotal, pcLost, (unsigned)pcRef);
-			for (int i = 0; i < 5 && pcHits[i]; ++i)
-				debug("AtariDspAudio:   0x%08x  %u (%u%%)", (unsigned)pcAddr[i], pcHits[i],
-				      (unsigned)(pcHits[i] * 100 / pcTotal));
+		for (int silent = 1; silent >= 0; --silent) {
+			uint32 pcAddr[6], pcHits[6], pcLost = 0, pcSessions = 0, pcRef = 0;
+			const uint32 pcTotal = _dsp->pcSamples(silent, pcAddr, pcHits, 6, pcLost, pcSessions, pcRef);
+			if (!pcTotal)
+				continue;
+			debug("AtariDspAudio: %s sessions: %u of them, %u pc samples (%u lost), tick at 0x%08x",
+			      silent ? "silent" : "eventful", pcSessions, pcTotal, pcLost, (unsigned)pcRef);
+			for (int i = 0; i < 6 && pcHits[i]; ++i)
+				debug("AtariDspAudio:   %s 0x%08x  %u (%u%%)", silent ? "S" : "E", (unsigned)pcAddr[i],
+				      pcHits[i], (unsigned)(pcHits[i] * 100 / pcTotal));
 		}
 	}
 }

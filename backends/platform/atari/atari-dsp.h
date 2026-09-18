@@ -147,7 +147,8 @@ public:
 	 * first, with a reference symbol's runtime address so they can be resolved
 	 * against the unstripped binary. Returns the total sampled.
 	 */
-	uint32 pcSamples(uint32 *addr, uint32 *hits, uint32 count, uint32 &lost, uint32 &reference) const;
+	uint32 pcSamples(int silent, uint32 *addr, uint32 *hits, uint32 count, uint32 &lost,
+	                 uint32 &sessions, uint32 &reference) const;
 
 	void productionStats(uint32 &refusedStreakMax, uint32 &refusedMutex, uint32 &refusedAllocator,
 	                     uint32 &refusedLevel, uint32 &extended, uint32 &produceMax,

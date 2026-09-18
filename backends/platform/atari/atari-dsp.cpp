@@ -127,23 +127,48 @@ volatile uint32 s_phaseTicks[2], s_callbackTicksAtMax, s_callbacksAtMax;
 // and a table keyed on each one fills with whatever arrived first and then
 // throws the rest away. Direct-mapped, and a page that is hit more often
 // takes a contested slot, so the ones worth seeing survive.
-enum { kPcBuckets = 512, kPcPageShift = 12, kPcSampleAfterMs = 10 };
-volatile uint32 s_pcPage[kPcBuckets], s_pcHits[kPcBuckets], s_pcTotal, s_pcLost;
+enum { kPcBuckets = 512, kPcPageShift = 12, kPcSampleAfterMs = 10, kPcSessionMax = 512 };
+struct PcHistogram {
+	uint32 page[kPcBuckets], hits[kPcBuckets], total, lost, sessions;
+};
+// Kept apart by what the session produced: [0] sessions that emitted no
+// register event, [1] the rest. The two slow kinds turned out to be
+// different problems, and one histogram over both can only be read against
+// neither - which is how a false explanation got into a commit once.
+PcHistogram s_pcHist[2];
+// A session's samples wait here until it ends, when its event count is final.
+volatile uint32 s_pcSession[kPcSessionMax], s_pcSessionCount;
 
 void samplePc(uint32 pc) {
-	++s_pcTotal;
+	if (s_pcSessionCount < kPcSessionMax)
+		s_pcSession[s_pcSessionCount++] = pc;
+}
+
+void histogramAdd(PcHistogram &h, uint32 pc) {
+	++h.total;
 	const uint32 page = pc >> kPcPageShift;
 	const uint32 slot = page & (kPcBuckets - 1);
-	if (s_pcHits[slot] == 0 || s_pcPage[slot] == page) {
-		s_pcPage[slot] = page;
-		++s_pcHits[slot];
+	if (h.hits[slot] == 0 || h.page[slot] == page) {
+		h.page[slot] = page;
+		++h.hits[slot];
 		return;
 	}
 	// Another page owns the slot: take it over only once this one has been
 	// seen more, so a busy page is not evicted by a passing one.
-	++s_pcLost;
-	if (--s_pcHits[slot] == 0)
-		s_pcPage[slot] = page;
+	++h.lost;
+	if (--h.hits[slot] == 0)
+		h.page[slot] = page;
+}
+
+// The end of a session: file its samples by whether it emitted anything.
+void foldPcSession() {
+	if (s_pcSessionCount == 0)
+		return;
+	PcHistogram &h = s_pcHist[s_produceEvents ? 1 : 0];
+	++h.sessions;
+	for (uint32 i = 0; i < s_pcSessionCount; ++i)
+		histogramAdd(h, s_pcSession[i]);
+	s_pcSessionCount = 0;
 }
 
 inline uint32 queued() {
@@ -302,6 +327,7 @@ long atari_dsp_timer_tick(unsigned long interruptedLevel, unsigned long interrup
 	s_produceLoops = s_produceEvents = 0;
 	s_phaseTicks[0] = s_phaseTicks[1] = 0;
 	g_atariDspCallbacks = 0;
+	s_pcSessionCount = 0;
 	s_producing = true;
 	return 1;
 }
@@ -315,6 +341,8 @@ void atari_dsp_produce() {
 		if (!s_producer(s_producerContext, true))
 			break;
 	}
+	InterruptsOff off;
+	foldPcSession();
 }
 
 // The vector: save the integer registers, and unless nested inside a
@@ -511,6 +539,8 @@ bool AtariDspAudio::startStream() {
 	s_produceTicks = s_produceTicksMax = s_emptyTicks = s_emptyStreak = s_emptyStreakMax = 0;
 	s_produceLoops = s_produceEvents = s_produceLoopsAtMax = s_produceEventsAtMax = 0;
 	s_phaseTicks[0] = s_phaseTicks[1] = s_callbackTicksAtMax = s_callbacksAtMax = 0;
+	memset(s_pcHist, 0, sizeof(s_pcHist));
+	s_pcSessionCount = 0;
 	g_atariDspInCallback = 0;
 	g_atariDspCallbacks = 0;
 	atari_dsp_stack_top = s_productionStack + kProductionStackBytes;
@@ -659,31 +689,34 @@ uint32 AtariDspAudio::protocolErrors() const {
 
 // DIAGNOSTIC: the sampled PCs, commonest first, with a reference symbol so
 // they can be resolved against the unstripped binary offline.
-uint32 AtariDspAudio::pcSamples(uint32 *addr, uint32 *hits, uint32 count, uint32 &lost, uint32 &reference) const {
+uint32 AtariDspAudio::pcSamples(int silent, uint32 *addr, uint32 *hits, uint32 count, uint32 &lost,
+                                uint32 &sessions, uint32 &reference) const {
+	const PcHistogram &h = s_pcHist[silent ? 0 : 1];
 	reference = (uint32)&atari_dsp_timer_tick;
-	lost = s_pcLost;
+	lost = h.lost;
+	sessions = h.sessions;
 	uint32 taken = 0;
 	for (uint32 slot = 0; slot < count; ++slot) {
 		int best = -1;
 		for (int i = 0; i < kPcBuckets; ++i) {
-			if (s_pcHits[i] == 0)
+			if (h.hits[i] == 0)
 				continue;
 			bool already = false;
 			for (uint32 j = 0; j < taken; ++j)
-				if (addr[j] == (s_pcPage[i] << kPcPageShift))
+				if (addr[j] == (h.page[i] << kPcPageShift))
 					already = true;
 			if (already)
 				continue;
-			if (best < 0 || s_pcHits[i] > s_pcHits[best])
+			if (best < 0 || h.hits[i] > h.hits[best])
 				best = i;
 		}
 		if (best < 0)
 			break;
-		addr[taken] = s_pcPage[best] << kPcPageShift;
-		hits[taken] = s_pcHits[best];
+		addr[taken] = h.page[best] << kPcPageShift;
+		hits[taken] = h.hits[best];
 		++taken;
 	}
-	return s_pcTotal;
+	return h.total;
 }
 
 #endif
