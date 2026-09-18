@@ -461,7 +461,9 @@ void Player::sysEx(const byte *p, uint16 len) {
 	if (len >= sizeof(buf))
 		return;
 
-	if (!_scanning) {
+	// Only format the message when it will be printed: this runs for every
+	// SysEx, from the music timer.
+	if (!_scanning && debugChannelSet(-1, DEBUG_IMUSE)) {
 		for (a = 0; a < len + 1 && a < 19; ++a) {
 			snprintf((char *)&buf[a * 3], 3 * sizeof(char) + 1, " %02X", (int)p[a]);
 		}
