@@ -49,7 +49,7 @@ void *atari_dsp_saved_stack;
 void *atari_dsp_stack_top;
 volatile unsigned char atari_dsp_producing;   // a production call is in progress
 void atari_dsp_timer_a();
-long atari_dsp_timer_tick(unsigned long interruptedLevel, unsigned long interruptedPc);
+long atari_dsp_timer_tick(unsigned long interruptedLevel);
 void atari_dsp_produce();
 }
 
@@ -109,67 +109,6 @@ uint8 s_productionStack[kProductionStackBytes] __attribute__((aligned(16)));
 volatile uint32 s_refusedStreak, s_refusedStreakMax, s_refusedMutex, s_refusedAllocator, s_refusedLevel, s_extended;
 volatile uint32 s_produceTicks, s_produceTicksMax;   // nested ticks during one production call: its length in ms
 volatile uint32 s_emptyTicks, s_emptyStreak, s_emptyStreakMax;   // ticks with nothing queued
-// Inside the longest production session: how many periods its loop produced,
-// and how many register events they carried. A session that lasts because the
-// loop cannot outrun delivery shows many periods at about a period's length
-// each; one that lasts because a burst of iMUSE writes is expensive shows few
-// periods and a large event count.
-volatile uint32 s_produceLoops, s_produceEvents;
-volatile uint32 s_produceLoopsAtMax, s_produceEventsAtMax;
-// Which phase of a period the producer is in, sampled by the nested tick:
-// the OPL timer callbacks, or the framing and the PCM copy around them.
-// s_produceTicks is wall time, so this says where the main loop's freeze went.
-volatile uint32 s_phaseTicks[2], s_callbackTicksAtMax, s_callbacksAtMax;
-// DIAGNOSTIC: where the 68030 actually is once a production session has run
-// long enough to be one of the pathological ones. The tick interrupts the
-// producer, so the exception frame's PC is the producer's own code.
-// Bucketed by 4 KB page, not by exact PC: a hot loop covers many addresses,
-// and a table keyed on each one fills with whatever arrived first and then
-// throws the rest away. Direct-mapped, and a page that is hit more often
-// takes a contested slot, so the ones worth seeing survive.
-enum { kPcBuckets = 512, kPcPageShift = 12, kPcSampleAfterMs = 10, kPcSessionMax = 512 };
-struct PcHistogram {
-	uint32 page[kPcBuckets], hits[kPcBuckets], total, lost, sessions;
-};
-// Kept apart by what the session produced: [0] sessions that emitted no
-// register event, [1] the rest. The two slow kinds turned out to be
-// different problems, and one histogram over both can only be read against
-// neither - which is how a false explanation got into a commit once.
-PcHistogram s_pcHist[2];
-// A session's samples wait here until it ends, when its event count is final.
-volatile uint32 s_pcSession[kPcSessionMax], s_pcSessionCount;
-
-void samplePc(uint32 pc) {
-	if (s_pcSessionCount < kPcSessionMax)
-		s_pcSession[s_pcSessionCount++] = pc;
-}
-
-void histogramAdd(PcHistogram &h, uint32 pc) {
-	++h.total;
-	const uint32 page = pc >> kPcPageShift;
-	const uint32 slot = page & (kPcBuckets - 1);
-	if (h.hits[slot] == 0 || h.page[slot] == page) {
-		h.page[slot] = page;
-		++h.hits[slot];
-		return;
-	}
-	// Another page owns the slot: take it over only once this one has been
-	// seen more, so a busy page is not evicted by a passing one.
-	++h.lost;
-	if (--h.hits[slot] == 0)
-		h.page[slot] = page;
-}
-
-// The end of a session: file its samples by whether it emitted anything.
-void foldPcSession() {
-	if (s_pcSessionCount == 0)
-		return;
-	PcHistogram &h = s_pcHist[s_produceEvents ? 1 : 0];
-	++h.sessions;
-	for (uint32 i = 0; i < s_pcSessionCount; ++i)
-		histogramAdd(h, s_pcSession[i]);
-	s_pcSessionCount = 0;
-}
 
 inline uint32 queued() {
 	return (uint32)((s_tail - s_head + kQueueSize) % kQueueSize);
@@ -245,11 +184,6 @@ long exchangeSuper() {
 
 } // namespace
 
-// Outside the anonymous namespace above: dsp-opl.cpp sets these around the
-// OPL timer callbacks, and the tick samples them.
-volatile uint8 g_atariDspInCallback;
-volatile uint32 g_atariDspCallbacks;
-
 // MFP Timer A, about 1 kHz, entered at interrupt level 6 in supervisor
 // mode. The assembly below has already moved to the handler's own stack
 // (unless this tick is nested inside a production call, which is on that
@@ -263,7 +197,7 @@ volatile uint32 g_atariDspCallbacks;
 //
 // The in-service bit is cleared first so that a tick nested inside
 // production is delivered at all.
-long atari_dsp_timer_tick(unsigned long interruptedLevel, unsigned long interruptedPc) {
+long atari_dsp_timer_tick(unsigned long interruptedLevel) {
 	*((volatile uint8 *)0xFFFFFA0FL) = (uint8)~(1 << 5);
 	if (s_deliver)
 		deliverStep();
@@ -283,16 +217,8 @@ long atari_dsp_timer_tick(unsigned long interruptedLevel, unsigned long interrup
 	if (s_producing) {
 		// A long production call (iMUSE can spend hundreds of milliseconds
 		// in one callback): extension periods keep the kernel fed meanwhile.
-		++s_phaseTicks[g_atariDspInCallback & 1];
-		if (s_produceTicks >= kPcSampleAfterMs)
-			samplePc((uint32)interruptedPc);
-		if (++s_produceTicks > s_produceTicksMax) {
+		if (++s_produceTicks > s_produceTicksMax)
 			s_produceTicksMax = s_produceTicks;
-			s_produceLoopsAtMax = s_produceLoops;
-			s_produceEventsAtMax = s_produceEvents;
-			s_callbackTicksAtMax = s_phaseTicks[1];
-			s_callbacksAtMax = g_atariDspCallbacks;
-		}
 		if (queued() < AtariDspAudio::kExtendBelow && s_producer(s_producerContext, false))
 			++s_extended;
 		return 0;
@@ -320,10 +246,6 @@ long atari_dsp_timer_tick(unsigned long interruptedLevel, unsigned long interrup
 	}
 	s_refusedStreak = 0;
 	s_produceTicks = 0;
-	s_produceLoops = s_produceEvents = 0;
-	s_phaseTicks[0] = s_phaseTicks[1] = 0;
-	g_atariDspCallbacks = 0;
-	s_pcSessionCount = 0;
 	s_producing = true;
 	return 1;
 }
@@ -333,12 +255,9 @@ long atari_dsp_timer_tick(unsigned long interruptedLevel, unsigned long interrup
 // clear and the level change would take this stack for its own.
 void atari_dsp_produce() {
 	while (s_producer && queued() < AtariDspAudio::kProduceAhead) {
-		++s_produceLoops;
 		if (!s_producer(s_producerContext, true))
 			break;
 	}
-	InterruptsOff off;
-	foldPcSession();
 }
 
 // The vector: save the integer registers, and unless nested inside a
@@ -359,14 +278,12 @@ asm(
 "	move.l	%sp,atari_dsp_saved_stack\n"
 "	move.l	atari_dsp_stack_top,%sp\n"
 "	move.l	atari_dsp_saved_stack,%a0\n"
-"	move.l	62(%a0),%d1\n"
 "	moveq	#0,%d0\n"
 "	move.w	60(%a0),%d0\n"
 "	and.l	#0x0700,%d0\n"
-"	move.l	%d1,-(%sp)\n"
 "	move.l	%d0,-(%sp)\n"
 "	jsr	atari_dsp_timer_tick\n"
-"	addq.l	#8,%sp\n"
+"	addq.l	#4,%sp\n"
 "	tst.l	%d0\n"
 "	beq	1f\n"
 "	fsave	-(%sp)\n"
@@ -388,14 +305,12 @@ asm(
 "	movem.l	(%sp)+,%d0-%d7/%a0-%a6\n"
 "	rte\n"
 "2:\n"
-"	move.l	62(%sp),%d1\n"
 "	moveq	#0,%d0\n"
 "	move.w	60(%sp),%d0\n"
 "	and.l	#0x0700,%d0\n"
-"	move.l	%d1,-(%sp)\n"
 "	move.l	%d0,-(%sp)\n"
 "	jsr	atari_dsp_timer_tick\n"
-"	addq.l	#8,%sp\n"
+"	addq.l	#4,%sp\n"
 "	movem.l	(%sp)+,%d0-%d7/%a0-%a6\n"
 "	rte\n"
 );
@@ -533,12 +448,6 @@ bool AtariDspAudio::startStream() {
 	s_producing = false;
 	s_refusedStreak = s_refusedStreakMax = s_refusedMutex = s_refusedAllocator = s_refusedLevel = s_extended = 0;
 	s_produceTicks = s_produceTicksMax = s_emptyTicks = s_emptyStreak = s_emptyStreakMax = 0;
-	s_produceLoops = s_produceEvents = s_produceLoopsAtMax = s_produceEventsAtMax = 0;
-	s_phaseTicks[0] = s_phaseTicks[1] = s_callbackTicksAtMax = s_callbacksAtMax = 0;
-	memset(s_pcHist, 0, sizeof(s_pcHist));
-	s_pcSessionCount = 0;
-	g_atariDspInCallback = 0;
-	g_atariDspCallbacks = 0;
 	atari_dsp_stack_top = s_productionStack + kProductionStackBytes;
 	// Timer A: 2,457,600 Hz / 64 / 38 = 1,010 Hz.
 	s_deliver = true;
@@ -560,8 +469,6 @@ uint32 AtariDspAudio::periodsQueued() const {
 
 void AtariDspAudio::productionStats(uint32 &refusedStreakMax, uint32 &refusedMutex, uint32 &refusedAllocator,
                                     uint32 &refusedLevel, uint32 &extended, uint32 &produceMax,
-                                    uint32 &produceLoopsAtMax, uint32 &produceEventsAtMax,
-                                    uint32 &callbackTicksAtMax, uint32 &callbacksAtMax,
                                     uint32 &emptyTicks, uint32 &emptyStreakMax) const {
 	refusedStreakMax = s_refusedStreakMax;
 	refusedMutex = s_refusedMutex;
@@ -569,10 +476,6 @@ void AtariDspAudio::productionStats(uint32 &refusedStreakMax, uint32 &refusedMut
 	refusedLevel = s_refusedLevel;
 	extended = s_extended;
 	produceMax = s_produceTicksMax;
-	produceLoopsAtMax = s_produceLoopsAtMax;
-	produceEventsAtMax = s_produceEventsAtMax;
-	callbackTicksAtMax = s_callbackTicksAtMax;
-	callbacksAtMax = s_callbacksAtMax;
 	emptyTicks = s_emptyTicks;
 	emptyStreakMax = s_emptyStreakMax;
 }
@@ -631,7 +534,6 @@ AtariDspAudio::Period *AtariDspAudio::beginPeriod(bool extension) {
 }
 
 bool AtariDspAudio::addEvent(Period *period, uint32 block, uint16 address, uint32 value) {
-	++s_produceEvents;
 	if (period->eventCount >= kMaxEvents) {
 		++s_protocolErrors;
 		return false;
@@ -682,38 +584,6 @@ void AtariDspAudio::poll() {
 
 uint32 AtariDspAudio::protocolErrors() const {
 	return s_protocolErrors;
-}
-
-// DIAGNOSTIC: the sampled PCs, commonest first, with a reference symbol so
-// they can be resolved against the unstripped binary offline.
-uint32 AtariDspAudio::pcSamples(int silent, uint32 *addr, uint32 *hits, uint32 count, uint32 &lost,
-                                uint32 &sessions, uint32 &reference) const {
-	const PcHistogram &h = s_pcHist[silent ? 0 : 1];
-	reference = (uint32)&atari_dsp_timer_tick;
-	lost = h.lost;
-	sessions = h.sessions;
-	uint32 taken = 0;
-	for (uint32 slot = 0; slot < count; ++slot) {
-		int best = -1;
-		for (int i = 0; i < kPcBuckets; ++i) {
-			if (h.hits[i] == 0)
-				continue;
-			bool already = false;
-			for (uint32 j = 0; j < taken; ++j)
-				if (addr[j] == (h.page[i] << kPcPageShift))
-					already = true;
-			if (already)
-				continue;
-			if (best < 0 || h.hits[i] > h.hits[best])
-				best = i;
-		}
-		if (best < 0)
-			break;
-		addr[taken] = h.page[best] << kPcPageShift;
-		hits[taken] = h.hits[best];
-		++taken;
-	}
-	return h.total;
 }
 
 #endif

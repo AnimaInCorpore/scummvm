@@ -62,11 +62,6 @@
  * The producer runs in interrupt context: it must not do I/O or call the
  * OS. It may allocate, since the allocator counts as a critical section.
  */
-// Set around the OPL timer callbacks so the tick can tell where a long
-// production session spent its wall time (backends/platform/atari/dsp-opl.cpp).
-extern volatile uint8 g_atariDspInCallback;
-extern volatile uint32 g_atariDspCallbacks;
-
 class AtariDspAudio {
 public:
 	enum {
@@ -143,18 +138,8 @@ public:
 	 * longest single production call, and the ticks with nothing queued,
 	 * total and longest streak.
 	 */
-	/**
-	 * DIAGNOSTIC: the PCs sampled inside long production sessions, commonest
-	 * first, with a reference symbol's runtime address so they can be resolved
-	 * against the unstripped binary. Returns the total sampled.
-	 */
-	uint32 pcSamples(int silent, uint32 *addr, uint32 *hits, uint32 count, uint32 &lost,
-	                 uint32 &sessions, uint32 &reference) const;
-
 	void productionStats(uint32 &refusedStreakMax, uint32 &refusedMutex, uint32 &refusedAllocator,
 	                     uint32 &refusedLevel, uint32 &extended, uint32 &produceMax,
-	                     uint32 &produceLoopsAtMax, uint32 &produceEventsAtMax,
-	                     uint32 &callbackTicksAtMax, uint32 &callbacksAtMax,
 	                     uint32 &emptyTicks, uint32 &emptyStreakMax) const;
 	uint32 protocolErrors() const;
 	/** The kernel's counters, periods rendered and periods rendered late, as of its last acknowledgement. */

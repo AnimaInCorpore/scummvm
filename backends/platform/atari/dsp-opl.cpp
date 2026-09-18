@@ -212,12 +212,8 @@ void AtariDspOPL::producePeriod(AtariDspAudio::Period *period) {
 	if (_running && _framesPerTick16) {
 		while (_nextTick16 < periodFrames16) {
 			_block = (_nextTick16 >> 16) / AtariDspAudio::kBlockFrames;
-			if (_callback && _callback->isValid()) {
-				g_atariDspInCallback = 1;
+			if (_callback && _callback->isValid())
 				(*_callback)();
-				g_atariDspInCallback = 0;
-				++g_atariDspCallbacks;
-			}
 			_nextTick16 += _framesPerTick16;
 		}
 		_nextTick16 -= periodFrames16;

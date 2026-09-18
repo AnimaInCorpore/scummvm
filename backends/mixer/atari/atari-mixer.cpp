@@ -276,27 +276,12 @@ void AtariMixerManager::updateDsp() {
 		_dspLoggedPeriods = submitted;
 		uint32 rendered = 0, late = 0, refusedStreak = 0, refusedMutex = 0, refusedAllocator = 0, refusedLevel = 0;
 		uint32 extended = 0, produceMax = 0, emptyTicks = 0, emptyStreak = 0;
-		uint32 produceLoops = 0, produceEvents = 0, callbackTicks = 0, callbacks = 0;
 		_dsp->queryCounters(rendered, late);
-		_dsp->productionStats(refusedStreak, refusedMutex, refusedAllocator, refusedLevel, extended, produceMax,
-		                      produceLoops, produceEvents, callbackTicks, callbacks, emptyTicks, emptyStreak);
+		_dsp->productionStats(refusedStreak, refusedMutex, refusedAllocator, refusedLevel, extended, produceMax, emptyTicks, emptyStreak);
 		debug("AtariDspAudio: %u periods submitted, %u rendered, %u late, %u protocol errors, %u pcm underruns, "
-		      "%u extended, refused %u ms max (%u mutex, %u allocator, %u level), production %u ms max "
-		      "(%u periods, %u events, %u ms in %u callbacks), empty %u ticks (%u max)",
+		      "%u extended, refused %u ms max (%u mutex, %u allocator, %u level), production %u ms max, empty %u ticks (%u max)",
 		      submitted, rendered, late, _dsp->protocolErrors(), _dspPcmUnderruns,
-		      extended, refusedStreak, refusedMutex, refusedAllocator, refusedLevel, produceMax,
-		      produceLoops, produceEvents, callbackTicks, callbacks, emptyTicks, emptyStreak);
-		for (int silent = 1; silent >= 0; --silent) {
-			uint32 pcAddr[6], pcHits[6], pcLost = 0, pcSessions = 0, pcRef = 0;
-			const uint32 pcTotal = _dsp->pcSamples(silent, pcAddr, pcHits, 6, pcLost, pcSessions, pcRef);
-			if (!pcTotal)
-				continue;
-			debug("AtariDspAudio: %s sessions: %u of them, %u pc samples (%u lost), tick at 0x%08x",
-			      silent ? "silent" : "eventful", pcSessions, pcTotal, pcLost, (unsigned)pcRef);
-			for (int i = 0; i < 6 && pcHits[i]; ++i)
-				debug("AtariDspAudio:   %s 0x%08x  %u (%u%%)", silent ? "S" : "E", (unsigned)pcAddr[i],
-				      pcHits[i], (unsigned)(pcHits[i] * 100 / pcTotal));
-		}
+		      extended, refusedStreak, refusedMutex, refusedAllocator, refusedLevel, produceMax, emptyTicks, emptyStreak);
 	}
 }
 
