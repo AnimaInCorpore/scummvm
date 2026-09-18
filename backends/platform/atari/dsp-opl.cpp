@@ -121,6 +121,11 @@ void AtariDspOPL::write(int a, int v) {
 void AtariDspOPL::writeReg(int r, int v) {
 	AtariCriticalSection critical;
 	_decoder->write(_block, (uint16)(r & 0x1ff), (uint8)v);
+	// Outside a period there is no block to wait for: the words go to the
+	// pending queue now, as they always did. Inside one, the decoder derives
+	// them when the block moves on, and producePeriod flushes the last.
+	if (!_period)
+		_decoder->flush();
 }
 
 void AtariDspOPL::EventSink::write(uint32 block, uint16 address, int32 value) {
@@ -218,6 +223,7 @@ void AtariDspOPL::producePeriod(AtariDspAudio::Period *period) {
 		}
 		_nextTick16 -= periodFrames16;
 	}
+	_decoder->flush();
 	_block = AtariDspAudio::kPeriodBlocks - 1;
 	_period = nullptr;
 	_block = 0;

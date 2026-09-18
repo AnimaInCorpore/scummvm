@@ -45,6 +45,7 @@ struct Pair {
 		decoder.write(block, reg, value);
 	}
 	void renderBlocks(int blocks) {
+		decoder.flush();
 		int32_t out[P::kBlockFrames];
 		for (int b = 0; b < blocks; ++b, ++block)
 			P::renderBlock(&practical, nullptr, out);
@@ -69,6 +70,7 @@ unsigned long checkPitch() {
 				for (int fnum = 0; fnum < 1024; ++fnum) {
 					p.write(0xa0, (uint8_t)(fnum & 0xff));
 					p.write(0xb0, (uint8_t)((block << 2) | (fnum >> 8)));
+					p.decoder.flush();
 					const E::Slot &slot = p.exact.slot[3];
 					for (int pos = 0; pos < 8; ++pos, ++checked) {
 						p.practical.vibratoPos = pos;

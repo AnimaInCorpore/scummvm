@@ -285,6 +285,12 @@ Register decoding stays on the 68030 in the same header (`Decoder`): each
 write becomes a few parameter words for the DSP's operator and channel
 records, emitted only when they change, so the DSP's per-block work is
 free of register logic and the host pays about a microsecond per write.
+The words a write reaches are marked, not derived, and derived once when
+the block moves on (or the caller flushes): a note is two or three
+registers touching the same increments and rates, and only a word's last
+value within a block ever reaches the boundary pass, so the rendering is
+bit-identical to deriving at every write (`practical-test` output, all
+ten scenes).
 
 What is not given up is the chip's register semantics, and a review on
 2026-09-17 found four places where the first version had let them go:

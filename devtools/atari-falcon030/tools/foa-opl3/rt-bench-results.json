@@ -1,13 +1,13 @@
 {
   "date": "2026-09-17",
   "gate": "practical OPL kernel on the emulated Falcon DSP56001: exactness and cycle cost",
-  "scummvm_commit": "e12b0a2bb4a392d265fa420717699ff4d99a6b39",
+  "scummvm_commit": "433fbc41c4f19ce124bab9014f22192e1276892c",
   "scummvm_worktree_dirty": true,
   "source_sha256": {
     "dsp/oplrt.asm": "7efd423d64855c165e983db215bfd4cae4ecaef887777ba120cbf69ea664b2f0",
     "m68k/oplrt.s": "1a1c2aa92065a0d8fb6a7fd6db97d57efde0bafd0b709f7cb9b4390bbc7c11d9",
-    "rt-fixture.cpp": "f6f27bc088116b282c4da191d88e4a959f0ad8a62d3e8b566ad27a56c6f86232",
-    "opl-practical.h": "85f10bbe5698be9dd285e56e6bf26005e464de94942626792cdbb00d1ec1ebfd",
+    "rt-fixture.cpp": "14abb12bfc066bd9a1ed484ab59c3f3fbd28b2af377bd3945c4729486491041c",
+    "opl-practical.h": "f013c490d722b8ae6f1f8b0d1b3e2ade16457117fce12c49cdcbd5202fd7a036",
     "rt-bench-gate.py": "bcb083544f84f8cb08352a79783f8dbc264f073f7ab653429b1eeedc8cb8378e",
     "generate-tables.py": "5061aa05b59a3b0b10532317d3a5a54546861858be11d2695769572b2d26eef7"
   },
@@ -22,8 +22,8 @@
       "blocks": 768,
       "chunks": 12,
       "register_writes": 146,
-      "parameter_events": 732,
-      "peak_events_per_chunk": 669,
+      "parameter_events": 636,
+      "peak_events_per_chunk": 573,
       "paths_exercised": {
         "blocks_decaying_past_sustain_level": 0,
         "blocks_entering_sustain_above_level": 0,
@@ -34,7 +34,7 @@
       "mismatches_against_host_kernel": 0,
       "first_mismatch_frame": null,
       "bit_exact": true,
-      "instruction_cycles_per_frame": 263.04,
+      "instruction_cycles_per_frame": 263.02,
       "instruction_cycles_per_frame_by_range": {
         "stages": 183.8,
         "op_boundary": 48.82,
@@ -45,7 +45,7 @@
         "emit": 5.14,
         "block_and_channel_boundary": 11.04,
         "render_block": 0.36,
-        "apply_events": 0.92
+        "apply_events": 0.9
       },
       "budget_cycles_per_frame": 326.27,
       "budget_use_percent": 80.6
@@ -57,8 +57,8 @@
       "blocks": 768,
       "chunks": 12,
       "register_writes": 219,
-      "parameter_events": 1333,
-      "peak_events_per_chunk": 669,
+      "parameter_events": 1198,
+      "peak_events_per_chunk": 573,
       "paths_exercised": {
         "blocks_decaying_past_sustain_level": 127,
         "blocks_entering_sustain_above_level": 1,
@@ -69,7 +69,7 @@
       "mismatches_against_host_kernel": 0,
       "first_mismatch_frame": null,
       "bit_exact": true,
-      "instruction_cycles_per_frame": 236.42,
+      "instruction_cycles_per_frame": 236.36,
       "instruction_cycles_per_frame_by_range": {
         "stages": 161.39,
         "op_boundary": 45.16,
@@ -80,10 +80,10 @@
         "emit": 5.14,
         "block_and_channel_boundary": 10.79,
         "render_block": 0.36,
-        "apply_events": 1.36
+        "apply_events": 1.3
       },
       "budget_cycles_per_frame": 326.27,
-      "budget_use_percent": 72.5
+      "budget_use_percent": 72.4
     },
     {
       "scenario": "atlantis",
@@ -92,7 +92,7 @@
       "blocks": 3073,
       "chunks": 49,
       "register_writes": 257,
-      "parameter_events": 840,
+      "parameter_events": 741,
       "peak_events_per_chunk": 344,
       "paths_exercised": {
         "blocks_decaying_past_sustain_level": 0,
@@ -104,7 +104,7 @@
       "mismatches_against_host_kernel": 0,
       "first_mismatch_frame": null,
       "bit_exact": true,
-      "instruction_cycles_per_frame": 202.02,
+      "instruction_cycles_per_frame": 202.01,
       "instruction_cycles_per_frame_by_range": {
         "stages": 130.6,
         "op_boundary": 42.77,
@@ -115,7 +115,7 @@
         "emit": 5.14,
         "block_and_channel_boundary": 10.35,
         "render_block": 0.36,
-        "apply_events": 0.78
+        "apply_events": 0.77
       },
       "budget_cycles_per_frame": 326.27,
       "budget_use_percent": 61.9

@@ -234,6 +234,7 @@ int main(int argc, char **argv) {
 		else
 			decoder.write(block, writes[i].reg, writes[i].value);
 	}
+	decoder.flush();
 
 	// ---- the DSP image
 	Writer out;

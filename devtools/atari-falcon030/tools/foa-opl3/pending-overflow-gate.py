@@ -113,10 +113,18 @@ static int mismatches(AtariDspAudio &a, AtariDspOPL &o, bool machine) {
  return bad;
 }
 
+// One register write, its words derived at once: every write here stands for
+// one in a block of its own, so each reaches the sink - the queue, or the
+// period - as it did before the decoder coalesced a block's writes.
+static void write(AtariDspOPL &o, uint16 reg, uint8_t value) {
+ o._decoder->write(0, reg, value);
+ o._decoder->flush();
+}
+
 static void keyedNote(AtariDspAudio &a, AtariDspOPL &o) {
  AtariDspAudio::Period p;
- o._decoder->write(0, 0x23, 0x21); o._decoder->write(0, 0x63, 0xf0);
- o._decoder->write(0, 0xa0, 0x41); o._decoder->write(0, 0xb0, 0x32);
+ write(o, 0x23, 0x21); write(o, 0x63, 0xf0);
+ write(o, 0xa0, 0x41); write(o, 0xb0, 0x32);
  AtariDspOPL::flushPending(&a, &p);
 }
 
@@ -130,8 +138,8 @@ int main() {
 
  { // pending: the review's reproduction - more writes between periods than the queue holds
   AtariDspAudio a; AtariDspOPL o(&a); keyedNote(a, o);
-  for (int i = 0; i < 2 * AtariDspOPL::kPendingMax; ++i) o._decoder->write(0, 0x43, (i & 1) ? 0 : 1);
-  o._decoder->write(0, 0xb0, 0x12);                    // key off, lost with the overflow
+  for (int i = 0; i < 2 * AtariDspOPL::kPendingMax; ++i) write(o, 0x43, (i & 1) ? 0 : 1);
+  write(o, 0xb0, 0x12);                    // key off, lost with the overflow
   AtariDspAudio::Period p; AtariDspOPL::flushPending(&a, &p);
   const int key = a.chip.op[1].w[P::OP_FLAGS] & 1, bad = mismatches(a, o, false);
   std::snprintf(d, sizeof d, "decoder key %d, kernel key %d, %d words out of step, resync still due %d",
@@ -141,8 +149,8 @@ int main() {
  { // period: more events inside one period than it holds
   AtariDspAudio a; AtariDspOPL o(&a); keyedNote(a, o);
   AtariDspAudio::Period full; o._period = &full;
-  for (int i = 0; i < 2 * AtariDspAudio::kMaxEvents; ++i) o._decoder->write(0, 0x43, (i & 1) ? 0 : 1);
-  o._decoder->write(0, 0xb0, 0x12);
+  for (int i = 0; i < 2 * AtariDspAudio::kMaxEvents; ++i) write(o, 0x43, (i & 1) ? 0 : 1);
+  write(o, 0xb0, 0x12);
   o._period = nullptr;
   AtariDspAudio::Period next; AtariDspOPL::flushPending(&a, &next);
   const int key = a.chip.op[1].w[P::OP_FLAGS] & 1, bad = mismatches(a, o, false);
@@ -152,7 +160,7 @@ int main() {
  { // reset: a reset whose own events do not fit the period it is made in
   AtariDspAudio a; AtariDspOPL o(&a); keyedNote(a, o);
   AtariDspAudio::Period nearlyFull; o._period = &nearlyFull;
-  for (int i = 0; nearlyFull.events < AtariDspAudio::kMaxEvents - 20; ++i) o._decoder->write(0, 0x43, (i & 1) ? 0 : 1);
+  for (int i = 0; nearlyFull.events < AtariDspAudio::kMaxEvents - 20; ++i) write(o, 0x43, (i & 1) ? 0 : 1);
   o.resetDecoder(0);                                   // most of it will not fit
   const bool machineDue = AtariDspOPL::s_resyncMachine;
   o._period = nullptr;
@@ -164,7 +172,7 @@ int main() {
  }
  { // normal: no overflow, the queue replays exactly as before and nothing is resent
   AtariDspAudio a; AtariDspOPL o(&a); keyedNote(a, o);
-  for (int i = 0; i < 100; ++i) o._decoder->write(0, 0x43, (i & 1) ? 0 : 1);
+  for (int i = 0; i < 100; ++i) write(o, 0x43, (i & 1) ? 0 : 1);
   const unsigned queued = AtariDspOPL::s_pendingCount, before = a.accepted;
   AtariDspAudio::Period p; AtariDspOPL::flushPending(&a, &p);
   const unsigned sent = a.accepted - before;

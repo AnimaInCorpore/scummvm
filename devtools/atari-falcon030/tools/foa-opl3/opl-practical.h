@@ -446,6 +446,13 @@ static inline void renderBlock(Chip *chip, const int32_t *pcm, int32_t *out) {
 // sink receives (address, value) pairs; the caller supplies the block the
 // write belongs to. Words are emitted only when they change, except by a
 // reset, which cannot know what the machine holds and sends everything.
+//
+// The words an operator derives from several registers - its increments,
+// its level and rates, its flags - are not derived at each write but marked
+// and derived once, when the block moves on or the caller flushes: a note
+// is written as two or three registers that each touch the same words, and
+// only the last value of a word within a block ever reaches the boundary
+// pass. So a caller must flush before it renders the block it last wrote.
 
 struct Sink {
 	virtual ~Sink() {}
@@ -471,6 +478,10 @@ struct Decoder {
 	int32_t shadowScalar[3];
 	Sink *sink;
 	uint32_t block;
+	// Operators whose words are still to be derived, one bit per slot index.
+	uint64_t dirtyIncrement, dirtyEnvelope, dirtySlot;
+
+	Decoder() { memset(this, 0, sizeof(*this)); }
 
 	// The chip's reset, carried out on the machine as well: every word the
 	// host owns goes out whatever the shadow held, and with them the words
@@ -479,6 +490,8 @@ struct Decoder {
 	// Events apply before their block's boundary pass, which therefore finds
 	// each operator idle. The machine may be fresh from boot or mid-note.
 	void reset(Sink *out, int channelCount, uint32_t atBlock = 0) {
+		if (atBlock != block)
+			flush();   // they played before the reset; those of its own block never do
 		memset(this, 0, sizeof(*this));
 		sink = out;
 		channels = channelCount;
@@ -521,6 +534,8 @@ struct Decoder {
 	// shadow keeps at their reset values: for a reset whose own events were
 	// lost, this silences every voice and retriggers the keyed ones instead of
 	// leaving the machine on the state the reset ended.
+	// Words still to be derived are not in the shadow yet; they go out with
+	// the next flush, after these.
 	void resend(Sink *out, uint32_t atBlock, bool machine) const {
 		static const uint8_t hostWords[] = {
 			OP_TRIG, OP_FLAGS, OP_SL, OP_RATE_A, OP_RATE_D, OP_RATE_S, OP_RATE_R, OP_TLKSL,
@@ -600,40 +615,34 @@ struct Decoder {
 	// and adds them to the f-number before the block and the multiplier
 	// apply, so a small range vanishes entirely: f-numbers below 256 have no
 	// shallow half-step, those below 128 no vibrato at all.
-	void updateIncrement(int c) {
-		const ChannelRegs &ch = channel[c];
+	void updateIncrement(int index) {
+		const ChannelRegs &ch = channel[index / 2];
 		const uint32_t range = (ch.fnum >> 7) & 7;
 		const uint32_t half = (range >> 1) >> vibratoShift;
 		const uint32_t full = range >> vibratoShift;
-		for (int which = 0; which < 2; ++which) {
-			const int index = slotOfChannel(c, which);
-			const int mult = slot[index].mult;
-			const int32_t base = increment(ch.fnum, ch.block, mult);
-			emitOp(index, OP_INCBASE, base);
-			emitOp(index, OP_VIBDELTA + 1, wrap24((int64_t)increment(ch.fnum + half, ch.block, mult) - base));
-			emitOp(index, OP_VIBDELTA + 2, wrap24((int64_t)increment(ch.fnum + full, ch.block, mult) - base));
-			emitOp(index, OP_VIBDELTA + 3, wrap24((int64_t)increment(ch.fnum - half, ch.block, mult) - base));
-			emitOp(index, OP_VIBDELTA + 4, wrap24((int64_t)increment(ch.fnum - full, ch.block, mult) - base));
-		}
+		const int mult = slot[index].mult;
+		const int32_t base = increment(ch.fnum, ch.block, mult);
+		emitOp(index, OP_INCBASE, base);
+		emitOp(index, OP_VIBDELTA + 1, wrap24((int64_t)increment(ch.fnum + half, ch.block, mult) - base));
+		emitOp(index, OP_VIBDELTA + 2, wrap24((int64_t)increment(ch.fnum + full, ch.block, mult) - base));
+		emitOp(index, OP_VIBDELTA + 3, wrap24((int64_t)increment(ch.fnum - half, ch.block, mult) - base));
+		emitOp(index, OP_VIBDELTA + 4, wrap24((int64_t)increment(ch.fnum - full, ch.block, mult) - base));
 	}
 
 	// Level and rates: everything the key-scale value reaches.
-	void updateEnvelope(int c) {
-		const ChannelRegs &ch = channel[c];
+	void updateEnvelope(int index) {
+		const ChannelRegs &ch = channel[index / 2];
+		const SlotRegs &s = slot[index];
 		const int ksv = (ch.block << 1) | ((ch.fnum >> (9 - nts)) & 1);
-		for (int which = 0; which < 2; ++which) {
-			const int index = slotOfChannel(c, which);
-			const SlotRegs &s = slot[index];
-			int ksl = (OplKernel::kKslRom[ch.fnum >> 6] << 2) - ((8 - ch.block) << 5);
-			if (ksl < 0)
-				ksl = 0;
-			emitOp(index, OP_TLKSL, (s.tl << 2) + (ksl >> OplKernel::kKslShift[s.ksl]));
-			const int ks = ksv >> ((s.ksr ^ 1) << 1);
-			emitOp(index, OP_RATE_A, effectiveRate(ks, s.ar));
-			emitOp(index, OP_RATE_D, effectiveRate(ks, s.dr));
-			emitOp(index, OP_RATE_S, s.type ? 0 : effectiveRate(ks, s.rr));
-			emitOp(index, OP_RATE_R, effectiveRate(ks, s.rr));
-		}
+		int ksl = (OplKernel::kKslRom[ch.fnum >> 6] << 2) - ((8 - ch.block) << 5);
+		if (ksl < 0)
+			ksl = 0;
+		emitOp(index, OP_TLKSL, (s.tl << 2) + (ksl >> OplKernel::kKslShift[s.ksl]));
+		const int ks = ksv >> ((s.ksr ^ 1) << 1);
+		emitOp(index, OP_RATE_A, effectiveRate(ks, s.ar));
+		emitOp(index, OP_RATE_D, effectiveRate(ks, s.dr));
+		emitOp(index, OP_RATE_S, s.type ? 0 : effectiveRate(ks, s.rr));
+		emitOp(index, OP_RATE_R, effectiveRate(ks, s.rr));
 	}
 
 	void updateSlot(int index) {
@@ -645,6 +654,33 @@ struct Decoder {
 		emitOp(index, OP_TRIG, (int32_t)channel[c].trigger);
 	}
 
+	// What a write marks: one operator, or both of a channel, or every
+	// operator a channel count reaches.
+	static uint64_t slotBit(int index) { return (uint64_t)1 << index; }
+	static uint64_t channelBits(int c) { return (uint64_t)3 << (2 * c); }
+	uint64_t allBits() const { return channels * 2 >= 64 ? ~(uint64_t)0 : (((uint64_t)1 << (channels * 2)) - 1); }
+
+	// Derives every marked word, stamped with the block that marked it.
+	void flush() {
+		const uint64_t any = dirtyIncrement | dirtyEnvelope | dirtySlot;
+		if (!any)
+			return;
+		// The bit steps along rather than being shifted into place: a 64-bit
+		// shift by a variable count is a library call on the 68030.
+		uint64_t bit = 1;
+		for (int index = 0; index < kSlots; ++index, bit <<= 1) {
+			if (!(any & bit))
+				continue;
+			if (dirtyIncrement & bit)
+				updateIncrement(index);
+			if (dirtyEnvelope & bit)
+				updateEnvelope(index);
+			if (dirtySlot & bit)
+				updateSlot(index);
+		}
+		dirtyIncrement = dirtyEnvelope = dirtySlot = 0;
+	}
+
 	void updateChannel(int c) {
 		const ChannelRegs &ch = channel[c];
 		emitChannel(c, CH_CONN, ch.connection);
@@ -652,6 +688,8 @@ struct Decoder {
 	}
 
 	void write(uint32_t atBlock, uint16_t reg, uint8_t value) {
+		if (atBlock != block)
+			flush();
 		block = atBlock;
 		const uint8_t high = (uint8_t)((reg >> 8) & 1);
 		const uint8_t low = (uint8_t)(reg & 0xff);
@@ -665,8 +703,7 @@ struct Decoder {
 				newm = value & 1;
 			else if (!high && (low & 0x0f) == 0x08) {
 				nts = (value >> 6) & 1;
-				for (int c = 0; c < channels; ++c)
-					updateEnvelope(c);
+				dirtyEnvelope |= allBits();
 			}
 			return;
 		case 0x20:
@@ -678,9 +715,9 @@ struct Decoder {
 			s->type = (value >> 5) & 1;
 			s->ksr = (value >> 4) & 1;
 			s->mult = value & 0x0f;
-			updateIncrement(index / 2);
-			updateEnvelope(index / 2);
-			updateSlot(index);
+			dirtyIncrement |= slotBit(index);
+			dirtyEnvelope |= slotBit(index);
+			dirtySlot |= slotBit(index);
 			return;
 		case 0x40:
 		case 0x50:
@@ -688,7 +725,7 @@ struct Decoder {
 				return;
 			s->ksl = (value >> 6) & 3;
 			s->tl = value & 0x3f;
-			updateEnvelope(index / 2);
+			dirtyEnvelope |= slotBit(index);
 			return;
 		case 0x60:
 		case 0x70:
@@ -696,7 +733,7 @@ struct Decoder {
 				return;
 			s->ar = (value >> 4) & 0x0f;
 			s->dr = value & 0x0f;
-			updateEnvelope(index / 2);
+			dirtyEnvelope |= slotBit(index);
 			return;
 		case 0x80:
 		case 0x90:
@@ -704,22 +741,22 @@ struct Decoder {
 				return;
 			s->sl = (value >> 4) & 0x0f;
 			s->rr = value & 0x0f;
-			updateEnvelope(index / 2);
-			updateSlot(index);
+			dirtyEnvelope |= slotBit(index);
+			dirtySlot |= slotBit(index);
 			return;
 		case 0xe0:
 		case 0xf0:
 			if (!s)
 				return;
 			s->wf = value & 0x07;
-			updateSlot(index);
+			dirtySlot |= slotBit(index);
 			return;
 		case 0xa0:
 			if ((low & 0x0f) < 9) {
 				const int c = 9 * high + (low & 0x0f);
 				channel[c].fnum = (uint16_t)((channel[c].fnum & 0x300) | value);
-				updateIncrement(c);
-				updateEnvelope(c);
+				dirtyIncrement |= channelBits(c);
+				dirtyEnvelope |= channelBits(c);
 			}
 			return;
 		case 0xb0:
@@ -727,8 +764,7 @@ struct Decoder {
 				tremoloShift = (uint8_t)(((((value >> 7) ^ 1) & 1) << 1) + 2);
 				vibratoShift = (uint8_t)(((value >> 6) & 1) ^ 1);
 				emitScalar(SC_TREMOLO_SHIFT, tremoloShift);
-				for (int c = 0; c < channels; ++c)
-					updateIncrement(c);
+				dirtyIncrement |= allBits();
 				return;
 			}
 			if ((low & 0x0f) < 9) {
@@ -740,10 +776,9 @@ struct Decoder {
 				if (key && !ch.key)
 					ch.trigger++;
 				ch.key = key;
-				updateIncrement(c);
-				updateEnvelope(c);
-				updateSlot(slotOfChannel(c, 0));
-				updateSlot(slotOfChannel(c, 1));
+				dirtyIncrement |= channelBits(c);
+				dirtyEnvelope |= channelBits(c);
+				dirtySlot |= channelBits(c);
 			}
 			return;
 		case 0xc0:

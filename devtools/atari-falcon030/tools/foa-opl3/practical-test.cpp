@@ -308,6 +308,7 @@ std::vector<int16> renderPractical(const Script &s, unsigned long long *writesOu
 			decoder.write((uint32)block, s.events[next].reg, s.events[next].value);
 			++next;
 		}
+		decoder.flush();
 		OplPractical::renderBlock(&chip, nullptr, out);
 		for (int i = 0; i < OplPractical::kBlockFrames; ++i)
 			pcm.push_back((int16)(out[i] >> 8));

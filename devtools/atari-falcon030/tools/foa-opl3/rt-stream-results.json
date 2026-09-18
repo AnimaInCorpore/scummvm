@@ -4,8 +4,8 @@
   "source_sha256": {
     "dsp/oplrt.asm": "7efd423d64855c165e983db215bfd4cae4ecaef887777ba120cbf69ea664b2f0",
     "m68k/oplplay.s": "c411e279a1ec485b3a8f47b4cf5d57d9f2ea5f0284da24eec846816e1345acd4",
-    "rt-fixture.cpp": "f6f27bc088116b282c4da191d88e4a959f0ad8a62d3e8b566ad27a56c6f86232",
-    "opl-practical.h": "85f10bbe5698be9dd285e56e6bf26005e464de94942626792cdbb00d1ec1ebfd"
+    "rt-fixture.cpp": "14abb12bfc066bd9a1ed484ab59c3f3fbd28b2af377bd3945c4729486491041c",
+    "opl-practical.h": "f013c490d722b8ae6f1f8b0d1b3e2ade16457117fce12c49cdcbd5202fd7a036"
   },
   "scenario": "trace",
   "trace_sha256": "883bae533b8338fb9ca9714216412705853f52248b75ff970f8f4ddc666a893f",
@@ -14,7 +14,7 @@
   "periods_rendered": 1280,
   "late_periods": 0,
   "register_writes": 2554,
-  "parameter_events": 5898,
+  "parameter_events": 4392,
   "checksum_expected": 2644680,
   "checksum_dsp": 2644680,
   "word_exact": true,
