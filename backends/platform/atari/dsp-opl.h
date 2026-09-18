@@ -88,12 +88,25 @@ private:
 	uint32 _framesPerTick16;   // codec frames per callback, 16.16
 	uint32 _nextTick16;        // next callback's frame within the period, 16.16
 	uint32 _block;             // block of the period the current writes belong to
+	bool _resetting;           // the decoder's reset is being emitted
 
-	// A song start from the main loop can write several hundred registers
-	// while the interrupt is refused production; none may be dropped.
-	enum { kPendingMax = 2048 };
+	void resetDecoder(uint32 atBlock);
+	void noteLost();
+
+	// Writes between periods wait here for the next one. A song start from
+	// the main loop can write several hundred registers while the interrupt
+	// is refused production. Losing one is recovered, not fatal: the loss is
+	// noted and the next period resends the decoder's shadow. The cap leaves
+	// a fresh period room for a full queue, that resend, the master gain and
+	// the period's own writes, so the resend can never be what overflows.
+	enum { kPendingMax = 1024 };
 	static uint32 s_pending[kPendingMax * 2];
 	static uint32 s_pendingCount;
+
+	// An event never reached the kernel, so the next period resends the
+	// decoder's shadow - the machine's own words too if it was a reset's.
+	// Static like the queue, which can outlive the instance.
+	static bool s_resync, s_resyncMachine;
 
 	static AtariDspOPL *s_instance;
 };

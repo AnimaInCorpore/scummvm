@@ -32,6 +32,8 @@
 
 AtariDspOPL *AtariDspOPL::s_instance = nullptr;
 uint32 AtariDspOPL::s_pending[AtariDspOPL::kPendingMax * 2];
+bool AtariDspOPL::s_resync = false;
+bool AtariDspOPL::s_resyncMachine = false;
 uint32 AtariDspOPL::s_pendingCount = 0;
 
 // The mixer manager sets this when the DSP owns the codec.
@@ -47,14 +49,30 @@ AtariDspAudio *g_atariDspAudio = nullptr;
 
 AtariDspOPL::AtariDspOPL(AtariDspAudio *audio)
 	: _audio(audio), _period(nullptr), _decoder(new OplPractical::Decoder), _address(0),
-	  _running(false), _framesPerTick16(0), _nextTick16(0), _block(0) {
+	  _running(false), _framesPerTick16(0), _nextTick16(0), _block(0), _resetting(false) {
 	_sink.owner = this;
 	// The kernel outlives every OPL and may hold an earlier one's patches:
 	// the decoder's reset sends the whole reset state rather than trust it.
 	AtariCriticalSection critical;
 	s_pendingCount = 0;
-	_decoder->reset(&_sink, 9);
+	resetDecoder(0);
 	s_instance = this;
+}
+
+// A reset supersedes every write before it, lost ones included, so it also
+// ends a resync that is still due; if its own events are lost, noteLost
+// schedules the resync again, with the machine's words.
+void AtariDspOPL::resetDecoder(uint32 atBlock) {
+	s_resync = s_resyncMachine = false;
+	_resetting = true;
+	_decoder->reset(&_sink, 9, atBlock);
+	_resetting = false;
+}
+
+void AtariDspOPL::noteLost() {
+	s_resync = true;
+	if (_resetting)
+		s_resyncMachine = true;
 }
 
 AtariDspOPL::~AtariDspOPL() {
@@ -66,7 +84,7 @@ AtariDspOPL::~AtariDspOPL() {
 		// period (flushPending).
 		AtariCriticalSection critical;
 		s_pendingCount = 0;
-		_decoder->reset(&_sink, 9);
+		resetDecoder(0);
 		// Unregistered before the critical section ends: the transport's
 		// interrupt looks the instance up before every period it produces.
 		s_instance = nullptr;
@@ -89,7 +107,7 @@ void AtariDspOPL::reset() {
 	// period belong to what the reset ends.
 	if (!_period)
 		s_pendingCount = 0;
-	_decoder->reset(&_sink, 9, _block);
+	resetDecoder(_block);
 }
 
 void AtariDspOPL::write(int a, int v) {
@@ -111,22 +129,64 @@ void AtariDspOPL::EventSink::write(uint32 block, uint16 address, int32 value) {
 
 // A write outside period production (from the engine, between periods) is
 // kept for the start of the next period.
+//
+// The decoder has already put the value in its shadow when it gets here, so
+// dropping it silently would leave the two out of step for good: the next
+// equal write is suppressed as unchanged, and a dropped key-off became a
+// note that nothing could stop. A write that does not fit is noted instead,
+// and the next period brings the kernel back into step (flushPending).
 void AtariDspOPL::emit(uint32 block, uint16 address, int32 value) {
 	if (_period) {
-		_audio->addEvent(_period, block, address, (uint32)value);
+		if (!_audio->addEvent(_period, block, address, (uint32)value))
+			noteLost();
 		return;
 	}
 	if (s_pendingCount < kPendingMax) {
 		s_pending[2 * s_pendingCount] = address;
 		s_pending[2 * s_pendingCount + 1] = (uint32)value;
 		++s_pendingCount;
+		return;
 	}
+	noteLost();
 }
 
+namespace {
+
+// A resend straight into a period, noting whether all of it fitted.
+struct PeriodSink : OplPractical::Sink {
+	AtariDspAudio *audio;
+	AtariDspAudio::Period *period;
+	bool complete;
+	PeriodSink(AtariDspAudio *a, AtariDspAudio::Period *p) : audio(a), period(p), complete(true) {}
+	void write(uint32 block, uint16 address, int32 value) override {
+		if (!audio->addEvent(period, block, address, (uint32)value))
+			complete = false;
+	}
+};
+
+} // End of anonymous namespace
+
 void AtariDspOPL::flushPending(AtariDspAudio *audio, AtariDspAudio::Period *period) {
-	for (uint32 i = 0; i < s_pendingCount; ++i)
-		audio->addEvent(period, 0, (uint16)s_pending[2 * i], s_pending[2 * i + 1]);
+	// A fresh period takes the whole queue, the largest resend (every slot,
+	// the machine's words too), the master gain, and still has room.
+	static_assert(kPendingMax + OplPractical::kSlots * 18 + OplPractical::kChannels * 2 + 2 + 1
+	              <= AtariDspAudio::kMaxEvents, "a full queue and its resync must fit one period");
+	for (uint32 i = 0; i < s_pendingCount; ++i) {
+		if (!audio->addEvent(period, 0, (uint16)s_pending[2 * i], s_pending[2 * i + 1])) {
+			s_resync = true;
+			break;
+		}
+	}
 	s_pendingCount = 0;
+	// Replayed before the resend, so that a reset waiting at the head of the
+	// queue still sends the machine its own words first. Without an instance
+	// there is no shadow to resend; the next instance's reset supersedes it.
+	if (s_resync && s_instance) {
+		PeriodSink sink(audio, period);
+		s_instance->_decoder->resend(&sink, 0, s_resyncMachine);
+		if (sink.complete)
+			s_resync = s_resyncMachine = false;
+	}
 }
 
 void AtariDspOPL::setCallbackFrequency(int timerFrequency) {

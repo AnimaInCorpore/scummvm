@@ -510,6 +510,41 @@ struct Decoder {
 		sink->write(block, SC_CHANNELS, channelCount);
 	}
 
+	// Every word the shadow holds goes out as the shadow holds it: the way back
+	// into step after events were lost on the way to the machine. The shadow
+	// is written before the sink sees a value, so after a loss it still holds
+	// what the machine should have, and resending it is enough; no later write
+	// could repair the loss on its own, because an equal write is suppressed.
+	// By default only the host's own words, which leaves running envelopes
+	// alone. With machine set, also the words the machine owns that a reset
+	// clears - the envelope, its state and the applied key-on count - which the
+	// shadow keeps at their reset values: for a reset whose own events were
+	// lost, this silences every voice and retriggers the keyed ones instead of
+	// leaving the machine on the state the reset ended.
+	void resend(Sink *out, uint32_t atBlock, bool machine) const {
+		static const uint8_t hostWords[] = {
+			OP_TRIG, OP_FLAGS, OP_SL, OP_RATE_A, OP_RATE_D, OP_RATE_S, OP_RATE_R, OP_TLKSL,
+			OP_INCBASE, OP_WFBASE, OP_VIBDELTA, OP_VIBDELTA + 1, OP_VIBDELTA + 2, OP_VIBDELTA + 3,
+			OP_VIBDELTA + 4
+		};
+		static const uint8_t machineWords[] = { OP_TRIGSEEN, OP_STATE, OP_ENV };
+		for (int i = 0; i < channels * 2; ++i) {
+			const uint16_t base = (uint16_t)(kOpBase + i * kOpStride);
+			if (machine)
+				for (unsigned w = 0; w < sizeof(machineWords); ++w)
+					out->write(atBlock, (uint16_t)(base + machineWords[w]), shadowOp[i][machineWords[w]]);
+			for (unsigned w = 0; w < sizeof(hostWords); ++w)
+				out->write(atBlock, (uint16_t)(base + hostWords[w]), shadowOp[i][hostWords[w]]);
+		}
+		for (int c = 0; c < channels; ++c) {
+			const uint16_t base = (uint16_t)(kChannelBase + c * kChannelStride);
+			out->write(atBlock, (uint16_t)(base + CH_CONN), shadowChannel[c][CH_CONN]);
+			out->write(atBlock, (uint16_t)(base + CH_FBMUL), shadowChannel[c][CH_FBMUL]);
+		}
+		out->write(atBlock, SC_TREMOLO_SHIFT, shadowScalar[SC_TREMOLO_SHIFT - SC_TREMOLO_SHIFT]);
+		out->write(atBlock, SC_CHANNELS, shadowScalar[SC_CHANNELS - SC_TREMOLO_SHIFT]);
+	}
+
 	// Chip slot index from the OPL register slot number.
 	static int slotIndex(int chipSlot) {
 		for (int c = 0; c < kChannels; ++c) {

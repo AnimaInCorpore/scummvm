@@ -630,15 +630,16 @@ AtariDspAudio::Period *AtariDspAudio::beginPeriod(bool extension) {
 	return nullptr;
 }
 
-void AtariDspAudio::addEvent(Period *period, uint32 block, uint16 address, uint32 value) {
+bool AtariDspAudio::addEvent(Period *period, uint32 block, uint16 address, uint32 value) {
 	++s_produceEvents;
 	if (period->eventCount >= kMaxEvents) {
 		++s_protocolErrors;
-		return;
+		return false;
 	}
 	period->words[1 + 2 * period->eventCount] = ((block & 0xff) << 16) | address;
 	period->words[2 + 2 * period->eventCount] = value & 0xffffff;
 	++period->eventCount;
+	return true;
 }
 
 void AtariDspAudio::setPcm(Period *period, const int16 *samples) {

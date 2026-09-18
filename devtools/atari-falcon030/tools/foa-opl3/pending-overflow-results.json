@@ -1,0 +1,6 @@
+{
+  "gate": "emit/flushPending with the real decoder and Chip: queue, period and reset overflow, and no overflow",
+  "current_passes": true,
+  "mutant_without_resend_fails": true,
+  "passed": true
+}

@@ -46,7 +46,7 @@ struct AtariDspAudio {
  int allocated = 0;
  std::vector<int> submitted;
  Period *beginPeriod(bool) { return &periods[allocated++]; }
- void addEvent(Period *, int, int, uint32) {}
+ bool addEvent(Period *, int, int, uint32) { return true; }
  void setPcm(Period *p, const int16 *s) { p->sample = s ? *s : 0; }
  void submit(Period *p) { submitted.push_back(p->sample); }
 };

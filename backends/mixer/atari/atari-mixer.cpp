@@ -322,10 +322,12 @@ bool AtariMixerManager::produceDspPeriod(void *context, bool runCallbacks) {
 	const int volume = self->_mixer->isSoundTypeMuted(Audio::Mixer::kPlainSoundType) ? 0
 		: self->_mixer->getVolumeForSoundType(Audio::Mixer::kPlainSoundType);
 	if (volume != self->_dspFmVolume) {
-		self->_dspFmVolume = volume;
 		const uint32 gain = volume >= Audio::Mixer::kMaxMixerVolume ? 0x7fffffu
 			: (uint32)((uint64)volume * 0x7fffffu / Audio::Mixer::kMaxMixerVolume);
-		self->_dsp->addEvent(period, 0, OplPractical::SC_MASTER_GAIN, gain);
+		// Remembered only once the period holds it, so a full period retries
+		// in the next rather than leaving the kernel on the old gain for good.
+		if (self->_dsp->addEvent(period, 0, OplPractical::SC_MASTER_GAIN, gain))
+			self->_dspFmVolume = volume;
 	}
 	if (runCallbacks) {
 		AtariDspOPL::flushPending(self->_dsp, period);

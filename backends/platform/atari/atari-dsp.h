@@ -122,7 +122,8 @@ public:
 	 */
 	Period *beginPeriod(bool extension);
 	/** Adds a kernel parameter event to the period being filled. */
-	void addEvent(Period *period, uint32 block, uint16 address, uint32 value);
+	/** Adds an event to the period; false, and nothing added, once the period is full. */
+	bool addEvent(Period *period, uint32 block, uint16 address, uint32 value);
 	/** Sets the period's PCM: 160 signed 16-bit samples, or nullptr for silence. */
 	void setPcm(Period *period, const int16 *samples);
 	/** Queues the period for delivery. */
