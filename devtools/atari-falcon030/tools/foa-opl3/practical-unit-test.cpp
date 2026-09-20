@@ -8,6 +8,7 @@
 //  * sustain level: changing it under a running decay never lowers the
 //    attenuation, and the envelope ends where the chip's does
 //  * reset: a reset under a held note leaves the machine as a fresh one
+//  * attack: zero and maximum rates hold mid-attack, maximum key-on is instant
 //  * pause: FM state is frozen and silent, PCM still plays, resume is continuous
 //
 // usage: opl-practical-unit-test
@@ -148,6 +149,56 @@ unsigned long checkSustainLevel(unsigned long *comparedOut) {
 	return checked;
 }
 
+unsigned checkAttackChanges() {
+	unsigned checked = 0;
+	for (int ksr = 0; ksr < 2; ++ksr) {
+		for (int block = 0; block < 8; ++block) {
+			for (int ar : { 0, 14, 15 }) {
+				Pair p;
+				p.write(0x23, (uint8_t)(0x21 | (ksr << 4)));
+				p.write(0x63, 0x20);
+				p.write(0x83, 0x04);
+				p.write(0xa0, 0x41);
+				const uint8_t key = (uint8_t)(0x21 | (block << 2));
+				p.write(0xb0, key);
+				int16_t left, right;
+				for (int i = 0; i < 130; ++i)
+					E::generate(&p.exact, &left, &right);
+				p.renderBlocks(2);
+				p.write(0x63, (uint8_t)(ar << 4));
+				p.decoder.flush();
+				const int rate = p.practical.op[1].w[P::OP_RATE_A];
+				if (rate && rate < 60)
+					continue;
+				++checked;
+				const int exactEnv = p.exact.slot[3].envRaw;
+				const int practicalEnv = p.practical.op[1].w[P::OP_ENV];
+				if (!exactEnv || !practicalEnv || p.exact.slot[3].envGen != E::kAttack
+				    || p.practical.op[1].w[P::OP_STATE] != P::kAttack)
+					fail("attack test did not reach a running attack", ksr, block, ar);
+				for (int i = 0; i < 6500; ++i)
+					E::generate(&p.exact, &left, &right);
+				p.renderBlocks(100);
+				if (p.exact.slot[3].envRaw != exactEnv || p.practical.op[1].w[P::OP_ENV] != practicalEnv)
+					fail("attack rate change did not hold the envelope", ksr, block, ar);
+				if (rate >= 60) {
+					p.write(0xb0, key & ~0x20);
+					for (int i = 0; i < 65; ++i)
+						E::generate(&p.exact, &left, &right);
+					p.renderBlocks(1);
+					p.write(0xb0, key);
+					for (int i = 0; i < 65; ++i)
+						E::generate(&p.exact, &left, &right);
+					p.renderBlocks(1);
+					if (p.exact.slot[3].envRaw || p.practical.op[1].w[P::OP_ENV])
+						fail("maximum-rate key-on was not instant", ksr, block, ar);
+				}
+			}
+		}
+	}
+	return checked;
+}
+
 void checkPause() {
 	Pair p;
 	for (int o : { 0, 3 }) {
@@ -273,10 +324,11 @@ int main() {
 	const unsigned long pitches = checkPitch();
 	unsigned long settled = 0;
 	const unsigned long levels = checkSustainLevel(&settled);
+	const unsigned attacks = checkAttackChanges();
 	checkPause();
 	checkReset();
 	std::printf("{\"increments_checked\": %lu, \"sustain_level_cases\": %lu,"
-	            " \"sustain_level_cases_settled_alike\": %lu, \"failures\": %u}\n",
-	            pitches, levels, settled, g_failures);
+	            " \"sustain_level_cases_settled_alike\": %lu, \"attack_change_cases\": %u, \"failures\": %u}\n",
+	            pitches, levels, settled, attacks, g_failures);
 	return g_failures ? 1 : 0;
 }

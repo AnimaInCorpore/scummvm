@@ -358,6 +358,7 @@ ob_active:
         move    #>OPR_STATE,n0
         nop
         move    a1,x:(r0+n0)            ; state = attack
+        jsr     trigger_attack         ; maximum rate is instant only at key-on
 ob_no_trigger:
         move    (r1)+                   ; -> FLAGS
         move    x:(r1)+,x0              ; FLAGS; -> STATE
@@ -394,6 +395,14 @@ ob_keyed:
         move    b1,a
         jmp     ob_env_snap
 ob_attack:
+        tst     b                      ; a zero envelope can leave attack at any rate
+        jeq     ob_attack_done
+        move    x0,a
+        tst     a
+        jeq     ob_attack_hold         ; rate zero holds exactly
+        move    #>60,x1
+        cmp     x1,a
+        jge     ob_attack_hold         ; maximum rate selected mid-attack also holds
         move    #>ATTACK_TABLE,a
         add     x0,a
         move    a1,r0
@@ -403,9 +412,13 @@ ob_attack:
         move    #>ATTACK_DONE,x1
         cmp     x1,a
         jge     ob_env_store            ; still attacking
+ob_attack_done:
         clr     a
         move    #>1,b
         move    b1,x:(r1)               ; state = decay
+        jmp     ob_env_store
+ob_attack_hold:
+        move    b1,a
         jmp     ob_env_store
 ; The chip leaves decay when the envelope's top five bits equal the sustain
 ; level: below it the step may reach it, inside that one sustain step the
@@ -756,6 +769,21 @@ host_receive:
 ; the per-frame stages and the per-operator boundary pass earn internal P.
 
 ; ------------------------------------------------------- render driver
+
+; Rare key-on work lives outside the internal render loops. r0 is the
+; operator record, a is zero, and r1 still points at TRIGSEEN.
+trigger_attack:
+        move    #>OPR_RATE_A,n0
+        nop
+        move    x:(r0+n0),b
+        move    #>60,x0
+        cmp     x0,b
+        jlt     ta_done
+        move    #>OPR_ENV,n0
+        nop
+        move    a1,x:(r0+n0)            ; maximum-rate key-on: no attenuation
+ta_done:
+        rts
 
 render_channels:
         move    #>CH_BASE,a

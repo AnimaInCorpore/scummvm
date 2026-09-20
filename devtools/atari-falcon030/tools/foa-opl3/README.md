@@ -348,10 +348,14 @@ settle where the chip's does; a reset under nine held voices leaves the
 machine word for word a fresh one, silent from its first block, and a song
 started on it renders as on a fresh pair.
 
-The unit test also checks that pausing freezes the operators, feedback and
-LFOs, emits PCM alone, and resumes the same FM samples as an uninterrupted
-reference. The DSP paths benchmark exercises pause/resume against this host
-reference.
+Attack-rate changes also retain the chip's behavior: effective rates 60–63
+make a new key-on instantaneous, but selecting one during a running attack
+holds its attenuation. Rate zero holds exactly too. The unit test checks
+38 combinations of rate, key scaling and octave against the exact kernel,
+then verifies maximum-rate retriggers. It also checks that pausing freezes
+the operators, feedback and LFOs, emits PCM alone, and resumes the same FM
+samples as an uninterrupted reference. The DSP paths benchmark exercises
+both held-attack cases and pause/resume against this host reference.
 
 [practical-gate.py](practical-gate.py) scores it against the exact kernel
 on synthetic scenarios and the captured 60-second Atlantis stream, at each

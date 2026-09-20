@@ -111,7 +111,18 @@ std::vector<RegisterWrite> stressScript(double seconds) {
 // DSP's are compared word for word too. Not a cost measurement.
 std::vector<RegisterWrite> pathsScript(double seconds) {
 	std::vector<RegisterWrite> writes = stressScript(seconds);
-	// Pause and resume while all voices are live.
+	// Rate changes during attack must hold, but the later key-on at maximum
+	// rate is still instant. Also pause and resume while all voices are live.
+	writes.push_back(RegisterWrite{seconds * 0.10, 0xb0, 0x09});
+	// The stress patch has release rate zero: give it time to attenuate
+	// before rekeying, so the slow attack starts above zero attenuation.
+	writes.push_back(RegisterWrite{seconds * 0.10, 0x80, 0x3f});
+	writes.push_back(RegisterWrite{seconds * 0.10, 0x83, 0x3f});
+	writes.push_back(RegisterWrite{seconds * 0.10, 0x60, 0x30});
+	writes.push_back(RegisterWrite{seconds * 0.10, 0x63, 0x30});
+	writes.push_back(RegisterWrite{seconds * 0.11, 0xb0, 0x29});
+	writes.push_back(RegisterWrite{seconds * 0.15, 0x60, 0xf0});
+	writes.push_back(RegisterWrite{seconds * 0.15, 0x63, 0x00});
 	writes.push_back(RegisterWrite{seconds * 0.30, kPauseChip, 1});
 	writes.push_back(RegisterWrite{seconds * 0.40, kPauseChip, 0});
 	static const uint16 chord[9] = { 0x181, 0x1e5, 0x241, 0x2aa, 0x181, 0x1e5, 0x241, 0x2aa, 0x33d };
@@ -297,7 +308,7 @@ int main(int argc, char **argv) {
 	uint32 peakEvents = 0;
 	// Blocks in which some audible operator took a rarely taken path.
 	uint32 decayPastBlocks = 0, decayHeldBlocks = 0, negativeIncrementBlocks = 0, vibratoBlocks = 0;
-	uint32 pausedBlocks = 0;
+	uint32 pausedBlocks = 0, attackZeroBlocks = 0, attackMaxBlocks = 0;
 	int32 frames[P::kBlockFrames];
 	for (uint32 chunk = 0; chunk < chunks; ++chunk) {
 		const uint32 first = chunk * chunkBlocks;
@@ -327,12 +338,17 @@ int main(int argc, char **argv) {
 				++at;
 			}
 			bool past = false, held = false, negative = false, vibrato = false;
+			bool attackZero = false, attackMax = false;
 			for (int i = 0; i < 18; ++i) {
 				const int32 *w = chip.op[i].w;
 				if (w[P::OP_STATE] == P::kDecay && w[P::OP_ENV] >= w[P::OP_SL] + (16 << 12))
 					past = true;
 				if (w[P::OP_STATE] == P::kDecay && w[P::OP_ENV] > w[P::OP_SL] && w[P::OP_ENV] < w[P::OP_SL] + (16 << 12))
 					held = true;
+				if (w[P::OP_STATE] == P::kAttack && w[P::OP_ENV] > 0 && (w[P::OP_FLAGS] & 1)) {
+					attackZero |= w[P::OP_RATE_A] == 0;
+					attackMax |= w[P::OP_RATE_A] >= 60;
+				}
 			}
 			P::renderBlock(&chip, nullptr, frames);
 			for (int i = 0; i < 18; ++i) {
@@ -347,6 +363,8 @@ int main(int argc, char **argv) {
 			negativeIncrementBlocks += negative;
 			vibratoBlocks += vibrato;
 			pausedBlocks += chip.paused != 0;
+			attackZeroBlocks += attackZero && !chip.paused;
+			attackMaxBlocks += attackMax && !chip.paused;
 			for (int i = 0; i < P::kBlockFrames; ++i)
 				expect.word((uint32)frames[i] & 0xffffff);
 		}
@@ -399,10 +417,10 @@ int main(int argc, char **argv) {
 	            " \"peak_events_per_chunk\": %u, \"periods\": %u, \"period_checksum\": %u,"
 	            " \"blocks_decaying_past_sustain_level\": %u, \"blocks_entering_sustain_above_level\": %u,"
 	            " \"blocks_with_negative_increment\": %u, \"blocks_with_vibrato\": %u,"
-	            " \"blocks_paused\": %u}\n",
+	            " \"blocks_paused\": %u, \"blocks_holding_attack_zero\": %u, \"blocks_holding_attack_max\": %u}\n",
 	            scenario.c_str(), seconds, totalBlocks, totalBlocks * P::kBlockFrames, chunks, chunkBlocks,
 	            writes.size(), sink.events.size(), peakEvents, play ? periods : 0, checksum,
 	            decayPastBlocks, decayHeldBlocks, negativeIncrementBlocks, vibratoBlocks,
-	            pausedBlocks);
+	            pausedBlocks, attackZeroBlocks, attackMaxBlocks);
 	return 0;
 }

@@ -42,13 +42,15 @@ PROFILE_RE = re.compile(r"^p:([0-9a-f]+).*?\s[0-9]+[.,][0-9]+% \((\d+), (\d+), (
 
 # Rarely taken paths the paths case must reach, as block counts from the fixture.
 PATHS = ("blocks_decaying_past_sustain_level", "blocks_entering_sustain_above_level",
-         "blocks_with_negative_increment", "blocks_with_vibrato", "blocks_paused")
+         "blocks_with_negative_increment", "blocks_with_vibrato", "blocks_paused",
+         "blocks_holding_attack_zero", "blocks_holding_attack_max")
 
 # Code ranges that are the kernel's own per-block work, by listing symbol.
 RANGES = {
     "stages": ("stage_mod_plain", "op_boundary"),
     "op_boundary": ("op_boundary", "emit_block_stream"),
     "stream_emit": ("emit_block_stream", "hot_code_end"),
+    "trigger_attack": ("trigger_attack", "render_channels"),
     "render_driver": ("render_channels", "load_mod"),
     "loaders_and_modes": ("load_mod", "clear_mix"),
     "clear_mix": ("clear_mix", "emit_block"),

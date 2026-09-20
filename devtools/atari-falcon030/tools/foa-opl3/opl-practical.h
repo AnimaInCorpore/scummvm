@@ -244,6 +244,10 @@ static void opBoundary(Chip *chip, int channel, int which) {
 		op.phase = 0;
 		if (which == 0)
 			ch.hist0 = ch.hist1 = 0;
+		// Maximum rate is instant only on a key-on edge. Selecting that
+		// rate during an existing attack holds the chip's current envelope.
+		if (w[OP_RATE_A] >= 60)
+			w[OP_ENV] = 0;
 	}
 	if (!(w[OP_FLAGS] & 1) && w[OP_STATE] != kRelease)
 		w[OP_STATE] = kRelease;
@@ -251,8 +255,9 @@ static void opBoundary(Chip *chip, int channel, int which) {
 	int32_t env = w[OP_ENV];
 	switch (w[OP_STATE]) {
 	case kAttack:
-		env = mpyHi(env, (int32_t)kOplAttackBlock[w[OP_RATE_A]]);
-		if (env < OPL_PRACTICAL_ATTACK_DONE) {
+		if (w[OP_RATE_A] > 0 && w[OP_RATE_A] < 60)
+			env = mpyHi(env, (int32_t)kOplAttackBlock[w[OP_RATE_A]]);
+		if (!env || (w[OP_RATE_A] > 0 && w[OP_RATE_A] < 60 && env < OPL_PRACTICAL_ATTACK_DONE)) {
 			env = 0;
 			w[OP_STATE] = kDecay;
 		}
