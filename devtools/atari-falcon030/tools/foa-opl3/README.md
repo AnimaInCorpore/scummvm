@@ -477,6 +477,12 @@ first period waits until the transmitter has just entered the ring half it
 is about to render, so it gets a whole half like every later one and the
 stream does not open with a late period.
 
+A payload with no PCM means silence and clears the interpolation history.
+Otherwise the next nonzero payload would interpolate from the last sample
+before the gap, creating a loud transient. [pcm-silence-gate.py](pcm-silence-gate.py)
+checks positive and negative transitions through omitted and explicit
+silence by reading the interpolated words from the emulated DSP.
+
 [m68k/oplplay.s](m68k/oplplay.s) drives that protocol with direct host-port
 writes, and [rt-stream-gate.py](rt-stream-gate.py) checks the emitted words
 by checksum against the host reference. From
@@ -697,6 +703,8 @@ python3 devtools/atari-falcon030/tools/foa-opl3/rt-bench-gate.py \
 python3 devtools/atari-falcon030/tools/foa-opl3/rt-stream-gate.py \
   --trace <opl-writes.ev> --seconds 20 --output build-falcon030/opl3-rt-stream
 python3 devtools/atari-falcon030/tools/foa-opl3/pause-gate.py
+python3 devtools/atari-falcon030/tools/foa-opl3/pcm-silence-gate.py \
+  --output build-falcon030/opl3-pcm-silence
 ```
 
 `build-dsp.sh` also regenerates `backends/platform/atari/dsp-opl-image.h`,

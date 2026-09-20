@@ -1238,7 +1238,10 @@ refill_events_done:
         jsr     host_receive
         move    a1,x:pcm_present
         tst     a
-        jeq     refill_pcm_done
+        jne     refill_pcm_present
+        move    a1,x:pcm_previous       ; omitted samples are zeros, including the last one
+        jmp     refill_pcm_done
+refill_pcm_present:
         jsr     receive_pcm
 refill_pcm_done:
         jsr     send_status             ; the acknowledgement carries the counters
