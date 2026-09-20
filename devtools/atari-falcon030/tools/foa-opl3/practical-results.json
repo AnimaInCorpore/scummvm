@@ -1,12 +1,12 @@
 {
-  "date": "2026-09-17",
+  "date": "2026-09-20",
   "gate": "practical block-rate OPL kernel against the exact kernel, perceptual metrics",
-  "scummvm_commit": "433fbc41c4f19ce124bab9014f22192e1276892c",
-  "scummvm_worktree_dirty": true,
+  "scummvm_commit": "f6d1711e03a242259559146c7b7b1a897041371e",
+  "scummvm_worktree_dirty": false,
   "source_sha256": {
-    "opl-practical.h": "f013c490d722b8ae6f1f8b0d1b3e2ade16457117fce12c49cdcbd5202fd7a036",
+    "opl-practical.h": "4fdc84b42cce266400cc37e765137f54ebee83c2e44063d533859c7f97ff0257",
     "practical-test.cpp": "16c8aacb1739a656ec94c16965dda9b6f758fc7daf6c885dc28a26cd05d4dcb4",
-    "practical-gate.py": "090d3fa0f6d521a8dfbc13138f8a5d834b880147f7397bb4a973879d0209b040",
+    "practical-gate.py": "1395f47cf20c579ca2d0222e025eff17aa1b62acc08769843bdf3d688aced011",
     "generate-tables.py": "5061aa05b59a3b0b10532317d3a5a54546861858be11d2695769572b2d26eef7",
     "opl-kernel.h": "b22fac5d5ecff8db925b5660823b6ba592afecdc590c0f3c87d567e012bdfcc1"
   },

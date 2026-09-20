@@ -1,14 +1,14 @@
 {
-  "date": "2026-09-16",
+  "date": "2026-09-20",
   "gate": "DSP-shaped OPL kernel against Nuked-OPL3, sample for sample",
-  "scummvm_commit": "4b73ae3393592cef284070df1fd831aa1e07463a",
-  "scummvm_worktree_dirty": true,
+  "scummvm_commit": "f6d1711e03a242259559146c7b7b1a897041371e",
+  "scummvm_worktree_dirty": false,
   "source_sha256": {
-    "opl-kernel.h": "ccfb0a922d71981e728be957240b789a99ce1abb28ef1053ec701e8d5cf5759d",
+    "opl-kernel.h": "b22fac5d5ecff8db925b5660823b6ba592afecdc590c0f3c87d567e012bdfcc1",
     "kernel-test.cpp": "89ac18c2c57cdcf1762fa4f5dbd546a4799c5fe7c9adca20f50ab742bd213fa6",
-    "generate-tables.py": "f6f9d6b8847dfdd1f77153f3394bf032bfc4f76a71569ceb61be78ee8136694e",
-    "kernel.mk": "5d823577815b270d9a80a22099248ff66aff577fbed1bfb80e06d127c85260ef",
-    "kernel-gate.py": "90f4375c3c8dc105afdf2f5fad2ef333332e0defcac44554e8df43a7e9abc902"
+    "generate-tables.py": "5061aa05b59a3b0b10532317d3a5a54546861858be11d2695769572b2d26eef7",
+    "kernel.mk": "11e5f1a4e30227b2fbe48db8e26350bceaf373432bb2915559bf9a244b54fafd",
+    "kernel-gate.py": "e77672ed081c4a831886989e05e0d32c4f9f844266a969dd309286474da33d43"
   },
   "trace_sha256": "883bae533b8338fb9ca9714216412705853f52248b75ff970f8f4ddc666a893f",
   "reference": "Nuked-OPL3 (ScummVM tree)",

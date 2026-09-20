@@ -607,12 +607,20 @@ game got to.
 
 | Game | Periods | Extension periods | Music peak | Results |
 | --- | ---: | ---: | ---: | --- |
-| Day of the Tentacle, CD | 6,160 in 90 s | 69 | -24 dBFS | [game-results-tentacle.json](game-results-tentacle.json) |
+| Day of the Tentacle, CD | 6,152 in 90 s | 44 | -24 dBFS | [game-results-tentacle.json](game-results-tentacle.json) |
 | The Secret of Monkey Island, Ultimate Talkie | 6,203 in 90 s | 102 | -24 dBFS | [game-results-monkey.json](game-results-monkey.json) |
 | Monkey Island 2, Ultimate Talkie | 7,718 in 120 s | 53 | -17 dBFS | [game-results-monkey2.json](game-results-monkey2.json) |
 
 So a v6 game and the two Monkey Islands fit in the 14 MB beside the DSP
 transport at least through their openings.
+
+None of those figures is reproducible to the digit. Four runs of the same
+Tentacle binary gave 6,152 to 6,173 periods, 43 to 69 extension periods and
+peaks from -23.5 to -24.1 dBFS; the run is not deterministic and why was
+not investigated. What every run does hold exactly is the invariants - no
+late period, no protocol error, fresh counters in every report, the opening
+music present at level - so a figure in this table is the scale of the
+thing, not a value to regress against.
 
 Two earlier stages of the Atlantis run are worth keeping in mind. With
 production on the main loop and delivery from the interrupt it reported two
