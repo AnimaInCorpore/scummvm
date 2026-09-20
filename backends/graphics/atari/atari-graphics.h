@@ -27,12 +27,13 @@
 
 #include "graphics/surface.h"
 
+#include "common/path.h"
+
 #include "atari-cursor.h"
 #include "atari-pendingscreenchanges.h"
 #include "atari-screen.h"
+#include "atari-ste-scene.h"
 #include "atari-supervidel.h"
-
-class AtariSteSceneRenderer;
 
 #define MAX_HZ_SHAKE 16 // Falcon only
 #define MAX_V_SHAKE  16
@@ -113,6 +114,11 @@ public:
 
 	bool notifyEvent(const Common::Event &event) override;
 	Common::Keymap *getKeymap() const;
+
+	// Installs the mixing table of a room, if the game has one for it. The
+	// STE build's engine calls this when a room is on screen; every other
+	// platform ignores rooms entirely.
+	void steSetRoom(int room);
 
 private:
 	enum {
@@ -212,6 +218,11 @@ private:
 	AtariSurface _overlaySurface;
 	bool _ignoreCursorChanges = false;
 	AtariSteSceneRenderer *_steSceneRenderer = nullptr;
+	// The mixing table the game started with, the one loaded now, and the
+	// pattern both were asked for (see steSetRoom()).
+	Common::Path _steMixDefault;
+	Common::Path _steMixLoaded;
+	AtariSteSceneRenderer::MixPattern _steMixPattern = AtariSteSceneRenderer::kMixChecker;
 
 	Palette _palette;
 	Palette _overlayPalette;
