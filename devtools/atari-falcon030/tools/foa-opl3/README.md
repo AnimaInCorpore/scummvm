@@ -439,18 +439,18 @@ DSP profile by code range. From [rt-bench-results.json](rt-bench-results.json):
 | Frames compared | 49,152 | 196,672 |
 | Mismatches | 0 | 0 |
 | Stages (per-frame) | 183.8 | 130.6 |
-| Per-operator boundary pass | 48.8 | 42.8 |
+| Per-operator boundary pass | 19.5 | 17.4 |
 | Loaders, modes, driver | 11.9 | 10.9 |
-| Block and channel boundary | 11.0 | 10.4 |
+| Block and channel boundary | 10.5 | 9.8 |
 | Emit, clear, events | 7.1 | 7.0 |
-| **Instruction cycles per frame** | **262.7** | **201.6** |
-| Share of the 326.3-cycle budget at 49.17 kHz | 81% | 62% |
+| **Instruction cycles per frame** | **233.2** | **176.1** |
+| Share of the 326.3-cycle budget at 49.17 kHz | 71% | 54% |
 
 A third case, `paths`, is there for exactness alone: the stress case plus
 what music rarely does, so that the DSP's code for it is compared word for
 word too. A sustain level lowered under a running decay (127 blocks past
 the level, and the block that enters sustain above it), increments past
-half the chip's phase range with a deep vibrato straddling it (109 blocks
+half the chip's phase range with a deep vibrato straddling it (93 blocks
 with a negative increment), and a chip reset under held notes followed by
 a song whose zero writes a stale shadow would swallow: 49,152 frames, no
 mismatch. The gate fails if the case stops reaching any of these paths.
@@ -461,9 +461,27 @@ Everything but the stages is per-block work, and that is why the block is
 budget arithmetic accepted and the transport did not: the kernel idles for
 a millisecond or so per period while the host's 1 kHz tick notices READY
 and sends the payload, so the stress case overran in the stream gate, and
-so did Atlantis's densest passage in the game. The boundary pass still
-walks the record with indexed accesses and remains the obvious next
-optimization. The whole program is 1,249 words; the stages and the
+so did Atlantis's densest passage in the game.
+
+The per-operator pass cost 48.8 and 43.1 cycles per frame in those two
+cases until it was rewritten, 174 instruction cycles for every active
+operator of every block, most of it addressing: each field of the record
+was reached by loading an offset into `n1`, a `nop` for the pipeline, and an
+indexed move, ten clock cycles where a postincrement costs two. It now
+walks the record forward. The one indexed read left is the rate of the
+current state, the one backward step the envelope's store; the table bases,
+the two shift multipliers and the release state stay in registers across
+all eighteen operators, the compare constants sit in internal X where a
+short absolute load is one word against an immediate's two, and conditional
+jumps inside internal P are forced short. The gains return in registers
+instead of through memory, the feedback gain is derived once per channel
+for the modulator (the carrier never had a use for one), and the record's
+GAIN, GAINMOD, GAINFB and INC words are no longer written: the render reads
+its own parameters, nothing else reads those words, and the idle path never
+kept them true anyway. A key-up operator is released with an unconditional
+store instead of a compare, and the rare key-on work left internal P for
+external. The output did not change by a word in any case or in either
+stream checksum. The whole program is 1,261 words; the stages and the
 operator pass live in the 512 words of internal program RAM, everything
 else in external.
 

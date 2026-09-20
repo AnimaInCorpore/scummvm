@@ -10,7 +10,8 @@ renderer does not fit the DSP, but a practical block-rate one does. Since
 2026-09-17 it runs at the codec's 49.17 kHz, next to the chip's own rate,
 because at 32.78 kHz its aliasing was audible: measured at 62% of that
 budget on the Atlantis stream and 80% with nine feedback FM channels held
-with tremolo and vibrato (55% and 69% at 32.78 kHz), word exact against its
+with tremolo and vibrato (55% and 69% at 32.78 kHz; 54% and 71% at 49.17 kHz
+since the per-operator boundary pass was rewritten on 2026-09-20), word exact against its
 host reference, streaming through the SSI without a late period, and
 playing the game's opening on the emulated Falcon from the ScummVM build
 (`opl_driver=atari_dsp`). It preserves the AdLib arrangement and live
@@ -439,8 +440,8 @@ each with a gate and a committed result file. In short:
 | Practical kernel against the exact one, sustained tones | levels within 0.1 dB, partials within 0.6 dB, pitch within 0.7 cent |
 | Envelope contour correlation, Atlantis 60 s | 0.982, mean level error 0.71 dB, onset skew at most 2.8 ms |
 | Aliasing: energy above 3 kHz against the exact kernel, Atlantis 60 s | +0.9 dB at 49.17 kHz (+2.7 dB at 32.78 kHz, heard as blurred instruments) |
-| DSP cost at 49.17 kHz, Atlantis first 4 s | 201.1 cycles per frame, 62% of budget, word exact |
-| DSP cost at 49.17 kHz, nine feedback FM channels with LFO held | 262.1 cycles per frame, 80% of budget, word exact |
+| DSP cost at 49.17 kHz, Atlantis first 4 s | 176.1 cycles per frame, 54% of budget, word exact |
+| DSP cost at 49.17 kHz, nine feedback FM channels with LFO held | 233.2 cycles per frame, 71% of budget, word exact |
 | Stream mode through the SSI | Atlantis 20 s: 1,280 periods; worst-case load 10 s: 640 periods; none late, checksums equal |
 | The game on the emulated Falcon | 6,166 periods through 90 s of the opening, none late, 98 extension periods (1.5 s of sequencer slip inside resource loads), opening music recorded |
 | Day of the Tentacle, Monkey Island 1 and 2 on the same build | 6,137 / 6,179 periods in 90 s, 7,716 in 120 s; none late; 80 / 97 / 60 extension periods; opening music recorded |
@@ -452,8 +453,7 @@ loop only mixes PCM ahead, and the game's stalls at scene changes (seconds,
 as the transport's PCM underrun count shows) no longer touch the music;
 extension periods cover the stretches where the interrupt may not run
 iMUSE, at the cost of 14.6 ms of sequencer slip each. The remaining
-engineering items are the per-operator boundary pass (the second-largest
-DSP cost, unoptimized, and the margin now that the rate is 49.17 kHz), a
+engineering items are a
 listening pass that includes the slips, and a
 hardware run with the same counters.
 

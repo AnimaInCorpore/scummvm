@@ -1,18 +1,18 @@
 {
   "date": "2026-09-17",
   "gate": "practical OPL kernel on the emulated Falcon DSP56001: exactness and cycle cost",
-  "scummvm_commit": "433fbc41c4f19ce124bab9014f22192e1276892c",
+  "scummvm_commit": "13739b3a0835fd6edf0157472d4e0f8625eb9e12",
   "scummvm_worktree_dirty": true,
   "source_sha256": {
-    "dsp/oplrt.asm": "7efd423d64855c165e983db215bfd4cae4ecaef887777ba120cbf69ea664b2f0",
+    "dsp/oplrt.asm": "13d67edc03fdd0836a74883ebfe88ba87b7c94cdc9d96cae28501b45da09982c",
     "m68k/oplrt.s": "1a1c2aa92065a0d8fb6a7fd6db97d57efde0bafd0b709f7cb9b4390bbc7c11d9",
-    "rt-fixture.cpp": "14abb12bfc066bd9a1ed484ab59c3f3fbd28b2af377bd3945c4729486491041c",
-    "opl-practical.h": "f013c490d722b8ae6f1f8b0d1b3e2ade16457117fce12c49cdcbd5202fd7a036",
-    "rt-bench-gate.py": "bcb083544f84f8cb08352a79783f8dbc264f073f7ab653429b1eeedc8cb8378e",
+    "rt-fixture.cpp": "1a4cd0a9af68af2848ae9c5cbc9d4fbdd9b9d67951a438e3b8b500e4348b7bf0",
+    "opl-practical.h": "4fdc84b42cce266400cc37e765137f54ebee83c2e44063d533859c7f97ff0257",
+    "rt-bench-gate.py": "bb6a6659d7b0454c19ba7164008d1591143b87641baccb1178665a237f4f401a",
     "generate-tables.py": "5061aa05b59a3b0b10532317d3a5a54546861858be11d2695769572b2d26eef7"
   },
   "trace_sha256": "883bae533b8338fb9ca9714216412705853f52248b75ff970f8f4ddc666a893f",
-  "dsp_program_words": 1326,
+  "dsp_program_words": 1261,
   "reference": "opl-practical.h, scored against the exact kernel by practical-gate.py",
   "cases": [
     {
@@ -28,27 +28,31 @@
         "blocks_decaying_past_sustain_level": 0,
         "blocks_entering_sustain_above_level": 0,
         "blocks_with_negative_increment": 0,
-        "blocks_with_vibrato": 570
+        "blocks_with_vibrato": 570,
+        "blocks_paused": 0,
+        "blocks_holding_attack_zero": 0,
+        "blocks_holding_attack_max": 0
       },
       "frame_words_compared": 49152,
       "mismatches_against_host_kernel": 0,
       "first_mismatch_frame": null,
       "bit_exact": true,
-      "instruction_cycles_per_frame": 263.02,
+      "instruction_cycles_per_frame": 233.21,
       "instruction_cycles_per_frame_by_range": {
         "stages": 183.8,
-        "op_boundary": 48.82,
+        "op_boundary": 19.52,
         "stream_emit": 0.0,
+        "trigger_attack": 0.01,
         "render_driver": 4.98,
         "loaders_and_modes": 6.89,
         "clear_mix": 1.09,
         "emit": 5.14,
-        "block_and_channel_boundary": 11.04,
-        "render_block": 0.36,
-        "apply_events": 0.9
+        "block_and_channel_boundary": 10.5,
+        "render_block": 0.41,
+        "apply_events": 0.87
       },
       "budget_cycles_per_frame": 326.27,
-      "budget_use_percent": 80.6
+      "budget_use_percent": 71.5
     },
     {
       "scenario": "paths",
@@ -56,34 +60,38 @@
       "frames": 49152,
       "blocks": 768,
       "chunks": 12,
-      "register_writes": 219,
-      "parameter_events": 1198,
+      "register_writes": 229,
+      "parameter_events": 1212,
       "peak_events_per_chunk": 573,
       "paths_exercised": {
         "blocks_decaying_past_sustain_level": 127,
         "blocks_entering_sustain_above_level": 1,
-        "blocks_with_negative_increment": 109,
-        "blocks_with_vibrato": 457
+        "blocks_with_negative_increment": 93,
+        "blocks_with_vibrato": 473,
+        "blocks_paused": 77,
+        "blocks_holding_attack_zero": 406,
+        "blocks_holding_attack_max": 192
       },
       "frame_words_compared": 49152,
       "mismatches_against_host_kernel": 0,
       "first_mismatch_frame": null,
       "bit_exact": true,
-      "instruction_cycles_per_frame": 236.36,
+      "instruction_cycles_per_frame": 179.38,
       "instruction_cycles_per_frame_by_range": {
-        "stages": 161.39,
-        "op_boundary": 45.16,
+        "stages": 136.29,
+        "op_boundary": 16.28,
         "stream_emit": 0.0,
-        "render_driver": 4.98,
-        "loaders_and_modes": 6.15,
+        "trigger_attack": 0.03,
+        "render_driver": 4.48,
+        "loaders_and_modes": 5.23,
         "clear_mix": 1.09,
         "emit": 5.14,
-        "block_and_channel_boundary": 10.79,
-        "render_block": 0.36,
-        "apply_events": 1.3
+        "block_and_channel_boundary": 9.12,
+        "render_block": 0.4,
+        "apply_events": 1.32
       },
       "budget_cycles_per_frame": 326.27,
-      "budget_use_percent": 72.4
+      "budget_use_percent": 55.0
     },
     {
       "scenario": "atlantis",
@@ -98,27 +106,31 @@
         "blocks_decaying_past_sustain_level": 0,
         "blocks_entering_sustain_above_level": 0,
         "blocks_with_negative_increment": 0,
-        "blocks_with_vibrato": 0
+        "blocks_with_vibrato": 0,
+        "blocks_paused": 0,
+        "blocks_holding_attack_zero": 0,
+        "blocks_holding_attack_max": 0
       },
       "frame_words_compared": 196672,
       "mismatches_against_host_kernel": 0,
       "first_mismatch_frame": null,
       "bit_exact": true,
-      "instruction_cycles_per_frame": 202.01,
+      "instruction_cycles_per_frame": 176.09,
       "instruction_cycles_per_frame_by_range": {
         "stages": 130.6,
-        "op_boundary": 42.77,
+        "op_boundary": 17.35,
         "stream_emit": 0.0,
+        "trigger_attack": 0.0,
         "render_driver": 4.98,
         "loaders_and_modes": 5.95,
         "clear_mix": 1.09,
         "emit": 5.14,
-        "block_and_channel_boundary": 10.35,
-        "render_block": 0.36,
-        "apply_events": 0.77
+        "block_and_channel_boundary": 9.81,
+        "render_block": 0.41,
+        "apply_events": 0.76
       },
       "budget_cycles_per_frame": 326.27,
-      "budget_use_percent": 61.9
+      "budget_use_percent": 54.0
     }
   ],
   "budget_basis": {

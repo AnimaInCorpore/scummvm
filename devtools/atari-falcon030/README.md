@@ -206,8 +206,8 @@ cycles per frame for Atlantis's own nine-channel arrangement, 209% of the
 49.17 kHz, next to the chip's own rate (at 32.78 kHz its aliasing was audible
 as blurred instruments), in 64-frame blocks with block-rate envelopes and
 LFO, is scored against the exact kernel by a perceptual gate (sustained tones
-within a dB and a cent), costs 62% of the budget on the Atlantis stream and
-80% with nine feedback FM channels held, word exact against its host
+within a dB and a cent), costs 54% of the budget on the Atlantis stream and
+71% with nine feedback FM channels held, word exact against its host
 reference on the emulated DSP, and streams through the SSI with no late
 period even under that worst case. The Falcon
 build embeds it: `opl_driver=atari_dsp` synthesizes the AdLib score on the

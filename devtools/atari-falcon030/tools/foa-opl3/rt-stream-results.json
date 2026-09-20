@@ -2,10 +2,10 @@
   "date": "2026-09-18",
   "gate": "practical OPL kernel stream mode on the emulated Falcon: transport, timing, exactness",
   "source_sha256": {
-    "dsp/oplrt.asm": "7efd423d64855c165e983db215bfd4cae4ecaef887777ba120cbf69ea664b2f0",
+    "dsp/oplrt.asm": "13d67edc03fdd0836a74883ebfe88ba87b7c94cdc9d96cae28501b45da09982c",
     "m68k/oplplay.s": "c411e279a1ec485b3a8f47b4cf5d57d9f2ea5f0284da24eec846816e1345acd4",
-    "rt-fixture.cpp": "14abb12bfc066bd9a1ed484ab59c3f3fbd28b2af377bd3945c4729486491041c",
-    "opl-practical.h": "f013c490d722b8ae6f1f8b0d1b3e2ade16457117fce12c49cdcbd5202fd7a036"
+    "rt-fixture.cpp": "1a4cd0a9af68af2848ae9c5cbc9d4fbdd9b9d67951a438e3b8b500e4348b7bf0",
+    "opl-practical.h": "4fdc84b42cce266400cc37e765137f54ebee83c2e44063d533859c7f97ff0257"
   },
   "scenario": "trace",
   "trace_sha256": "883bae533b8338fb9ca9714216412705853f52248b75ff970f8f4ddc666a893f",

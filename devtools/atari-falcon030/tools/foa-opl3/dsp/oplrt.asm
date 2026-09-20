@@ -127,23 +127,23 @@ block_index:    ds      1
 tremolo_phase:  ds      1
 vibrato_phase:  ds      1
 tremolo_value:  ds      1
-vibrato_offset: ds      1               ; this block's vibrato delta, as an offset from STATE
-ob_flags:       ds      1
+vibrato_offset: ds      1               ; this block's vibrato delta, as an offset from WFBASE
+k_sixty:        ds      1               ; constants of the boundary pass, set at start:
 render_ch:      ds      1
 render_rt:      ds      1
 render_op:      ds      1
 render_hist:    ds      1
 render_gain:    ds      1
-ob_base:        ds      1
+k_attack_done:  ds      1               ; a short absolute load is one word, an immediate two
 
         org     x:$0010
 tremolo_shift:  ds      1               ; host: 4 (1 dB) or 2 (4.8 dB)
 fm_paused:      ds      1               ; host: freeze and silence FM, still emit PCM
 channel_count:  ds      1               ; host: 9 or 18
 master_gain:    ds      1               ; host: fraction applied to the FM mix
-ob_gain:        ds      1               ; op_boundary results
-ob_gainmod:     ds      1
-ob_gainfb:      ds      1
+k_env_silent:   ds      1
+k_env_snap:     ds      1
+k_env_out_max:  ds      1
 ob_gain_mod:    ds      1               ; the modulator's, kept across the carrier
 ob_gainmod_mod: ds      1
 ob_gainfb_mod:  ds      1
@@ -308,220 +308,143 @@ smfm_done:
         move    b10,l:(r7)
         rts
 
-; One operator: trigger, key, envelope, gains, increment. Enters with r1 at
-; the record base and leaves it at the next record; r3 walks the render
-; parameters; r5 addresses the channel's history words; r2 the channel.
+; One operator: trigger, key, envelope, gains, increment. The record is
+; walked forward with postincrements; the one indexed read is the rate of
+; the current state, and the one backward step is the envelope's store.
+;
+; Enters with r1 at the record's TRIG and leaves it at the next record's;
+; r3 walks the render parameters; r5 addresses the channel's history words.
+; block_boundary holds the pass's constants in registers: r0 = DECAY_TABLE,
+; r7 = GAIN_TABLE, n3 = RT_STRIDE, n5 = 3 (the release state),
+; y0 = $010000 (>> 7, and one sustain step), y1 = $000800 (>> 12).
+; Returns x1 = GAIN and x0 = GAINMOD; the feedback gain is the channel's to
+; derive, since only a modulator has one. The record's GAIN, GAINMOD,
+; GAINFB and INC words are not written: the render reads its parameters.
+;
+; An address register loaded by a move is not usable as a pointer by the
+; next instruction, so every load of n0, n1 and n7 below has an instruction
+; between it and its use.
 op_boundary:
-        move    r1,x:ob_base
+        move    x:(r1)+,a               ; TRIG
+        move    x:(r1)+,b               ; TRIGSEEN; -> FLAGS
+        cmp     a,b
+        jne     trigger_attack          ; rare: external, returns to ob_keyed or ob_release
+        move    x:(r1)+,n4              ; FLAGS; -> STATE
+        jset    #0,n4,ob_keyed
         ; Idle test: key up, no key-on pending, envelope silent. Such an
         ; operator's gains are zero and nothing else it would compute is
-        ; observable, so it costs a dozen instructions instead of a hundred.
-        move    #>OPR_TRIG,n1
-        nop
-        move    x:(r1+n1),a             ; TRIG
-        move    #>OPR_TRIGSEEN,n1
-        nop
-        move    x:(r1+n1),b
-        cmp     a,b
-        jne     ob_active
-        move    #>OPR_FLAGS,n1
-        nop
-        move    x:(r1+n1),a
-        jset    #0,a1,ob_active
-        move    #>OPR_ENV,n1
-        nop
-        move    x:(r1+n1),a
-        move    #>ENV_SILENT,x0
-        cmp     x0,a
-        jne     ob_active
-        clr     a
-        move    a1,x:ob_gain
-        move    a1,x:ob_gainmod
-        move    a1,x:ob_gainfb
-        move    #>RT_STRIDE,n3
-        move    #>OP_STRIDE,n1
-        move    (r3)+n3                 ; its render parameters stay stale
-        move    (r1)+n1
-        rts
-ob_active:
-        move    (r1)+                   ; -> TRIG
-        move    x:(r1)+,a               ; TRIG; -> TRIGSEEN
-        move    x:(r1),b
-        cmp     a,b
-        jeq     ob_no_trigger
-        move    a1,x:(r1)               ; TRIGSEEN = TRIG
-        move    x:ob_base,r0
-        clr     a
-        move    a1,x:(r5)               ; history to zero
-        move    a1,y:(r5)
-        move    a10,l:(r0)              ; phase to zero
-        move    #>OPR_STATE,n0
-        nop
-        move    a1,x:(r0+n0)            ; state = attack
-        jsr     trigger_attack         ; maximum rate is instant only at key-on
-ob_no_trigger:
-        move    (r1)+                   ; -> FLAGS
-        move    x:(r1)+,x0              ; FLAGS; -> STATE
-        move    x0,x:ob_flags
-        move    x:(r1),a                ; STATE
-        jset    #0,x0,ob_keyed
-        move    #>3,b
-        cmp     b,a
-        jeq     ob_keyed
-        move    b1,x:(r1)               ; released
-        move    b1,a
+        ; observable, so it costs a dozen instructions.
+        move    (r1)+                   ; -> ENV
+        move    x:(r1)-,b               ; ENV; -> STATE
+        move    x:k_env_silent,x0
+        cmp     x0,b
+        jeq     <ob_idle
+ob_release:
+        move    n5,x:(r1)               ; key up: released, whatever it was
 ob_keyed:
-        ; a1 = state; the rate for it sits at STATE + 3 + state
-        move    #>3,x1
-        add     x1,a
-        move    a1,n1
-        move    x:(r1),b                ; state again, an intervening instruction
-        move    x:(r1+n1),x0            ; rate index
-        move    #>OPR_ENV-OPR_STATE,n1
-        move    b1,a
-        move    x:(r1+n1),b             ; ENV
+        move    x:(r1)+,n1              ; STATE; -> ENV
+        move    x:(r1)+,b               ; ENV; -> SL
+        move    x:(r1)+,x1              ; SL; -> RATE_A
+        move    x:(r1+n1),n0            ; the rate of this state
+        jset    #1,n1,ob_slide          ; sustain or release
+        jset    #0,n1,ob_decay
+        ; attack
+        tst     b                       ; a zero envelope can leave attack at any rate
+        jeq     <ob_attack_done
+        move    n0,a
         tst     a
-        jeq     ob_attack
-        move    #>1,x1
-        cmp     x1,a
-        jeq     ob_decay
-        ; sustain or release: add the step, then snap
-        move    #>DECAY_TABLE,a
-        add     x0,a
-        move    a1,r0
-        nop
-        move    x:(r0),x1
-        add     x1,b
-        move    b1,a
-        jmp     ob_env_snap
-ob_attack:
-        tst     b                      ; a zero envelope can leave attack at any rate
-        jeq     ob_attack_done
-        move    x0,a
-        tst     a
-        jeq     ob_attack_hold         ; rate zero holds exactly
-        move    #>60,x1
-        cmp     x1,a
-        jge     ob_attack_hold         ; maximum rate selected mid-attack also holds
-        move    #>ATTACK_TABLE,a
-        add     x0,a
-        move    a1,r0
-        move    b1,y0                   ; env
-        move    x:(r0),x1               ; retention factor
-        mpy     x1,y0,a
-        move    #>ATTACK_DONE,x1
-        cmp     x1,a
-        jge     ob_env_store            ; still attacking
+        jeq     <ob_env_store            ; rate zero holds exactly
+        move    x:k_sixty,x0
+        cmp     x0,a
+        jge     <ob_env_store            ; maximum rate selected mid-attack also holds
+        move    #>ATTACK_TABLE,r0
+        move    b1,x1                   ; env
+        move    x:(r0+n0),x0            ; retention factor
+        mpy     x1,x0,b
+        move    #>DECAY_TABLE,r0
+        move    x:k_attack_done,x0
+        cmp     x0,b
+        jge     <ob_env_store            ; still attacking
 ob_attack_done:
-        clr     a
-        move    #>1,b
-        move    b1,x:(r1)               ; state = decay
-        jmp     ob_env_store
-ob_attack_hold:
-        move    b1,a
-        jmp     ob_env_store
+        clr     b
+        move    #>1,x0
+ob_state_store:
+        move    #>OPR_STATE-OPR_RATE_A,n1
+        nop
+        move    x0,x:(r1+n1)            ; state = decay, or sustain
+        jmp     <ob_snap                 ; (an envelope of zero passes it unchanged)
 ; The chip leaves decay when the envelope's top five bits equal the sustain
 ; level: below it the step may reach it, inside that one sustain step the
 ; envelope holds where it is, and past it (a level lowered under a running
 ; decay) the decay runs on to silence.
 ob_decay:
-        move    #>DECAY_TABLE,a
-        add     x0,a
-        move    a1,r0
-        move    #>OPR_SL-OPR_STATE,n1
-        move    x:(r0),x0               ; the step
-        move    x:(r1+n1),x1            ; SL
+        move    x:(r0+n0),x0            ; the step
         cmp     x1,b
-        jge     ob_decay_past
+        jge     <ob_decay_past
         add     x0,b
         cmp     x1,b
-        jlt     ob_decay_keep
+        jlt     <ob_snap
         move    x1,b                    ; reached: hold at SL, sustain
 ob_decay_sustain:
-        move    #>2,a
-        move    a1,x:(r1)
-ob_decay_keep:
-        move    b1,a
-        jmp     ob_env_snap
+        move    #>2,x0
+        jmp     <ob_state_store
 ob_decay_past:
-        move    #>$010000,a             ; one sustain step, 16 << 12
+        move    y0,a                    ; one sustain step, 16 << 12
         add     x1,a
         cmp     a,b
-        jlt     ob_decay_sustain
+        jlt     <ob_decay_sustain
         add     x0,b
-        move    b1,a
-ob_env_snap:
-        move    #>ENV_SNAP,x1
-        cmp     x1,a
-        jlt     ob_env_store
-        move    #>ENV_SILENT,a
-ob_env_store:
-        move    #>OPR_ENV-OPR_STATE,n1
-        nop
-        move    a1,x:(r1+n1)            ; ENV
+        jmp     <ob_snap
+ob_slide:
+        move    x:(r0+n0),x0            ; the step
+        add     x0,b
+ob_snap:
+        move    x:k_env_snap,x0
+        cmp     x0,b
+        jlt     <ob_env_store
+        move    x:k_env_silent,b
+ob_env_store:                           ; b = env; r1 -> RATE_A
+        move    (r1)-                   ; -> SL
+        move    b1,x:-(r1)              ; ENV; -> ENV
         ; envOut = (env >> 12) + TLKSL (+ tremolo), clamped to 0x1ff
-        move    a1,x1
-        move    #>$000800,y0
-        mpy     x1,y0,a
-        move    #>OPR_TLKSL-OPR_STATE,n1
-        nop
-        move    x:(r1+n1),x1
-        add     x1,a
-        jclr    #1,x:ob_flags,ob_no_tremolo
-        move    x:tremolo_value,x1
-        add     x1,a
+        move    #<OPR_TLKSL-OPR_ENV,n1
+        move    b1,x1
+        mpy     y1,x1,a   (r1)+n1       ; -> TLKSL
+        move    x:(r1)+,x0              ; TLKSL; -> INCBASE
+        add     x0,a
+        jclr    #1,n4,ob_no_tremolo
+        move    x:tremolo_value,x0
+        add     x0,a
 ob_no_tremolo:
-        move    #>$1ff,x1
-        cmp     x1,a
-        jle     ob_gain_lookup
-        move    x1,a
+        move    x:k_env_out_max,x0
+        cmp     x0,a
+        jle     <ob_gain_lookup
+        move    x0,a
 ob_gain_lookup:
-        move    #>GAIN_TABLE,x1
-        add     x1,a
-        move    a1,r0
-        move    #>OPR_GAIN-OPR_STATE,n1
-        move    x:(r0),a                ; GAIN
-        move    a1,x:ob_gain
-        move    a1,x:(r1+n1)
-        move    a1,x1
-        move    #>$010000,y0            ; >> 7
-        mpy     x1,y0,b
-        move    #>OPR_GAINMOD-OPR_STATE,n1
-        move    b1,x:ob_gainmod
-        move    b1,x:(r1+n1)
-        move    #>CHR_FBMUL,n2
-        nop
-        move    x:(r2+n2),y0
-        mpy     x1,y0,b                 ; gain * 2^(fb - 16), zero without feedback
-        move    #>OPR_GAINFB-OPR_STATE,n1
-        move    b1,x:ob_gainfb
-        move    b1,x:(r1+n1)
-        ; increment, with vibrato when enabled
-        move    #>OPR_INCBASE-OPR_STATE,n1
-        nop
-        move    x:(r1+n1),a
-        jclr    #2,x:ob_flags,ob_no_vibrato
+        move    a1,n7
+        move    x:(r1)+,a               ; INCBASE; -> the unused word
+        move    x:(r7+n7),x1            ; GAIN
+        mpy     x1,y0,b   (r1)+         ; GAINMOD = GAIN >> 7; -> WFBASE
+        jclr    #2,n4,ob_no_vibrato
         move    x:vibrato_offset,n1
         nop
-        move    x:(r1+n1),x1            ; the delta of this LFO position
-        add     x1,a                    ; a1 wraps, as the host's sum does
+        move    x:(r1+n1),x0            ; the delta of this LFO position
+        add     x0,a                    ; a1 wraps, as the host's sum does
 ob_no_vibrato:
-        move    #>OPR_INC-OPR_STATE,n1
+        move    #<OP_STRIDE+OPR_TRIG-OPR_WFBASE,n1
         move    a1,x:(r3)+              ; render parameters: INC
-        move    a1,x:(r1+n1)
-        move    x:ob_gain,x0
-        move    x0,x:(r3)+              ; GAIN
-        move    x:ob_gainmod,x0
+        move    x1,x:(r3)+              ; GAIN
+        move    b1,x0
         move    x0,x:(r3)+              ; GAINMOD
-        move    #>OPR_WFBASE-OPR_STATE,n1
-        nop
-        move    x:(r1+n1),x0
-        move    x0,x:(r3)+              ; WFBASE
-        ; next record
-        move    x:ob_base,a
-        move    #>OP_STRIDE,x0
-        add     x0,a
-        move    a1,r1
+        move    x:(r1)+n1,a             ; WFBASE; -> the next record's TRIG
+        move    a1,x:(r3)+
+        rts
+ob_idle:                                ; r1 -> STATE
+        move    #<OP_STRIDE+OPR_TRIG-OPR_STATE,n1
+        clr     a         (r3)+n3       ; its render parameters stay stale
+        move    a1,x1
+        move    a1,x0
+        move    (r1)+n1
         rts
 
 ; Stream emit: the mix ring plus this block's expanded PCM, doubled and
@@ -597,6 +520,16 @@ start_cleared:
         move    a1,x:master_gain
         move    #>emit_block,a
         move    a1,x:emit_routine
+        move    #>60,a
+        move    a1,x:k_sixty
+        move    #>ATTACK_DONE,a
+        move    a1,x:k_attack_done
+        move    #>ENV_SILENT,a
+        move    a1,x:k_env_silent
+        move    #>ENV_SNAP,a
+        move    a1,x:k_env_snap
+        move    #>$1ff,a
+        move    a1,x:k_env_out_max
         jsr     rewind
 
 command_loop:
@@ -770,20 +703,34 @@ host_receive:
 
 ; ------------------------------------------------------- render driver
 
-; Rare key-on work lives outside the internal render loops. r0 is the
-; operator record, a is zero, and r1 still points at TRIGSEEN.
+; Rare key-on work lives outside the internal render loops. Entered by a
+; jump from op_boundary with a = TRIG and r1 at FLAGS; returns into it past
+; the idle test, which a pending key-on fails.
 trigger_attack:
-        move    #>OPR_RATE_A,n0
+        move    (r1)-                   ; -> TRIGSEEN
+        move    a1,x:(r1)-              ; TRIGSEEN = TRIG; -> TRIG
+        clr     a         (r1)-         ; -> PHASE
+        move    a1,x:(r5)               ; history to zero
+        move    a1,y:(r5)
+        move    a10,l:(r1)              ; phase to zero
+        move    #<OPR_STATE,n1
+        move    x:k_sixty,x0
+        move    a1,x:(r1+n1)            ; state = attack
+        move    #<OPR_RATE_A,n1
         nop
-        move    x:(r0+n0),b
-        move    #>60,x0
+        move    x:(r1+n1),b
         cmp     x0,b
         jlt     ta_done
-        move    #>OPR_ENV,n0
+        move    #<OPR_ENV,n1
         nop
-        move    a1,x:(r0+n0)            ; maximum-rate key-on: no attenuation
+        move    a1,x:(r1+n1)            ; maximum-rate key-on: no attenuation
 ta_done:
-        rts
+        move    #<OPR_FLAGS,n1
+        nop
+        move    (r1)+n1                 ; -> FLAGS
+        move    x:(r1)+,n4              ; FLAGS; -> STATE
+        jset    #0,n4,ob_keyed
+        jmp     ob_release
 
 render_channels:
         move    #>CH_BASE,a
@@ -1008,16 +955,23 @@ bb_vib_wrapped:
         move    #>VIB_TABLE,x0
         add     x0,a
         move    a1,r0
-        move    #>OPR_STATE,x0
+        move    #>OPR_WFBASE,x0
         move    x:(r0),a
-        sub     x0,a                    ; op_boundary indexes from STATE
+        sub     x0,a                    ; op_boundary indexes from WFBASE
         move    a1,x:vibrato_offset
 
-        move    #>OP_BASE,r1
+        move    #>OP_BASE+OPR_TRIG,r1
         move    #>CH_BASE,r2
         move    #>RT_BASE,r3
         move    #>GAIN_RING,r4
         move    #>HIST_BASE,r5
+        ; what op_boundary keeps in registers across the pass
+        move    #>DECAY_TABLE,r0
+        move    #>GAIN_TABLE,r7
+        move    #<RT_STRIDE,n3
+        move    #<3,n5
+        move    #>$010000,y0
+        move    #>$000800,y1
         do      x:channel_count,bb_channels_done
         jsr     channel_boundary
         nop
@@ -1025,23 +979,19 @@ bb_channels_done:
         rts
 
 channel_boundary:
+        move    #<CHR_FBMUL,n2
         jsr     op_boundary             ; the modulator; r1 advances to the carrier
-        move    x:ob_gain,a
-        move    a1,x:ob_gain_mod
-        move    x:ob_gainmod,a
-        move    a1,x:ob_gainmod_mod
-        move    x:ob_gainfb,a
+        move    x1,x:ob_gain_mod
+        move    x0,x:ob_gainmod_mod
+        move    x:(r2+n2),x0
+        mpy     x1,x0,a                 ; gain * 2^(fb - 16), zero without feedback
         move    a1,x:ob_gainfb_mod
         jsr     op_boundary             ; the carrier
-        move    x:ob_gain,a
-        move    a1,x:ob_gain_car
+        move    x1,x:ob_gain_car
 
-        move    #>CHR_FBMUL,n2
-        nop
         move    x:(r2+n2),b             ; nonzero: feedback
-        move    #>CHR_CONN,n2
-        nop
-        move    x:(r2+n2),a
+        move    (r2)+
+        move    x:(r2)-,a               ; CHR_CONN
         tst     a
         jne     cb_additive
         move    x:ob_gain_car,a
