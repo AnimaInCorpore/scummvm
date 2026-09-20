@@ -170,6 +170,8 @@ void Screen::reset(int width, int height, const Graphics::Surface &boundingSurf)
 
 	cursor.reset(_offsettedSurf.get(), &boundingSurf);
 	cursor.setPosition(boundingSurf.w / 2, boundingSurf.h / 2);
+
+	steCursorRect = Common::Rect();
 }
 
 void Screen::addDirtyRect(const Graphics::Surface &srcSurface, int x, int y, int w, int h, bool directRendering) {

@@ -1289,6 +1289,29 @@ bool AtariGraphicsManager::updateScreenInternal(Screen *dstScreen, const Graphic
 	LockSuperBlitter();
 
 	if (_ste && _overlayState == kOverlayHidden && srcSurface) {
+		// The STE converts the engine's finished frame, so the mouse cursor is
+		// drawn into it around the conversion instead of being blitted into the
+		// four-plane screen. Each buffer remembers the rectangle its last
+		// conversion covered, so a cursor that moved is repainted in all of
+		// them, whichever frame each one last saw.
+		bool cursorChanged = false;
+		const Common::Rect cursorRect = cursor.steUpdate(cursorChanged);
+		const int cursorOffset = (dstSurface.w - _chunkySurfaceOffsetted.w) / 2;
+		const Common::Rect alignedCursorRect = cursorRect.isEmpty()
+			? Common::Rect()
+			: AtariSurface::alignRect(
+				cursorRect.left + cursorOffset, cursorRect.top,
+				cursorRect.right + cursorOffset, cursorRect.bottom);
+
+		if (!dstScreen->fullRedraw && (cursorChanged || alignedCursorRect != dstScreen->steCursorRect)) {
+			if (!dstScreen->steCursorRect.isEmpty())
+				dstScreen->dirtyRects.insert(dstScreen->steCursorRect);
+			if (!alignedCursorRect.isEmpty())
+				dstScreen->dirtyRects.insert(alignedCursorRect);
+		}
+
+		dstScreen->steCursorRect = alignedCursorRect;
+
 		// Keep both extents of this buffer's accumulated dirty rectangles.
 		// Collapsing them to dirty rows makes a narrow actor repaint all 320
 		// pixels of every affected line. Full redraws still convert everything.
@@ -1306,6 +1329,8 @@ bool AtariGraphicsManager::updateScreenInternal(Screen *dstScreen, const Graphic
 			atari_ste_bench_mark(3);
 		}
 #endif
+		// The cursor is part of the frame only while it is converted.
+		cursor.steDraw(_chunkySurfaceOffsetted);
 		if (dstScreen->mixSurf())
 			_steSceneRenderer->convertMix(*srcSurface, *dstScreen->offsettedSurf, *dstScreen->mixSurf(),
 				_palette.falcon, dstScreen->stePalettes(), dstScreen->stePaletteGeneration,
@@ -1314,6 +1339,7 @@ bool AtariGraphicsManager::updateScreenInternal(Screen *dstScreen, const Graphic
 			_steSceneRenderer->convert(*srcSurface, *dstScreen->offsettedSurf,
 				_palette.falcon, dstScreen->stePalettes(), dstScreen->stePaletteGeneration,
 				dstScreen->fullRedraw ? nullptr : &dirtyRects);
+		cursor.steRestore(_chunkySurfaceOffsetted);
 #ifdef ATARI_STE_GAME_ONLY
 		if (atari_ste_bench_state.enabled) {
 			atari_ste_bench_state.rendererActive = 0;

@@ -43,6 +43,7 @@ Graphics::Surface Cursor::_surfaceMask;
 
 Cursor::~Cursor() {
 	_savedBackground.free();
+	_steBackground.free();
 	// beware, called multiple times (they have to be destroyed before
 	// AtariSurfaceDeinit() is called)
 	if (_surface.getPixels())
@@ -298,6 +299,55 @@ void Cursor::draw() {
 		_srcRect);
 
 	_visibilityChanged = _positionChanged = _surfaceChanged = false;
+}
+
+Common::Rect Cursor::steUpdate(bool &changed) {
+	update();
+
+	changed = isChanged();
+	_visibilityChanged = _positionChanged = _surfaceChanged = false;
+
+	return isVisible() ? _dstRect : Common::Rect();
+}
+
+void Cursor::steDraw(Graphics::Surface &frame) {
+	_steRect = isVisible() ? _dstRect : Common::Rect();
+
+	if (_steRect.isEmpty())
+		return;
+
+	// The frame is the engine's 8-bit surface and the cursor's colours are
+	// its palette indices, so they are copied as they are; the conversion
+	// gives them the same pairs as every other pixel of that colour.
+	if (_steBackground.w != _steRect.width()
+		|| _steBackground.h != _steRect.height()
+		|| _steBackground.format != frame.format) {
+		_steBackground.create(_steRect.width(), _steRect.height(), frame.format);
+	}
+
+	_steBackground.copyRectToSurface(frame, 0, 0, _steRect);
+
+	for (int y = 0; y < _steRect.height(); ++y) {
+		const byte *src = _buf + (_srcRect.top + y) * _width + _srcRect.left;
+		byte *dst = (byte *)frame.getBasePtr(_steRect.left, _steRect.top + y);
+
+		for (int x = 0; x < _steRect.width(); ++x) {
+			if (src[x] != _keycolor)
+				dst[x] = src[x];
+		}
+	}
+}
+
+void Cursor::steRestore(Graphics::Surface &frame) {
+	if (_steRect.isEmpty())
+		return;
+
+	frame.copyRectToSurface(
+		_steBackground,
+		_steRect.left, _steRect.top,
+		Common::Rect(_steRect.width(), _steRect.height()));
+
+	_steRect = Common::Rect();
 }
 
 void Cursor::restoreBackground() {

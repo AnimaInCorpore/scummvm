@@ -89,6 +89,10 @@ struct Screen {
 	// Renderer schedule generation the packed stream in stePalettes() holds.
 	uint32 stePaletteGeneration = 0;
 
+	// Rectangle the mouse cursor covered when this buffer was last converted,
+	// in its own coordinates. A moved cursor repaints it in every buffer.
+	Common::Rect steCursorRect;
+
 	// Second field of an STE colour-mixing buffer; null without mixing.
 	AtariSurface *mixSurf() { return _mixSurf.get(); }
 
