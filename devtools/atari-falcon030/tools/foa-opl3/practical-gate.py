@@ -27,6 +27,7 @@ Pure Python, no numpy: the windows are small and the counts bounded.
 """
 import argparse
 import cmath
+from datetime import date
 import hashlib
 import json
 import math
@@ -557,7 +558,7 @@ def main():
     dirty = bool(subprocess.run(["git", "-C", str(HERE), "status", "--porcelain"],
                                 capture_output=True, text=True, check=True).stdout.strip())
     summary = {
-        "date": "2026-09-17",
+        "date": date.today().isoformat(),
         "gate": "practical block-rate OPL kernel against the exact kernel, perceptual metrics",
         "scummvm_commit": repository,
         "scummvm_worktree_dirty": dirty,

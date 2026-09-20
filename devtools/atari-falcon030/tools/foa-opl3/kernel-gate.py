@@ -7,6 +7,7 @@ runs nothing on a Falcon or a DSP.
 """
 import argparse
 import hashlib
+from datetime import date
 import json
 from pathlib import Path
 import subprocess
@@ -41,7 +42,7 @@ def main():
     dirty = bool(subprocess.run(["git", "-C", str(HERE), "status", "--porcelain"],
                                 capture_output=True, text=True, check=True).stdout.strip())
     result = {
-        "date": "2026-09-16",
+        "date": date.today().isoformat(),
         "gate": "DSP-shaped OPL kernel against Nuked-OPL3, sample for sample",
         "scummvm_commit": repository,
         "scummvm_worktree_dirty": dirty,

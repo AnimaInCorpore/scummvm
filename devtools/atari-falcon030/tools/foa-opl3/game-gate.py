@@ -23,6 +23,7 @@ runs are alike), or anything on hardware.
 """
 import argparse
 import hashlib
+from datetime import date
 import json
 import math
 import os
@@ -236,7 +237,7 @@ def main():
                  "loud_seconds": len(loud), "peak_dbfs": max(seconds) if seconds else None,
                  "first_loud_second": next((i for i, s in enumerate(seconds) if s > -50.0), None)}
     result = {
-        "date": "2026-09-17",
+        "date": date.today().isoformat(),
         "gate": f"{args.gameid} with the DSP OPL build on the emulated Falcon: transport and recorded audio",
         "binary_sha256": hashlib.sha256(args.binary.read_bytes()).hexdigest(),
         "requested_seconds": args.seconds,
