@@ -69,6 +69,7 @@ struct RegisterWrite {
 
 const uint8 kModOffset[9] = { 0x00, 0x01, 0x02, 0x08, 0x09, 0x0a, 0x10, 0x11, 0x12 };
 const uint16 kResetChip = 0xffff;   // not a register: the driver resetting the chip
+const uint16 kPauseChip = 0xfffe;   // not a register: the mixer pausing FM
 
 // Every channel in feedback FM with tremolo and vibrato, held: the most
 // expensive render path on all nine channels for the whole run.
@@ -110,6 +111,9 @@ std::vector<RegisterWrite> stressScript(double seconds) {
 // DSP's are compared word for word too. Not a cost measurement.
 std::vector<RegisterWrite> pathsScript(double seconds) {
 	std::vector<RegisterWrite> writes = stressScript(seconds);
+	// Pause and resume while all voices are live.
+	writes.push_back(RegisterWrite{seconds * 0.30, kPauseChip, 1});
+	writes.push_back(RegisterWrite{seconds * 0.40, kPauseChip, 0});
 	static const uint16 chord[9] = { 0x181, 0x1e5, 0x241, 0x2aa, 0x181, 0x1e5, 0x241, 0x2aa, 0x33d };
 	// Channel 8's carrier decays past a sustain level that is then lowered
 	// under it (the decay must run on) and channel 7's is lowered onto its
@@ -231,7 +235,10 @@ int main(int argc, char **argv) {
 		const uint32 block = (uint32)((uint64)(writes[i].seconds * OPL_PRACTICAL_CODEC_RATE) / P::kBlockFrames);
 		if (writes[i].reg == kResetChip)
 			decoder.reset(&sink, 9, block);
-		else
+		else if (writes[i].reg == kPauseChip) {
+			decoder.flush();
+			sink.write(block, P::SC_PAUSED, writes[i].value);
+		} else
 			decoder.write(block, writes[i].reg, writes[i].value);
 	}
 	decoder.flush();
@@ -290,6 +297,7 @@ int main(int argc, char **argv) {
 	uint32 peakEvents = 0;
 	// Blocks in which some audible operator took a rarely taken path.
 	uint32 decayPastBlocks = 0, decayHeldBlocks = 0, negativeIncrementBlocks = 0, vibratoBlocks = 0;
+	uint32 pausedBlocks = 0;
 	int32 frames[P::kBlockFrames];
 	for (uint32 chunk = 0; chunk < chunks; ++chunk) {
 		const uint32 first = chunk * chunkBlocks;
@@ -338,6 +346,7 @@ int main(int argc, char **argv) {
 			decayHeldBlocks += held;
 			negativeIncrementBlocks += negative;
 			vibratoBlocks += vibrato;
+			pausedBlocks += chip.paused != 0;
 			for (int i = 0; i < P::kBlockFrames; ++i)
 				expect.word((uint32)frames[i] & 0xffffff);
 		}
@@ -389,9 +398,11 @@ int main(int argc, char **argv) {
 	            " \"chunk_blocks\": %u, \"register_writes\": %zu, \"parameter_events\": %zu,"
 	            " \"peak_events_per_chunk\": %u, \"periods\": %u, \"period_checksum\": %u,"
 	            " \"blocks_decaying_past_sustain_level\": %u, \"blocks_entering_sustain_above_level\": %u,"
-	            " \"blocks_with_negative_increment\": %u, \"blocks_with_vibrato\": %u}\n",
+	            " \"blocks_with_negative_increment\": %u, \"blocks_with_vibrato\": %u,"
+	            " \"blocks_paused\": %u}\n",
 	            scenario.c_str(), seconds, totalBlocks, totalBlocks * P::kBlockFrames, chunks, chunkBlocks,
 	            writes.size(), sink.events.size(), peakEvents, play ? periods : 0, checksum,
-	            decayPastBlocks, decayHeldBlocks, negativeIncrementBlocks, vibratoBlocks);
+	            decayPastBlocks, decayHeldBlocks, negativeIncrementBlocks, vibratoBlocks,
+	            pausedBlocks);
 	return 0;
 }

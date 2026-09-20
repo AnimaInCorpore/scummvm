@@ -8,10 +8,12 @@
 //  * sustain level: changing it under a running decay never lowers the
 //    attenuation, and the envelope ends where the chip's does
 //  * reset: a reset under a held note leaves the machine as a fresh one
+//  * pause: FM state is frozen and silent, PCM still plays, resume is continuous
 //
 // usage: opl-practical-unit-test
 #include <cstdio>
 #include <cstdlib>
+#include <initializer_list>
 
 #include "opl-kernel.h"
 #include "opl-practical.h"
@@ -146,6 +148,49 @@ unsigned long checkSustainLevel(unsigned long *comparedOut) {
 	return checked;
 }
 
+void checkPause() {
+	Pair p;
+	for (int o : { 0, 3 }) {
+		p.write(0x20 + o, 0xe1);
+		p.write(0x60 + o, 0xf4);
+		p.write(0x80 + o, 0x44);
+	}
+	p.write(0x40, 0x10);
+	p.write(0xc0, 0x06);
+	p.write(0xa0, 0x41);
+	p.write(0xb0, 0x32);
+	p.renderBlocks(30);
+	P::Chip continued = p.practical;
+	P::poke(&p.practical, P::SC_PAUSED, 1);
+	int32_t pcm[P::kBlockFrames], out[P::kBlockFrames], expected[P::kBlockFrames];
+	for (int i = 0; i < P::kBlockFrames; ++i)
+		pcm[i] = (i - 32) * 128;
+	for (int b = 0; b < 100; ++b) {
+		P::renderBlock(&p.practical, pcm, out);
+		for (int i = 0; i < P::kBlockFrames; ++i)
+			if (out[i] != 2 * pcm[i])
+				fail("paused FM was not silent or changed PCM", b, i);
+	}
+	if (memcmp(p.practical.op, continued.op, sizeof(continued.op))
+	    || memcmp(p.practical.ch, continued.ch, sizeof(continued.ch))
+	    || p.practical.tremoloPhase != continued.tremoloPhase
+	    || p.practical.vibratoPhase != continued.vibratoPhase)
+		fail("pause advanced FM state");
+	P::poke(&p.practical, P::SC_PAUSED, 0);
+	bool audible = false;
+	for (int b = 0; b < 20; ++b) {
+		P::renderBlock(&p.practical, nullptr, out);
+		P::renderBlock(&continued, nullptr, expected);
+		for (int i = 0; i < P::kBlockFrames; ++i) {
+			audible |= expected[i] != 0;
+			if (out[i] != expected[i])
+				fail("resuming changed the FM output", b, i);
+		}
+	}
+	if (!audible)
+		fail("pause test did not resume an audible voice");
+}
+
 void checkReset() {
 	Pair p;
 	p.write(0x01, 0x20);
@@ -205,15 +250,21 @@ void checkReset() {
 		r.write(0x80, 0x24); r.write(0x83, 0x24);
 		r.write(0xc0, 0x06);
 		r.write(0xa0, 0x41); r.write(0xb0, 0x32);
+		r.decoder.flush();
 	}
 	// the LFO phases differ between the two machines; this patch uses neither
+	bool audible = false;
 	for (int b = 0; b < 50; ++b) {
 		P::renderBlock(&p.practical, nullptr, outs[0]);
 		P::renderBlock(&q.practical, nullptr, outs[1]);
-		for (int i = 0; i < P::kBlockFrames; ++i)
+		for (int i = 0; i < P::kBlockFrames; ++i) {
+			audible |= outs[1][i] != 0;
 			if (outs[0][i] != outs[1][i])
 				fail("a song after a reset differs from the same song on a fresh machine", b, i);
+		}
 	}
+	if (!audible)
+		fail("reset test did not start an audible new song");
 }
 
 } // namespace
@@ -222,6 +273,7 @@ int main() {
 	const unsigned long pitches = checkPitch();
 	unsigned long settled = 0;
 	const unsigned long levels = checkSustainLevel(&settled);
+	checkPause();
 	checkReset();
 	std::printf("{\"increments_checked\": %lu, \"sustain_level_cases\": %lu,"
 	            " \"sustain_level_cases_settled_alike\": %lu, \"failures\": %u}\n",

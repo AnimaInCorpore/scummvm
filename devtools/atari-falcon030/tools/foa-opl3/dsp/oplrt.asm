@@ -138,7 +138,7 @@ ob_base:        ds      1
 
         org     x:$0010
 tremolo_shift:  ds      1               ; host: 4 (1 dB) or 2 (4.8 dB)
-unused_11:      ds      1               ; the vibrato depth is the decoder's business
+fm_paused:      ds      1               ; host: freeze and silence FM, still emit PCM
 channel_count:  ds      1               ; host: 9 or 18
 master_gain:    ds      1               ; host: fraction applied to the FM mix
 ob_gain:        ds      1               ; op_boundary results
@@ -1086,9 +1086,11 @@ cb_store:
 
 render_block:
         jsr     apply_events
+        jset    #0,x:fm_paused,rb_paused
         jsr     block_boundary
         jsr     clear_mix
         jsr     render_channels
+rb_emit:
         move    x:emit_routine,r0
         nop
         jsr     (r0)
@@ -1097,6 +1099,9 @@ render_block:
         add     x0,a
         move    a1,x:block_index
         rts
+rb_paused:
+        jsr     clear_mix              ; no FM or synth-state advance, but PCM still plays
+        jmp     rb_emit
 
 ; Apply every pending event due at this block. The table is sorted by
 ; block; each event is (block << 16 | X address) followed by the value.

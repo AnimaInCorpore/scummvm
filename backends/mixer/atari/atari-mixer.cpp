@@ -49,6 +49,31 @@
 #include "devtools/atari-falcon030/tools/foa-opl3/opl-practical.h"
 
 extern AtariDspAudio *g_atariDspAudio;
+
+namespace {
+
+// The FM synth has no mixer stream, so it must share pauseAll explicitly.
+// Keep the nested pause count and the PCM channel pauses in one critical
+// section, outside which the interrupt may produce a period.
+class AtariDspMixer final : public Audio::MixerImpl {
+public:
+	AtariDspMixer(uint rate, uint samples, volatile uint &pauseLevel)
+		: Audio::MixerImpl(rate, false, samples, 4, false), _pauseLevel(pauseLevel) {}
+
+	void pauseAll(bool paused) override {
+		AtariCriticalSection critical;
+		if (paused)
+			++_pauseLevel;
+		else if (_pauseLevel)
+			--_pauseLevel;
+		Audio::MixerImpl::pauseAll(paused);
+	}
+
+private:
+	volatile uint &_pauseLevel;
+};
+
+} // End of anonymous namespace
 #endif
 
 #ifdef ATARI_STE_GAME_ONLY
@@ -308,7 +333,7 @@ bool AtariMixerManager::initDsp() {
 	_dspPcmHead = _dspPcmTail = 0;
 	debug("AtariMixerManager: DSP audio at %d Hz mono, %d-frame periods at %d Hz",
 	      _outputRate, AtariDspAudio::kPeriodFrames, AtariDspAudio::kCodecRateHz);
-	_mixer = new Audio::MixerImpl(_outputRate, false, _samples, 4, false);
+	_mixer = new AtariDspMixer(_outputRate, _samples, _dspPauseLevel);
 	_mixer->setReady(true);
 	// Fills the ring, then the interrupt takes over the periods.
 	resumeAudio();
@@ -370,6 +395,11 @@ bool AtariMixerManager::produceDspPeriod(void *context, bool runCallbacks) {
 	AtariDspAudio::Period *period = self->_dsp->beginPeriod(!runCallbacks);
 	if (!period)
 		return false;
+	// Every period carries its pause state, including extensions submitted
+	// while the main loop is inside pauseAll's critical section. Freezing FM
+	// must leave the transport and PCM delivery running.
+	const bool paused = self->_dspPauseLevel != 0;
+	self->_dsp->addEvent(period, 0, OplPractical::SC_PAUSED, paused);
 	// The FM mix gets what the mixer gives a software OPL's stream, which
 	// plays on the plain sound type: the engine has already put the music
 	// slider into the operator levels it writes (iMUSE's setMusicVolume), so
@@ -387,7 +417,7 @@ bool AtariMixerManager::produceDspPeriod(void *context, bool runCallbacks) {
 	}
 	if (runCallbacks) {
 		AtariDspOPL::flushPending(self->_dsp, period);
-		if (AtariDspOPL::instance())
+		if (!paused && AtariDspOPL::instance())
 			AtariDspOPL::instance()->producePeriod(period);
 	}
 	// Claiming a chunk and queueing the period that carries it are one step,

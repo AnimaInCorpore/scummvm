@@ -42,7 +42,7 @@ PROFILE_RE = re.compile(r"^p:([0-9a-f]+).*?\s[0-9]+[.,][0-9]+% \((\d+), (\d+), (
 
 # Rarely taken paths the paths case must reach, as block counts from the fixture.
 PATHS = ("blocks_decaying_past_sustain_level", "blocks_entering_sustain_above_level",
-         "blocks_with_negative_increment", "blocks_with_vibrato")
+         "blocks_with_negative_increment", "blocks_with_vibrato", "blocks_paused")
 
 # Code ranges that are the kernel's own per-block work, by listing symbol.
 RANGES = {

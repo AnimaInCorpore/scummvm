@@ -37,7 +37,7 @@ namespace Audio { struct Mixer {
  bool isSoundTypeMuted(int) { return false; }
  int getVolumeForSoundType(int) { return 256; }
 }; }
-namespace OplPractical { enum { SC_MASTER_GAIN = 0x13 }; }
+namespace OplPractical { enum { SC_PAUSED = 0x11, SC_MASTER_GAIN = 0x13 }; }
 int g_mask, g_nested, g_point, g_target;
 struct AtariInterruptsOff { AtariInterruptsOff() { ++g_mask; } ~AtariInterruptsOff() { --g_mask; } };
 struct AtariDspAudio {
@@ -60,6 +60,7 @@ struct AtariMixerManager {
  AtariDspAudio audio; Audio::Mixer mixer;
  AtariDspAudio *_dsp = &audio; Audio::Mixer *_mixer = &mixer;
  bool _audioSuspended = false; int _dspFmVolume = 256;
+ volatile unsigned _dspPauseLevel = 0;
  int16 _dspPcmRing[kDspPcmChunks * AtariDspAudio::kPcmPerPeriod] = {};
  volatile int _dspPcmHead = 0, _dspPcmTail = 0;
  volatile bool _dspPcmTaking = false;

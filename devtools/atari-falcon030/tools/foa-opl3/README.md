@@ -348,6 +348,11 @@ settle where the chip's does; a reset under nine held voices leaves the
 machine word for word a fresh one, silent from its first block, and a song
 started on it renders as on a fresh pair.
 
+The unit test also checks that pausing freezes the operators, feedback and
+LFOs, emits PCM alone, and resumes the same FM samples as an uninterrupted
+reference. The DSP paths benchmark exercises pause/resume against this host
+reference.
+
 [practical-gate.py](practical-gate.py) scores it against the exact kernel
 on synthetic scenarios and the captured 60-second Atlantis stream, at each
 signal's own rate, on what a listener would notice. Every note of a
@@ -536,6 +541,12 @@ The ScummVM build wires it in without touching the AdLib driver:
   type's volume on top, as first committed, applied it twice, 6 dB too
   quiet at half volume. A loop stall longer than the ring silences speech
   and effects until the loop runs again; the music does not notice.
+  Nested `pauseAll` calls also freeze the OPL callbacks and send the FM
+  pause state in every period, including extension periods. The DSP keeps
+  streaming PCM while its FM envelopes, phases and LFOs hold. This prevents
+  timed AdLib voices and effects from expiring while the game is paused;
+  [pause-gate.py](pause-gate.py) exercises the production mixer and producer
+  bodies, including nested pauses and a negative control that ignores pause.
   `atari_dsp_audio=false` restores DMA playback.
 
 [game-gate.py](game-gate.py) runs Atlantis on the emulated Falcon with that
@@ -685,6 +696,7 @@ python3 devtools/atari-falcon030/tools/foa-opl3/rt-bench-gate.py \
   --trace <opl-writes.ev> --seconds 4 --output build-falcon030/opl3-rt-bench
 python3 devtools/atari-falcon030/tools/foa-opl3/rt-stream-gate.py \
   --trace <opl-writes.ev> --seconds 20 --output build-falcon030/opl3-rt-stream
+python3 devtools/atari-falcon030/tools/foa-opl3/pause-gate.py
 ```
 
 `build-dsp.sh` also regenerates `backends/platform/atari/dsp-opl-image.h`,

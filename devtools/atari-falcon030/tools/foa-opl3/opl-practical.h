@@ -98,7 +98,7 @@ static const int32_t kVibratoOffset[8] = {
 enum { CH_MODE = 0, CH_CONN = 1, CH_FBMUL = 2 };   // FBMUL = 2^(7 + fb), 0 for no feedback
 
 // Scalars in internal X the host writes.
-enum { SC_TREMOLO_SHIFT = 0x0010, SC_CHANNELS = 0x0012, SC_MASTER_GAIN = 0x0013 };   // 0x0011 is unused
+enum { SC_TREMOLO_SHIFT = 0x0010, SC_PAUSED = 0x0011, SC_CHANNELS = 0x0012, SC_MASTER_GAIN = 0x0013 };
 
 enum EnvelopeState { kAttack = 0, kDecay = 1, kSustain = 2, kRelease = 3 };
 
@@ -183,6 +183,7 @@ struct Chip {
 	int32_t vibratoPos;
 	int32_t tremoloShift, channels;
 	int32_t masterGain;   // fraction applied to the FM mix before the PCM
+	int32_t paused;       // transport-owned: freeze and silence FM, still mix PCM
 	uint32_t block;
 };
 
@@ -217,6 +218,7 @@ static inline void poke(Chip *chip, uint16_t address, int32_t value) {
 	case SC_TREMOLO_SHIFT: chip->tremoloShift = value; return;
 	case SC_CHANNELS: chip->channels = value; return;
 	case SC_MASTER_GAIN: chip->masterGain = value; return;
+	case SC_PAUSED: chip->paused = value; return;
 	default: return;
 	}
 }
@@ -399,9 +401,10 @@ static void serialAccumulate(Chip *chip, Op &op) {
 // short of 1.0, passes the mix through unchanged), plus the host PCM word,
 // doubled and saturated. The 16-bit sample is the word's top sixteen bits.
 static inline void renderBlock(Chip *chip, const int32_t *pcm, int32_t *out) {
-	blockBoundary(chip);
+	if (!chip->paused)
+		blockBoundary(chip);
 	memset(chip->mixRing, 0, sizeof(chip->mixRing));
-	for (int c = 0; c < chip->channels; ++c) {
+	for (int c = 0; !chip->paused && c < chip->channels; ++c) {
 		Channel &ch = chip->ch[c];
 		Op &mod = chip->op[slotOfChannel(c, 0)];
 		Op &car = chip->op[slotOfChannel(c, 1)];
