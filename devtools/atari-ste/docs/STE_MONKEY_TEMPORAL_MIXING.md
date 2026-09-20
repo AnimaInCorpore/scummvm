@@ -50,12 +50,22 @@ or `static`. Two-palette tables always alternate; any other pattern set for them
 logs a warning. An empty `ste_mix_lut`, or a table that cannot be loaded, keeps
 the per-line raster.
 
-Changed files in `scummvm-ste-scene/backends`: `graphics/atari/atari-ste-scene.*`
+A table holds one room's colours, so `R<room>.BIN` next to the default table is
+installed while that room is on screen (`R064.BIN` for room 64). Rooms without
+one use the default table.
+`devtools/atari-ste/tools/scumm-ste-room-tables.mjs` builds a game's set from
+the game files.
+
+The room comes from `ScummEngine::startScene` through
+`atari_ste_scene_room()`; everything else is in the backend. Changed files in
+`scummvm-ste-scene/backends`: `graphics/atari/atari-ste-scene.*`
 (table loading, fallback and two-field conversion), `atari-ste-raster.*` (field
 alternation in the VBL hook and the Timer B verb-bar switch), `atari-screen.*`
-(the second field), `atari-graphics.cpp` (configuration, presentation, capture
-pointers) and `platform/atari/ste-benchmark.h` (`atari_ste_last_source` and
-`atari_ste_last_palette` for debugger captures).
+(the second field and the cursor rectangle per buffer), `atari-cursor.*` (the
+cursor in the engine's frame), `atari-graphics.cpp` (configuration,
+presentation, cursor, capture pointers) and `platform/atari/ste-benchmark.h`
+(`atari_ste_last_source` and `atari_ste_last_palette` for debugger captures).
+Frames captured from a running port therefore carry the cursor where it stood.
 
 MiNTLib declares `_RGB` components as signed `char`. Palette bytes of 128 or
 more must be cast before comparing them; this bug once sent every bright colour
@@ -76,7 +86,11 @@ The capture tool breaks at the renderer marker after each requested VBL and save
 the engine's finished 320×200 frame and live palette. The benchmark hooks behind
 that marker only run in room 28; for other rooms and games (`--game`,
 `--boot-param`, `--room`) it breaks at the entry of
-`AtariSteSceneRenderer::convert` and records the rooms entered. The evaluator writes
+`AtariSteSceneRenderer::convert` and records the rooms entered and the costumes
+drawn in each. `scumm-scene-colours.mjs` turns those costumes, the room's own
+ones, its background and its objects into the colour list `--union` fits the
+palettes to; `scumm-mix-table-check.mjs` scores a finished table against it.
+The evaluator writes
 `lut-pair16-dl*.bin` and `lut-dual16-dl*.bin`; copy them to `C:\SCUMMVM\MIX`
 under 8.3 names (`PAIR20.BIN`, `DUAL20.BIN`). Table layout: palette words, slot
 pairs per region, then the 768-byte VGA palette they were computed for; see
@@ -105,17 +119,56 @@ colours come from the table, both displayed fields match it pixel for pixel
 (92,160 room and 35,840 verb-bar pixels), and the verb-bar palette switches
 exactly at line 144.
 
+## Fate of Atlantis, room 64
+
+The same pipeline built a table for the Algiers bazaar (room 64), the first
+room the game plays after the logo, from eight frames captured with
+`--game atlantis --boot-param 9554 --room 64`. Room lines hold 174 VGA colours
+and the verb bar 17. Split table, same optimiser defaults, fitted to the frames
+only (`--union` changes this; see below and
+[the Atlantis notes](STE_ATLANTIS_DUAL20.md#what-the-palettes-are-fitted-to)):
+
+| Strategy | Pixel | Blurred | Area flicker mean / p95 | Colours kept |
+|---|---:|---:|---:|---:|
+| Per-line 16 colours | 10.09 | 4.89 | 0 | — |
+| Full Spectrum 512 | 7.13 | 3.37 | 0 | — |
+| One palette, checkerboard, ΔL ≤ 0.20 | 4.82 | 2.91 | 0.011 / 0.048 | 83 |
+| **Two palettes, alternating, ΔL ≤ 0.20** | **2.22** | **1.19** | **0.058 / 0.136** | **112** |
+| Two palettes, alternating, ΔL ≤ 0.25 | 1.97 | 1.06 | 0.069 / 0.173 | 121 |
+| Any two RGB12 colours (no palette) | 0.76 | 0.48 | 0.048 / 0.094 | 188 |
+
+`lut-dual16-dl0.20.bin` installed as `MIX\DUAL20.BIN` is what the port loads
+without configuration. The installed table is the `--union` one: fitting the
+palettes to the frames alone serves what those frames happened to show, so
+`scumm-scene-colours.mjs` lists every colour the room's background, objects and
+costumes can produce, and the evaluator gives each of them a floor weight. Over
+all 196 indices room 64 can show, that moves the mean squared Oklab error from
+25.26 to 12.41 and the colours visibly off from 20 to 8; of the 31 indices only
+a costume uses, from 73.67 to 20.60 and from 7 to 3. The price is the error of
+the captured frames themselves, 2.54 to 3.37. **Verified in Hatari** on a 4 MiB STE with TOS 2.06: in
+room 64 all 256 colours come from the table, the average of two consecutive
+fields shows the room's VGA colours, the cursor follows the mouse and clicking a
+verb changes the sentence line. The room runs at about 1.7 complete frames per
+second (30 VBLs per conversion, `debuglevel=0`), so the game answers but is far
+from the 10 fps goal.
+
 ## Known limits
 
 - Flicker visibility and the Timer B switch are unverified on real hardware;
   `devtools/atari-ste/monkey-bar/hardware-test` holds a test kit and checklist.
-- Tables exist only for room 28. Other rooms fall back to nearest pairs from its
-  palette.
-- The mouse cursor is not drawn on the STE yet. It will need colours that exist
-  in both the room and the verb-bar palettes.
+- Fate of Atlantis has a table per room; Monkey Island has one for room 28.
+  A room without its own table falls back to nearest pairs from the default
+  table's palettes, which loses far more than the room's own table would.
+- The mouse cursor is drawn into the engine's frame before it is converted
+  (`Cursor::steDraw`), so it needs no colours of its own but is mixed like
+  every other pixel: SCUMM V5 draws it in palette entry 15, and each field
+  shows one entry of that colour's pair, so a thin crosshair flickers where a
+  filled area would not.
 - Only 16 palette entries give about 70 allowed pairs at ΔL ≤ 0.20 for 126 room
   colours. Rare or close colours merge: Guybrush's mouth (#f07458) shares the
-  pair of his skin (#f88c7c).
+  pair of his skin (#f88c7c). `--union` with its floor weight is what keeps a
+  colour this small in the fit at all; two palettes and a floor of 64 leave
+  8 of room 64's 196 colours visibly off.
 
 ## Optimiser options kept for later
 

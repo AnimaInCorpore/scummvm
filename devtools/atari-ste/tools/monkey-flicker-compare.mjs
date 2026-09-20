@@ -11,7 +11,8 @@
 // only; not an STE timing result, and a 60 Hz monitor cannot show the blend
 // faithfully.
 //
-//   node devtools/atari-ste/tools/monkey-flicker-compare.mjs [--fixture DIR | --capture DIR] [--split LINE]
+//   node devtools/atari-ste/tools/monkey-flicker-compare.mjs [--fixture DIR | --capture DIR | --room-colours FILE] [--split LINE]
+//     [--union FILE] [--colour-floor 64]
 //     [--out DIR] [--data-dir DIR] [--dl 0.05,0.1,0.2,1] [--frames 0] [--restarts 6]
 //     [--seed 1] [--flicker-weight 0] [--sheet-dl 0.1] [--chroma-weight 1]
 //     [--error-cap DIST --cap-penalty P] [--quad-texture T,...] [--quad-radius 2]
@@ -21,6 +22,16 @@
 // 144-line fixture scene; its tables then match the port's real palette.
 // --split gives the lines from LINE on (the verb bar) their own palettes and
 // pairs, which the port installs there with one Timer B interrupt.
+// --room-colours builds a table for a room that was never captured: the
+// palette, the background and the colours come from the game files through
+// scumm-scene-colours.mjs, and the file is its own --union.
+// --union takes the colours a room can show from scumm-scene-colours.mjs: its
+// background, objects and costumes become targets of the first region's
+// palette fit even when no captured frame showed them, and every target there
+// is worth at least --colour-floor pixels per frame, so a costume colour that
+// covers few pixels cannot be optimised away. The floor trades the error of
+// what the frames happen to show against the error of what the room can show;
+// see STE_ATLANTIS_DUAL20.md for the measured curve.
 // --chroma-weight scales the Oklab a/b part of the squared error the optimiser
 // minimises; --error-cap makes every colour whose optimiser error exceeds DIST
 // pay P per squared unit above it, however few pixels it has. Reported metrics
@@ -30,9 +41,11 @@
 // other, each counter-phased as a checkerboard. Both pair mixes must lie within
 // T in Oklab, which bounds the static row texture. Its palette starts from the
 // pair palette and moves each slot within --quad-radius levels per channel.
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadMonkeyContainers, resolveRoom } from './monkey-resource.mjs';
+import { parseRoom } from './monkey-room.mjs';
 import { choosePalette, nearest } from './palette-select.mjs';
 import { convertLine, steWord } from './reference.mjs';
 import { renderCostumeFrame } from './monkey-costume.mjs';
@@ -49,12 +62,15 @@ const SCALE = 127;
 // A colour further than this (plain Oklab) from its source counts as visibly off.
 const VISIBLE = 0.06;
 const KIT_DIR = fileURLToPath(new URL('..', import.meta.url));
-const USAGE = 'Usage: node devtools/atari-ste/tools/monkey-flicker-compare.mjs [--fixture DIR | --capture DIR] [--split LINE] [--out DIR] [--data-dir DIR] [--dl 0.05,0.1,0.2,1] [--frames 0] [--restarts 6] [--seed 1] [--flicker-weight 0] [--sheet-dl 0.1] [--chroma-weight 1] [--error-cap DIST --cap-penalty P] [--quad-texture T,...] [--quad-radius 2]';
+const USAGE = 'Usage: node devtools/atari-ste/tools/monkey-flicker-compare.mjs [--fixture DIR | --capture DIR] [--split LINE] [--union FILE] [--colour-floor 64] [--out DIR] [--data-dir DIR] [--dl 0.05,0.1,0.2,1] [--frames 0] [--restarts 6] [--seed 1] [--flicker-weight 0] [--sheet-dl 0.1] [--chroma-weight 1] [--error-cap DIST --cap-penalty P] [--quad-texture T,...] [--quad-radius 2]';
 
 function parseArgs(argv) {
 	const out = {
 		fixture: `${KIT_DIR}monkey-bar/fixture`,
 		capture: null,
+		roomColours: null,
+		union: null,
+		colourFloor: 64,
 		split: null,
 		out: null,
 		dataDir: process.env.MONKEY_DATA_DIR,
@@ -75,6 +91,9 @@ function parseArgs(argv) {
 		const argument = argv[i];
 		if (argument === '--fixture') out.fixture = resolve(argv[++i]);
 		else if (argument === '--capture') out.capture = resolve(argv[++i]);
+		else if (argument === '--room-colours') out.roomColours = resolve(argv[++i]);
+		else if (argument === '--union') out.union = resolve(argv[++i]);
+		else if (argument === '--colour-floor') out.colourFloor = Number(argv[++i]);
 		else if (argument === '--split') out.split = Number(argv[++i]);
 		else if (argument === '--out') out.out = resolve(argv[++i]);
 		else if (argument === '--data-dir') out.dataDir = resolve(argv[++i]);
@@ -94,9 +113,12 @@ function parseArgs(argv) {
 			process.exit(0);
 		} else throw new Error(`Unknown argument ${argument}\n${USAGE}`);
 	}
+	// A room's colour list is both the scene and the union it is fitted to.
+	if (out.roomColours) out.union ??= out.roomColours;
 	out.out ??= out.capture ? `${out.capture}/flicker-compare` : `${KIT_DIR}monkey-bar/flicker-compare`;
 	out.dl = [...new Set(out.dl)].sort((a, b) => a - b);
 	if (out.split !== null && !Number.isInteger(out.split)) throw new Error('--split needs an integer line number');
+	if (!Number.isFinite(out.colourFloor) || out.colourFloor < 0) throw new Error('--colour-floor needs a non-negative number of pixels');
 	if (!out.dl.length || out.dl.some(v => !Number.isFinite(v) || v < 0)) throw new Error('--dl needs non-negative Oklab lightness limits');
 	if (out.frames.some(v => !Number.isInteger(v) || v < 0)) throw new Error('--frames needs non-negative integer frame numbers');
 	if (!Number.isInteger(out.restarts) || out.restarts < 0) throw new Error('--restarts needs a non-negative integer');
@@ -252,6 +274,38 @@ function loadCapture(dir) {
 	};
 }
 
+// A room from the game files, without a capture: the palette and the colours
+// it can show come from scumm-scene-colours.mjs, the evaluated frame holds the
+// room background at camera 0 and one band per verb-bar colour. The fit comes
+// from the union, which counts the whole room and its costumes; this frame is
+// what the metrics and previews are measured on, so they cover the background
+// and the verb-bar colours, not the actors.
+function loadRoomColours(file) {
+	const union = JSON.parse(readFileSync(file, 'utf8'));
+	if (union.schema !== 'scumm-ste-scene-colours/1') throw new Error(`${file} is not a scene-colour union`);
+	const palette = Buffer.from(union.palette);
+	if (palette.length !== 256 * 3) throw new Error(`${file} has no 256-entry palette`);
+	const rgbOf = i => (palette[i * 3] << 16) | (palette[i * 3 + 1] << 8) | palette[i * 3 + 2];
+	const names = readdirSync(union.dataDir).filter(name => /\.00[01]$/i.test(name)).sort();
+	const containers = loadMonkeyContainers(union.dataDir, names);
+	const { container, room } = resolveRoom(containers, union.room);
+	const parsed = parseRoom(container.bytes, room, { roomId: union.room });
+	const split = union.verbBar.split;
+	const scene = new Uint32Array(WIDTH * 200);
+	for (let y = 0; y < Math.min(split, parsed.height); y++)
+		for (let x = 0; x < Math.min(WIDTH, parsed.width); x++)
+			scene[y * WIDTH + x] = rgbOf(parsed.background.pixels[y * parsed.width + x]);
+	const bar = union.verbBar.indices;
+	for (let y = split; y < 200; y++)
+		for (let x = 0; x < WIDTH; x++)
+			scene[y * WIDTH + x] = rgbOf(bar.length ? bar[Math.floor(x * bar.length / WIDTH)] : 0);
+	return {
+		palette, rgbOf, frame: () => scene, cycle: 1, height: 200, framesLabel: 'room image',
+		description: `${WIDTH}x200 room ${union.room} of ${union.game} from the game files, `
+			+ `${bar.length} verb-bar colours in bands`,
+	};
+}
+
 // Targets carry optimiser-space Oklab (lab) and linear light (lin) per colour.
 function labTargets(colors, weights) {
 	const lab = new Float64Array(colors.length * 3), lin = new Float64Array(colors.length * 3);
@@ -265,16 +319,32 @@ function labTargets(colors, weights) {
 }
 
 // Pixel-count weights of lines top..bottom-1 over every scene frame, heaviest
-// colour first so candidate costs overtake the running best sooner.
-function buildTargets(scene, top, bottom) {
+// colour first so candidate costs overtake the running best sooner. A union
+// adds the colours the room's resources can show but these frames did not, and
+// lifts every weight of the region to the floor, so rare costume colours keep a
+// say in the palette.
+function buildTargets(scene, top, bottom, union = null) {
 	const counts = new Map();
 	for (let f = 0; f < scene.cycle; f++) {
 		const rgb = scene.frame(f);
 		for (let i = top * WIDTH; i < bottom * WIDTH; i++) counts.set(rgb[i], (counts.get(rgb[i]) || 0) + 1);
 	}
+	let added = 0;
+	if (union) {
+		// The union counts palette indices; their colours come from the live
+		// palette the frames were captured with.
+		for (let index = 0; index < 256; index++) {
+			if (!(union.weights[index] > 0)) continue;
+			const colour = scene.rgbOf(index);
+			if (!counts.has(colour)) added++;
+			counts.set(colour, Math.max(counts.get(colour) ?? 0, union.floor));
+		}
+		for (const [colour, count] of counts) counts.set(colour, Math.max(count, union.floor));
+	}
 	const colors = [...counts.keys()].sort((a, b) => counts.get(b) - counts.get(a) || a - b);
 	const targets = labTargets(colors, colors.map(c => counts.get(c)));
 	targets.total = targets.weight.reduce((sum, w) => sum + w, 0);
+	targets.fromUnion = added;
 	return targets;
 }
 
@@ -688,7 +758,8 @@ function main() {
 	mkdirSync(options.out, { recursive: true });
 	const started = performance.now();
 	const elapsed = () => `${((performance.now() - started) / 1000).toFixed(1)}s`;
-	const scene = options.capture ? loadCapture(options.capture) : loadScene(options);
+	const scene = options.roomColours ? loadRoomColours(options.roomColours)
+		: options.capture ? loadCapture(options.capture) : loadScene(options);
 	HEIGHT = scene.height;
 	PIXELS = WIDTH * HEIGHT;
 	CHROMA = Math.sqrt(options.chromaWeight);
@@ -708,9 +779,20 @@ function main() {
 	const regions = options.split === null
 		? [{ name: 'scene', top: 0, bottom: HEIGHT }]
 		: [{ name: 'room', top: 0, bottom: options.split }, { name: 'verb bar', top: options.split, bottom: HEIGHT }];
-	for (const region of regions) region.targets = buildTargets(scene, region.top, region.bottom);
+	// The union describes what the room itself can show, so it belongs to the
+	// first region; the verb bar is the engine's and stays as captured.
+	let union = null;
+	if (options.union !== null) {
+		const file = JSON.parse(readFileSync(options.union, 'utf8'));
+		if (file.schema !== 'scumm-ste-scene-colours/1') throw new Error(`${options.union} is not a scene-colour union`);
+		union = { weights: file.indices.total, floor: options.colourFloor * scene.cycle, source: file };
+	}
+	for (const region of regions)
+		region.targets = buildTargets(scene, region.top, region.bottom, region.top === 0 ? union : null);
 	const evalFrames = options.frames.map(frame => ({ frame, rgb: scene.frame(frame) }));
 	console.log(`${scene.description}: ${regions.map(r => `${r.name} lines ${r.top}..${r.bottom - 1} ${r.targets.colors.length} VGA colours`).join(', ')} over ${scene.cycle} ${scene.framesLabel}; evaluating frames ${options.frames.join(',')}`);
+	if (union)
+		console.log(`union ${options.union}: room ${union.source.room} of ${union.source.game}, costumes ${union.source.costumes.map(c => c.id).join(',') || 'none'}, ${regions[0].targets.fromUnion} colours no captured frame showed, floor ${options.colourFloor} pixels per frame`);
 
 	const rows = [], images = new Map();
 	const record = (key, strategy, info, fieldsFor) => {
@@ -887,6 +969,13 @@ function main() {
 		schema: 'spectrum512-monkey-flicker-compare/3',
 		scene: scene.description,
 		fitFrames: `${scene.cycle} ${scene.framesLabel} (pixel-count weights)`,
+		union: union ? {
+			file: options.union, game: union.source.game, room: union.source.room,
+			costumes: union.source.costumes.map(({ id, source, steps }) => ({ id, source, steps })),
+			colourFloorPixelsPerFrame: options.colourFloor,
+			coloursNoFrameShowed: regions[0].targets.fromUnion,
+			indicesOnlyACostumeUses: union.source.indices.costumeOnly,
+		} : null,
 		evalFrames: options.frames,
 		regions: regions.map(r => ({ name: r.name, lines: `${r.top}..${r.bottom - 1}`, targetColours: r.targets.colors.length })),
 		options: {
