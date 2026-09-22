@@ -2,12 +2,15 @@
 """Run the practical OPL kernel on the emulated Falcon DSP, check its frames
 against the host reference word for word, and measure its cost.
 
-Three scenarios: the captured Atlantis register stream (the real workload,
+Four scenarios: the captured Atlantis register stream (the real workload,
 with its bursts and its five-of-nine average occupancy), a stress case
-holding all nine channels in feedback FM with tremolo and vibrato, and a
-paths case that adds what music rarely does (a sustain level lowered under a
+holding all nine channels in feedback FM with tremolo and vibrato, a paths
+case that adds what music rarely does (a sustain level lowered under a
 running decay, increments past half the chip's phase range, a chip reset
-under held notes) for exactness alone: its cost means nothing.
+under held notes) for exactness alone: its cost means nothing; and a rhythm
+case, which opens on rhythm mode at its most expensive (six feedback FM
+channels, the bass drum in feedback FM, all four other drums held) and then
+walks every shape the rhythm section takes.
 
 Cost is attributed by code range from Hatari's DSP profile, so the host
 port waits between chunks (the bench reads every frame back through XBIOS)
@@ -18,6 +21,7 @@ external memory zero wait states and calls itself instruction-wise correct
 rather than cycle accurate.
 """
 import argparse
+from datetime import date
 import hashlib
 import json
 from pathlib import Path
@@ -44,6 +48,11 @@ PROFILE_RE = re.compile(r"^p:([0-9a-f]+).*?\s[0-9]+[.,][0-9]+% \((\d+), (\d+), (
 PATHS = ("blocks_decaying_past_sustain_level", "blocks_entering_sustain_above_level",
          "blocks_with_negative_increment", "blocks_with_vibrato", "blocks_paused",
          "blocks_holding_attack_zero", "blocks_holding_attack_max")
+
+# The shapes of the rhythm section the rhythm case must reach.
+RHYTHM_PATHS = ("blocks_with_drums", "blocks_with_silent_drums", "blocks_with_tom",
+                "blocks_with_bass_carrier_alone", "blocks_with_bass_feedback_fm", "blocks_with_bass_plain_fm",
+                "blocks_with_drum_vibrato", "blocks_melodic_after_rhythm")
 
 # Code ranges that are the kernel's own per-block work, by listing symbol.
 RANGES = {
@@ -142,7 +151,7 @@ def run_case(name, fixture_args, output, vbls):
         "register_writes": shape["register_writes"],
         "parameter_events": shape["parameter_events"],
         "peak_events_per_chunk": shape["peak_events_per_chunk"],
-        "paths_exercised": {key: shape[key] for key in PATHS},
+        "paths_exercised": {key: shape[key] for key in PATHS + RHYTHM_PATHS},
         "frame_words_compared": len(got),
         "mismatches_against_host_kernel": len(mismatches),
         "first_mismatch_frame": mismatches[0] if mismatches else None,
@@ -159,6 +168,10 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--trace", type=Path, required=True, help="captured opl-writes.ev to replay")
     parser.add_argument("--seconds", type=float, default=4.0)
+    parser.add_argument("--rhythm-trace", type=Path,
+                        help="a second captured stream, of a game that uses rhythm mode (Cruise for a Corpse)")
+    parser.add_argument("--rhythm-from", type=float, default=153.0,
+                        help="where its window starts, on the register image the earlier writes left")
     parser.add_argument("--stress-seconds", type=float, default=1.0)
     parser.add_argument("--vbls", type=int, default=60000)
     args = parser.parse_args()
@@ -169,9 +182,16 @@ def main():
     cases = [
         run_case("stress", ["stress", "--seconds", str(args.stress_seconds)], args.output, args.vbls),
         run_case("paths", ["paths", "--seconds", str(args.stress_seconds)], args.output, args.vbls),
+        run_case("rhythm", ["rhythm", "--seconds", str(args.stress_seconds)], args.output, args.vbls),
         run_case("atlantis", ["trace", "--trace", str(args.trace.resolve()), "--seconds", str(args.seconds)],
                  args.output, args.vbls),
     ]
+    if args.rhythm_trace:
+        cases.append(run_case("cruise", ["trace", "--trace", str(args.rhythm_trace.resolve()),
+                                         "--from", str(args.rhythm_from), "--seconds", str(args.seconds)],
+                              args.output, args.vbls))
+        if not cases[-1]["paths_exercised"]["blocks_with_drums"]:
+            raise SystemExit("the rhythm trace's window plays no drums")
     sources = ("dsp/oplrt.asm", "m68k/oplrt.s", "rt-fixture.cpp", "opl-practical.h", "rt-bench-gate.py",
                "generate-tables.py")
     repository = subprocess.run(["git", "-C", str(HERE), "rev-parse", "HEAD"],
@@ -183,12 +203,15 @@ def main():
         if line.startswith("DSP_STAGE2_PROGRAM_WORDS"):
             program_words = int(line.split()[-1])
     result = {
-        "date": "2026-09-17",
+        "date": date.today().isoformat(),
         "gate": "practical OPL kernel on the emulated Falcon DSP56001: exactness and cycle cost",
         "scummvm_commit": repository,
         "scummvm_worktree_dirty": dirty,
         "source_sha256": {name: hashlib.sha256((HERE / name).read_bytes()).hexdigest() for name in sources},
         "trace_sha256": hashlib.sha256(args.trace.read_bytes()).hexdigest(),
+        "rhythm_trace_sha256": (hashlib.sha256(args.rhythm_trace.read_bytes()).hexdigest()
+                                if args.rhythm_trace else None),
+        "rhythm_trace_from_s": args.rhythm_from if args.rhythm_trace else None,
         "dsp_program_words": program_words,
         "reference": "opl-practical.h, scored against the exact kernel by practical-gate.py",
         "cases": cases,
@@ -204,10 +227,13 @@ def main():
                         "tremolo and vibrato at block rate, the vibrato from the decoder's exact"
                         " per-position increments", "negative (aliased) phase increments",
                         "a full reset through parameter events", "feedback, FM and additive connections",
-                        "all four OPL2 waveforms", "channel skipping when silent",
+                        "all four OPL2 waveforms and the OPL2's waveform select enable",
+                        "rhythm mode: the bass drum and the tom-tom at twice the level, the hi-hat, the"
+                        " snare and the cymbal from the two oscillators' phase bits and the noise",
+                        "channel skipping when silent",
                         "parameter events applied at block boundaries"],
         "not_implemented": ["SSI output and the period-paced host transport", "PCM mixing",
-                            "four-operator mode", "rhythm mode"],
+                            "four-operator mode"],
         "not_established": [
             "No hardware run: every cycle figure is Hatari's model",
             "No audio was auditioned from the DSP; the practical kernel's quality is the host gate's",
@@ -220,6 +246,9 @@ def main():
     missed = [key for key in PATHS if not cases[1]["paths_exercised"][key]]
     if missed:
         raise SystemExit(f"the paths case no longer reaches: {', '.join(missed)}")
+    missed = [key for key in RHYTHM_PATHS if not cases[2]["paths_exercised"][key]]
+    if missed:
+        raise SystemExit(f"the rhythm case no longer reaches: {', '.join(missed)}")
 
 
 if __name__ == "__main__":

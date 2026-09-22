@@ -12,25 +12,33 @@
 ; transport adds a period-paced host protocol on top of render_block.
 ;
 ; Memory map (words)
-;   P internal $0080-$01ff  stages, render driver, per-operator boundary pass
+;   P internal $0080-$01ff  stages, rhythm stages, per-operator boundary pass
 ;   P external $2000-       start, command loop, per-block and per-channel code
 ;   X internal $0000-$003f  scalars ($10-$13 host-written)
 ;   X internal $0040-$007f  modulation ring, 64 words
 ;   X internal $0080-$0091  feedback history, newer product, 18 channels
+;   X internal $00b0-$00b7  rhythm: drum sum parts, high words (low words in Y)
+;   X internal $00c0-$00ff  rhythm: select row of each frame, 64 words
 ;   Y internal $0000-$003f  mix ring, 64 words
 ;   Y internal $0040-$0063  gain pairs of feedback modulators, [history, onward]
 ;   Y internal $0080-$0091  feedback history, older product
+;   Y internal $00a0-$00af  rhythm: this block's sixteen drum sums
+;   Y internal $00c0-$00ff  rhythm: drum table row of each frame's noise, 64 words
 ;   X external $0200-$03ff  gain table 2^(-envOut/32) / 2, 512 words
 ;   X external $0400-$087f  operator records, 32 words each, 36 operators
+;   X external $0880-$089f  rhythm: drum table offset by select row and column
+;   X external $08a0-$08ab  rhythm: the phases the drum sums are built from
 ;   X external $0900-$09ff  channel records, 8 words each
 ;   X external $0a00-$0a3f  attack factor per block, by 6-bit rate
 ;   X external $0a40-$0a7f  decay step per block, by rate
 ;   X external $0a80-$0a87  record offset of the vibrato delta, by LFO position
 ;   X external $0b00-$0b8f  per-operator render parameters, 4 words each
+;   X external $1c00-$1fff  rhythm: select row address by the hi-hat's phase
 ;   X external $2000-$2fff  bench output, 128 blocks
 ;   X external $3000-$3fff  bench events, (block << 16 | address), value
 ;   X external $2000-$3fff  stream events, same format, 4,096 of them
 ;   Y external $0400-$087f  phase fractions, the L-space partners of the records
+;   Y external $0c00-$0fff  rhythm: select column by the cymbal's phase
 ;   Y external $1000-$1fff  waveforms as linear samples * 256, 1,024 each
 ;
 ; Arithmetic conventions shared with the host reference
@@ -72,6 +80,25 @@ MOD_RING        equ     $0040           ; X internal, BLOCK_FRAMES words
 HIST_BASE       equ     $0080           ; X and Y internal
 MIX_RING        equ     $0000           ; Y internal, BLOCK_FRAMES words
 GAIN_RING       equ     $0040           ; Y internal, two words per channel
+
+; rhythm mode
+DRUM_TABLE      equ     $00a0           ; Y internal, 16 words, low four bits clear
+DRUM_PARTS      equ     $00b0           ; X and Y internal as L words: 4 pair sums, 4 snare products
+ROW_RING        equ     $00c0           ; X internal, BLOCK_FRAMES words
+NOISE_RING      equ     $00c0           ; Y internal, BLOCK_FRAMES words
+RHYTHM_PHASES   equ     $08a0           ; X external, 12 words
+ROW_TABLE       equ     $1c00           ; X external, 1,024 words
+COLUMN_TABLE    equ     $0c00           ; Y external, 1,024 words
+NOISE_TAPS      equ     $400100         ; x^23 + x^14 + 1, right-shifting Galois form
+NOISE_BITS      equ     $000009         ; the two state bits a frame's drums read
+OP_BASS_CAR     equ     13              ; record indices of the rhythm section
+OP_HIHAT        equ     14
+OP_SNARE        equ     15
+OP_TOM          equ     16
+OP_CYMBAL       equ     17
+CH_BASS         equ     6
+CH_DRUMS        equ     7
+CH_TOM          equ     8
 
 ; operator record offsets, in the order the boundary pass walks them
 OPR_PHASE       equ     0
@@ -169,6 +196,13 @@ th_a2:          ds      1               ; track_halves keeps a and x0 here
 th_a1:          ds      1
 th_a0:          ds      1
 th_x0:          ds      1
+rhythm_on:      ds      1               ; host, at $0030: channels six to eight are the rhythm section
+noise_state:    ds      1               ; the noise generator's 23 bits
+rhythm_inc_hh:  ds      1               ; this block's increments of the two oscillators
+rhythm_inc_tc:  ds      1               ; whose phase bits the drums share
+rhythm_g_hh:    ds      1               ; this block's drum gains, doubled and negated
+rhythm_g_sd:    ds      1
+rhythm_g_tc:    ds      1
 
 ; ------------------------------------------------------------ entry vectors
 
@@ -305,6 +339,112 @@ smfm_done:
         move    #>-1,m5
         move    x:save_r7,r7
         nop
+        move    b10,l:(r7)
+        rts
+
+; ------------------------------------------------------- rhythm stages
+;
+; The rhythm section sounds at twice a melodic operator's level. A gain of
+; 1.0 does not fit the word, so its operators carry the doubled gain
+; negated, which reaches -1.0, and these stages negate the product.
+
+; The tom-tom, and the bass drum's carrier alone: stage_indep_mix, negated.
+stage_indep_mix_neg:
+        move    #MIX_RING,r5
+        and     y1,b
+        move    b1,n0
+        do      #BLOCK_FRAMES,simn_done
+        mac     x1,y1,b   y:(r0+n0),x0
+        and     y1,b      y:(r5),a
+        move    b1,n0
+        mac     -x0,y0,a
+        move    a,y:(r5)+
+simn_done:
+        move    b10,l:(r7)
+        rts
+
+; The bass drum's modulated carrier: stage_serial_mix, negated.
+stage_serial_mix_neg:
+        move    #MOD_RING,r3
+        move    #MIX_RING,r5
+        nop
+        move    x:(r3)+,a
+        do      #BLOCK_FRAMES,ssmn_done
+        add     b,a
+        and     y1,a
+        move    a1,n0
+        mac     x1,y1,b
+        move    y:(r0+n0),y0
+        mpy     -x0,y0,a  y:(r5),y0
+        add     y0,a      x:(r3)+,y0
+        move    y0,a      a,y:(r5)+
+ssmn_done:
+        move    b10,l:(r7)
+        rts
+
+; The hi-hat, the snare and the cymbal play a few fixed phases, picked by
+; phase bits of the hi-hat's and the cymbal's oscillators and by the noise,
+; so a block's three drums are one table of sixteen sums (rhythm_boundary)
+; and three passes: the noise, the hi-hat's phase, and the cymbal's phase
+; with the lookup and the mix.
+;
+; The noise generator steps twice a frame; two of its bits select the drum
+; table's row, kept as that row's address. a = the state, x0 = the taps,
+; y0 = the two bits' mask, x1 = the drum table's address.
+stage_drum_noise:
+        move    #NOISE_RING,r4
+        do      #BLOCK_FRAMES,sdn_done
+        lsr     a
+        jcc     <sdn_first
+        eor     x0,a
+sdn_first:
+        lsr     a
+        jcc     <sdn_second
+        eor     x0,a
+sdn_second:
+        move    a1,b
+        and     y0,b
+        or      x1,b
+        move    b1,y:(r4)+
+sdn_done:
+        move    a1,x:noise_state
+        rts
+
+; The hi-hat's oscillator: each frame's phase becomes the address of a
+; select table row. r0 = the row table.
+stage_drum_rows:
+        move    #ROW_RING,r3
+        and     y1,b
+        move    b1,n0
+        do      #BLOCK_FRAMES,sdr_done
+        mac     x1,y1,b   x:(r0+n0),y0
+        and     y1,b
+        move    b1,n0
+        move    y0,x:(r3)+
+sdr_done:
+        move    b10,l:(r7)
+        rts
+
+; The cymbal's oscillator: each frame's phase is a column of the select
+; table, whose entry is an offset into the drum table row the noise picked.
+; r0 = the column table.
+stage_drum_mix:
+        move    #ROW_RING,r3
+        move    #NOISE_RING,r2
+        move    #MIX_RING,r1
+        and     y1,b
+        move    b1,n0
+        do      #BLOCK_FRAMES,sdm_done
+        mac     x1,y1,b   x:(r3)+,r4
+        and     y1,b      y:(r0+n0),n4
+        move    y:(r2)+,r5
+        move    x:(r4+n4),n5
+        move    y:(r1),a
+        move    y:(r5+n5),x0
+        add     x0,a
+        move    a,y:(r1)+
+        move    b1,n0
+sdm_done:
         move    b10,l:(r7)
         rts
 
@@ -530,6 +670,8 @@ start_cleared:
         move    a1,x:k_env_snap
         move    #>$1ff,a
         move    a1,x:k_env_out_max
+        move    #>1,a
+        move    a1,x:noise_state
         jsr     rewind
 
 command_loop:
@@ -874,6 +1016,62 @@ mode_mod_only_plain:
         jsr     load_mod
         jmp     stage_indep_mix
 
+; ---------------------------------------------------- rhythm mode's modes
+
+mode_bass_carrier:
+        jsr     load_carrier
+        jmp     stage_indep_mix_neg
+
+mode_bass_fm_fb:
+        jsr     load_mod_ring
+        jsr     stage_mod_fb
+        jsr     load_carrier_x0
+        jmp     stage_serial_mix_neg
+
+mode_bass_fm_plain:
+        jsr     load_mod_ring
+        jsr     stage_mod_plain
+        jsr     load_carrier_x0
+        jmp     stage_serial_mix_neg
+
+mode_tom:
+        jsr     load_mod
+        jmp     stage_indep_mix_neg
+
+; Channel seven stands for the hi-hat, the snare and the cymbal together.
+mode_drums:
+        move    x:noise_state,a
+        move    #>NOISE_TAPS,x0
+        move    #>NOISE_BITS,y0
+        move    #>DRUM_TABLE,x1
+        jsr     stage_drum_noise
+        move    #>OP_BASE+OP_HIHAT*OP_STRIDE,r7
+        move    #>ROW_TABLE,r0
+        move    x:rhythm_inc_hh,x1
+        move    l:(r7),b10
+        jsr     stage_drum_rows
+        move    #>OP_BASE+OP_CYMBAL*OP_STRIDE,r7
+        move    #>COLUMN_TABLE,r0
+        move    x:rhythm_inc_tc,x1
+        move    l:(r7),b10
+        jmp     stage_drum_mix
+
+; With all three silent the two oscillators still run, since their phase
+; bits shape whichever drum sounds next: a block's advance in one product.
+mode_drums_silent:
+        move    #>OP_BASE+OP_HIHAT*OP_STRIDE,r7
+        move    x:rhythm_inc_hh,x1
+        jsr     drums_skip_block
+        move    #>OP_BASE+OP_CYMBAL*OP_STRIDE,r7
+        move    x:rhythm_inc_tc,x1
+drums_skip_block:
+        move    #>$3ff*BLOCK_FRAMES,y0
+        move    l:(r7),b10
+        mac     x1,y0,b
+        and     y1,b
+        move    b10,l:(r7)
+        rts
+
 clear_mix:
         move    #MIX_RING,r5
         clr     a
@@ -976,6 +1174,169 @@ bb_vib_wrapped:
         jsr     channel_boundary
         nop
 bb_channels_done:
+        jset    #0,x:rhythm_on,rhythm_boundary
+        rts
+
+; ------------------------------------------------------- rhythm boundary
+;
+; Rhythm mode, after the melodic pass has run every envelope and chosen
+; every channel's melodic mode: channels six to eight get the rhythm
+; section's modes, and the hi-hat, the snare and the cymbal become this
+; block's table of drum sums.
+
+rhythm_boundary:
+        ; The bass drum keeps the melodic mode's shape with its carrier
+        ; doubled; under the additive connection it is the carrier alone.
+        move    #>CH_BASE+CH_BASS*CH_STRIDE,r2
+        move    #>RT_BASE+OP_BASS_CAR*RT_STRIDE+1,r3
+        move    x:(r2),a
+        move    #>mode_bass_fm_fb,b
+        move    #>mode_fm_fb,x0
+        cmp     x0,a
+        jeq     rb_bass_doubled
+        move    #>mode_bass_fm_plain,b
+        move    #>mode_fm_plain,x0
+        cmp     x0,a
+        jeq     rb_bass_doubled
+        move    #>mode_bass_carrier,b
+        move    #>mode_carrier_only,x0
+        cmp     x0,a
+        jeq     rb_bass_doubled
+        move    #>mode_add_fb,x0
+        cmp     x0,a
+        jeq     rb_bass_doubled
+        move    #>mode_add_plain,x0
+        cmp     x0,a
+        jeq     rb_bass_doubled
+        move    #>mode_skip,b
+        jmp     rb_bass_store
+rb_bass_doubled:
+        move    x:(r3),a
+        asl     a
+        neg     a
+        move    a1,x:(r3)
+rb_bass_store:
+        move    b1,x:(r2)
+
+        ; the tom-tom
+        move    #>OP_BASE+OP_TOM*OP_STRIDE,r1
+        move    #>RT_BASE+OP_TOM*RT_STRIDE+1,r3
+        jsr     rb_gain
+        move    #>mode_tom,b
+        tst     a
+        jne     rb_tom_store
+        move    #>mode_skip,b
+rb_tom_store:
+        move    b1,x:>CH_BASE+CH_TOM*CH_STRIDE
+
+        ; the two oscillators' increments, and the three drums' gains
+        move    #>OP_BASE+OP_HIHAT*OP_STRIDE,r1
+        move    #>RT_BASE+OP_HIHAT*RT_STRIDE+1,r3
+        jsr     rb_increment
+        move    a1,x:rhythm_inc_hh
+        jsr     rb_gain
+        move    a1,x:rhythm_g_hh
+        move    #>OP_BASE+OP_SNARE*OP_STRIDE,r1
+        move    #>RT_BASE+OP_SNARE*RT_STRIDE+1,r3
+        jsr     rb_gain
+        move    a1,x:rhythm_g_sd
+        move    #>OP_BASE+OP_CYMBAL*OP_STRIDE,r1
+        move    #>RT_BASE+OP_CYMBAL*RT_STRIDE+1,r3
+        jsr     rb_increment
+        move    a1,x:rhythm_inc_tc
+        jsr     rb_gain
+        move    a1,x:rhythm_g_tc
+        move    x:rhythm_g_hh,x0
+        or      x0,a
+        move    x:rhythm_g_sd,x0
+        or      x0,a
+        jne     rb_drums_sound
+        move    #>mode_drums_silent,b
+        move    b1,x:>CH_BASE+CH_DRUMS*CH_STRIDE
+        rts
+rb_drums_sound:
+        move    #>mode_drums,b
+        move    b1,x:>CH_BASE+CH_DRUMS*CH_STRIDE
+
+        ; The drum sums. The phase list pairs the hi-hat's and the cymbal's
+        ; phase four times, by (noise, combined bit), then holds the snare's
+        ; four by (hi-hat bit 8, noise); the table is every pair sum plus
+        ; every snare product, in that order.
+        move    #>RHYTHM_PHASES,r1
+        move    #DRUM_PARTS,r2
+        move    x:>OP_BASE+OP_HIHAT*OP_STRIDE+OPR_WFBASE,r0
+        move    x:>OP_BASE+OP_CYMBAL*OP_STRIDE+OPR_WFBASE,r4
+        move    x:rhythm_g_hh,y0
+        move    x:rhythm_g_tc,y1
+        do      #4,rb_pairs_done
+        move    x:(r1)+,n0
+        move    x:(r1)+,n4
+        move    y:(r0+n0),x0
+        mpy     -x0,y0,a
+        move    y:(r4+n4),x1
+        mac     -x1,y1,a
+        move    a10,l:(r2)+
+rb_pairs_done:
+        move    x:>OP_BASE+OP_SNARE*OP_STRIDE+OPR_WFBASE,r0
+        move    x:rhythm_g_sd,y0
+        do      #4,rb_snare_done
+        move    x:(r1)+,n0
+        nop
+        move    y:(r0+n0),x0
+        mpy     -x0,y0,a
+        move    a10,l:(r2)+
+rb_snare_done:
+        move    #DRUM_PARTS,r1
+        move    #DRUM_TABLE,r5
+        do      #4,rb_table_done
+        move    #DRUM_PARTS+4,r2
+        move    l:(r1)+,b
+        do      #4,rb_row_done
+        move    l:(r2)+,a
+        add     b,a
+        move    a,y:(r5)+
+rb_row_done:
+        nop
+rb_table_done:
+        rts
+
+; What a rhythm operator sounds at, doubled and negated, in a and in its
+; render parameters. The pass leaves an idle operator's parameters stale,
+; so silence is read off the record: key up and the envelope silent.
+; r1 = the record, r3 = its render GAIN.
+rb_gain:
+        move    #<OPR_FLAGS,n1
+        clr     a
+        jset    #0,x:(r1+n1),rbg_sounding
+        move    #<OPR_ENV,n1
+        move    x:k_env_silent,x0
+        move    x:(r1+n1),b
+        cmp     x0,b
+        jeq     rbg_store
+rbg_sounding:
+        move    x:(r3),a
+        asl     a
+        neg     a
+rbg_store:
+        move    a1,x:(r3)
+        tst     a
+        rts
+
+; An operator's increment for this block, as op_boundary derives it, which
+; an idle operator's render parameters do not hold. r1 = the record.
+rb_increment:
+        move    #<OPR_INCBASE,n1
+        move    x:vibrato_offset,b
+        move    x:(r1+n1),a
+        move    #<OPR_FLAGS,n1
+        move    #>OPR_WFBASE,x0
+        jclr    #2,x:(r1+n1),rbi_done
+        add     x0,b
+        move    b1,n1
+        nop
+        move    x:(r1+n1),x0
+        add     x0,a                    ; a1 wraps, as the host's sum does
+rbi_done:
         rts
 
 channel_boundary:

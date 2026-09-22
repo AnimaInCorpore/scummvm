@@ -8,9 +8,12 @@
 //   block count, event count, and (block << 16 | address), value pairs.
 // EXPECT.BIN holds every chunk's output words in order, 24 bits each.
 //
-// usage: opl-rt-fixture <trace|stress|paths> <opldata.bin> <expect.bin>
-//                       [--trace opl-writes.ev] [--seconds N] [--chunk-blocks N]
-//                       [--play playdata.bin]
+// usage: opl-rt-fixture <trace|stress|paths|rhythm> <opldata.bin> <expect.bin>
+//                       [--trace opl-writes.ev] [--from S] [--seconds N]
+//                       [--chunk-blocks N] [--play playdata.bin]
+//
+// --from starts the trace's window S seconds in, on the register image the
+// earlier writes left.
 //
 // With --play the events are also written as stream-mode periods of 15
 // blocks with silent PCM ('OPLP', period count, then per period: event
@@ -174,12 +177,107 @@ std::vector<RegisterWrite> pathsScript(double seconds) {
 	return writes;
 }
 
-std::vector<RegisterWrite> traceScript(const char *path, double seconds) {
+// Rhythm mode at its most expensive - six feedback FM channels beside a
+// bass drum in feedback FM and all four single-operator drums held, with
+// vibrato on the hi-hat's and the cymbal's oscillators - and then every
+// shape the rhythm section takes: each drum alone, all of them silent, the
+// bass drum in each connection, the mode left and entered under sounding
+// notes, a reset under it, and an OPL2's waveform select enable.
+std::vector<RegisterWrite> rhythmScript(double seconds) {
+	std::vector<RegisterWrite> writes;
+	const std::vector<RegisterWrite> melodic = stressScript(seconds);
+	for (size_t i = 0; i < melodic.size(); ++i) {
+		// channels zero to five of the stress case; the mid-run changes too
+		const uint16 reg = melodic[i].reg;
+		const int slotOffset = reg & 0x1f;
+		const bool rhythmSlot = reg >= 0x20 && reg < 0xa0 ? slotOffset >= 0x10 : false;
+		const bool rhythmWave = reg >= 0xe0 && slotOffset >= 0x10;
+		const bool rhythmChannel = reg >= 0xa0 && reg < 0xd0 && reg != 0xbd && (reg & 0x0f) >= 6;
+		if (!rhythmSlot && !rhythmWave && !rhythmChannel)
+			writes.push_back(melodic[i]);
+	}
+	for (uint8 ch = 6; ch < 9; ++ch)
+		for (uint8 which = 0; which < 2; ++which) {
+			const uint8 op = (uint8)(kModOffset[ch] + 3 * which);
+			writes.push_back(RegisterWrite{0.0, (uint16)(0x20 + op), (uint8)(0xe1 + ((ch + which) & 3))});
+			writes.push_back(RegisterWrite{0.0, (uint16)(0x40 + op), (uint8)((ch == 6 && !which) ? 0x12 : 2 * which)});
+			writes.push_back(RegisterWrite{0.0, (uint16)(0x60 + op), 0xf3});
+			writes.push_back(RegisterWrite{0.0, (uint16)(0x80 + op), 0x2d});
+			writes.push_back(RegisterWrite{0.0, (uint16)(0xe0 + op), (uint8)((ch + which) & 3)});
+		}
+	writes.push_back(RegisterWrite{0.0, 0xc6, 0x0a});
+	writes.push_back(RegisterWrite{0.0, 0xa6, 0x57});
+	writes.push_back(RegisterWrite{0.0, 0xb6, 0x09});
+	writes.push_back(RegisterWrite{0.0, 0xa7, 0x03});
+	writes.push_back(RegisterWrite{0.0, 0xb7, 0x0e});
+	writes.push_back(RegisterWrite{0.0, 0xa8, 0x57});
+	writes.push_back(RegisterWrite{0.0, 0xb8, 0x0d});
+	writes.push_back(RegisterWrite{0.0, 0xbd, 0xff});
+	// all released, to silence; then one at a time
+	writes.push_back(RegisterWrite{seconds * 0.30, 0xbd, 0xe0});
+	static const uint8 alone[4] = { 0x01, 0x08, 0x02, 0x04 };
+	for (int i = 0; i < 4; ++i) {
+		writes.push_back(RegisterWrite{seconds * (0.40 + 0.05 * i), 0xbd, (uint8)(0xe0 | alone[i])});
+		writes.push_back(RegisterWrite{seconds * (0.43 + 0.05 * i), 0xbd, 0xe0});
+	}
+	// the bass drum under the additive connection, then without feedback
+	writes.push_back(RegisterWrite{seconds * 0.60, 0xc6, 0x0b});
+	writes.push_back(RegisterWrite{seconds * 0.60, 0xbd, 0xf0});
+	writes.push_back(RegisterWrite{seconds * 0.63, 0xbd, 0xe0});
+	writes.push_back(RegisterWrite{seconds * 0.65, 0xc6, 0x00});
+	writes.push_back(RegisterWrite{seconds * 0.65, 0xbd, 0xf0});
+	writes.push_back(RegisterWrite{seconds * 0.68, 0xbd, 0xff});
+	// the mode left under the drums, the channels keyed as melodic voices,
+	// and the mode entered again over them
+	writes.push_back(RegisterWrite{seconds * 0.72, 0xbd, 0xdf});
+	for (uint8 ch = 6; ch < 9; ++ch)
+		writes.push_back(RegisterWrite{seconds * 0.74, (uint16)(0xb0 + ch), (uint8)(0x29 + ch)});
+	writes.push_back(RegisterWrite{seconds * 0.78, 0xbd, 0xff});
+	for (uint8 ch = 6; ch < 9; ++ch)
+		writes.push_back(RegisterWrite{seconds * 0.80, (uint16)(0xb0 + ch), (uint8)(0x09 + ch)});
+	// A reset under it all. The OPL2's waveform select enable is clear again:
+	// the waveforms written now are held and the drums play sines, until
+	// register 1 brings the selection into force.
+	double at = seconds * 0.84;
+	writes.push_back(RegisterWrite{at, kResetChip, 0});
+	for (uint8 ch = 6; ch < 9; ++ch)
+		for (uint8 which = 0; which < 2; ++which) {
+			const uint8 op = (uint8)(kModOffset[ch] + 3 * which);
+			writes.push_back(RegisterWrite{at, (uint16)(0x20 + op), 0x21});
+			writes.push_back(RegisterWrite{at, (uint16)(0x40 + op), 0x00});
+			writes.push_back(RegisterWrite{at, (uint16)(0x60 + op), 0xf2});
+			writes.push_back(RegisterWrite{at, (uint16)(0x80 + op), 0x16});
+			writes.push_back(RegisterWrite{at, (uint16)(0xe0 + op), (uint8)(1 + ((ch + which) % 3))});
+		}
+	writes.push_back(RegisterWrite{at, 0xa6, 0x57});
+	writes.push_back(RegisterWrite{at, 0xb6, 0x09});
+	writes.push_back(RegisterWrite{at, 0xa7, 0x03});
+	writes.push_back(RegisterWrite{at, 0xb7, 0x0a});
+	writes.push_back(RegisterWrite{at, 0xa8, 0x57});
+	writes.push_back(RegisterWrite{at, 0xb8, 0x09});
+	writes.push_back(RegisterWrite{at, 0xbd, 0x3f});
+	writes.push_back(RegisterWrite{seconds * 0.92, 0x01, 0x20});
+	for (size_t i = 1; i < writes.size(); ++i)
+		for (size_t j = i; j > 0 && writes[j].seconds < writes[j - 1].seconds; --j) {
+			const RegisterWrite moved = writes[j];
+			writes[j] = writes[j - 1];
+			writes[j - 1] = moved;
+		}
+	return writes;
+}
+
+std::vector<RegisterWrite> traceScript(const char *path, double seconds, double from) {
 	std::vector<RegisterWrite> writes;
 	FILE *file = std::fopen(path, "r");
 	if (!file)
 		fail("cannot open the trace");
 	char line[256];
+	// Writes before the window only leave their register image, applied once
+	// at its start: replayed in an instant they would be key-on edges.
+	int image[512];
+	for (int i = 0; i < 512; ++i)
+		image[i] = -1;
+	bool started = false;
 	while (std::fgets(line, sizeof(line), file)) {
 		if (line[0] != 'W')
 			continue;
@@ -188,9 +286,19 @@ std::vector<RegisterWrite> traceScript(const char *path, double seconds) {
 		unsigned reg, value;
 		if (std::sscanf(line, "W %llu %c %x %x", &when, &context, &reg, &value) != 4)
 			continue;
-		const double at = when / 1000000.0;
+		const double at = when / 1000000.0 - from;
 		if (at > seconds)
 			break;
+		if (at < 0.0) {
+			image[reg & 0x1ff] = (int)value;
+			continue;
+		}
+		if (!started) {
+			for (int i = 0; i < 512; ++i)
+				if (image[i] >= 0)
+					writes.push_back(RegisterWrite{0.0, (uint16)i, (uint8)image[i]});
+			started = true;
+		}
 		writes.push_back(RegisterWrite{at, (uint16)reg, (uint8)value});
 	}
 	std::fclose(file);
@@ -201,14 +309,14 @@ std::vector<RegisterWrite> traceScript(const char *path, double seconds) {
 
 int main(int argc, char **argv) {
 	if (argc < 4) {
-		std::fprintf(stderr, "usage: opl-rt-fixture <trace|stress|paths> <opldata.bin> <expect.bin>"
+		std::fprintf(stderr, "usage: opl-rt-fixture <trace|stress|paths|rhythm> <opldata.bin> <expect.bin>"
 		                     " [--trace file] [--seconds N] [--chunk-blocks N]\n");
 		return 2;
 	}
 	const std::string scenario = argv[1];
 	const char *trace = nullptr;
 	const char *play = nullptr;
-	double seconds = 4.0;
+	double seconds = 4.0, from = 0.0;
 	// The bench output area holds 4,096 frames.
 	const uint32 kMaxChunkBlocks = 4096 / P::kBlockFrames;
 	uint32 chunkBlocks = kMaxChunkBlocks;
@@ -217,6 +325,8 @@ int main(int argc, char **argv) {
 			trace = argv[++i];
 		else if (!std::strcmp(argv[i], "--seconds") && i + 1 < argc)
 			seconds = std::atof(argv[++i]);
+		else if (!std::strcmp(argv[i], "--from") && i + 1 < argc)
+			from = std::atof(argv[++i]);
 		else if (!std::strcmp(argv[i], "--chunk-blocks") && i + 1 < argc)
 			chunkBlocks = (uint32)std::atoi(argv[++i]);
 		else if (!std::strcmp(argv[i], "--play") && i + 1 < argc)
@@ -230,8 +340,10 @@ int main(int argc, char **argv) {
 		writes = stressScript(seconds);
 	else if (scenario == "paths")
 		writes = pathsScript(seconds);
+	else if (scenario == "rhythm")
+		writes = rhythmScript(seconds);
 	else if (scenario == "trace" && trace)
-		writes = traceScript(trace, seconds);
+		writes = traceScript(trace, seconds, from);
 	else
 		fail("unknown scenario, or --trace missing");
 
@@ -260,7 +372,7 @@ int main(int argc, char **argv) {
 	if (!out.file)
 		fail("cannot create the data image");
 	out.word(kMagic);
-	out.word(9);   // upload blocks
+	out.word(13);   // upload blocks
 
 	out.word(0); out.word(P::SC_TREMOLO_SHIFT); out.word(4);
 	out.word(4); out.word(0); out.word(9); out.word(0x7fffff);
@@ -297,6 +409,20 @@ int main(int argc, char **argv) {
 		for (uint16 phase = 0; phase < 1024; ++phase)
 			out.word((uint32)P::waveSample((uint8)wf, phase) & 0xffffff);
 
+	// rhythm mode's lookups
+	out.word(0); out.word(P::kRhythmHiHat); out.word(1024);
+	for (uint16 phase = 0; phase < 1024; ++phase)
+		out.word((uint32)P::rhythmHiHatRow(phase));
+	out.word(1); out.word(P::kRhythmCymbal); out.word(1024);
+	for (uint16 phase = 0; phase < 1024; ++phase)
+		out.word((uint32)P::rhythmCymbalColumn(phase));
+	out.word(0); out.word(P::kRhythmSelect); out.word(32);
+	for (int i = 0; i < 32; ++i)
+		out.word((uint32)P::rhythmSelect(i));
+	out.word(0); out.word(P::kRhythmPhases); out.word(12);
+	for (int i = 0; i < 12; ++i)
+		out.word((uint32)P::rhythmPhase(i));
+
 	// ---- chunks, and the reference output alongside
 	Writer expect;
 	expect.file = std::fopen(argv[3], "wb");
@@ -309,6 +435,10 @@ int main(int argc, char **argv) {
 	// Blocks in which some audible operator took a rarely taken path.
 	uint32 decayPastBlocks = 0, decayHeldBlocks = 0, negativeIncrementBlocks = 0, vibratoBlocks = 0;
 	uint32 pausedBlocks = 0, attackZeroBlocks = 0, attackMaxBlocks = 0;
+	// Blocks by the shape the rhythm section took, and with an OPL2 waveform held back.
+	uint32 drumBlocks = 0, drumSilentBlocks = 0, tomBlocks = 0, bassCarrierBlocks = 0, bassFeedbackBlocks = 0;
+	uint32 bassPlainBlocks = 0, drumVibratoBlocks = 0, melodicAfterRhythmBlocks = 0;
+	bool rhythmSeen = false;
 	int32 frames[P::kBlockFrames];
 	for (uint32 chunk = 0; chunk < chunks; ++chunk) {
 		const uint32 first = chunk * chunkBlocks;
@@ -357,6 +487,20 @@ int main(int argc, char **argv) {
 					negative = true;
 				if (w[P::OP_GAIN] && w[P::OP_INC] != w[P::OP_INCBASE])
 					vibrato = true;
+			}
+			if (chip.rhythm && !chip.paused) {
+				rhythmSeen = true;
+				drumBlocks += chip.ch[P::kChannelDrums].w[P::CH_MODE] == P::kModeDrums;
+				drumSilentBlocks += chip.ch[P::kChannelDrums].w[P::CH_MODE] == P::kModeDrumsSilent;
+				tomBlocks += chip.ch[P::kChannelTom].w[P::CH_MODE] == P::kModeTom;
+				bassCarrierBlocks += chip.ch[P::kChannelBass].w[P::CH_MODE] == P::kModeBassCarrier;
+				bassFeedbackBlocks += chip.ch[P::kChannelBass].w[P::CH_MODE] == P::kModeBassFmFeedback;
+				bassPlainBlocks += chip.ch[P::kChannelBass].w[P::CH_MODE] == P::kModeBassFmPlain;
+				drumVibratoBlocks += chip.ch[P::kChannelDrums].w[P::CH_MODE] == P::kModeDrums
+				                     && chip.hiHatInc != chip.op[P::kOpHiHat].w[P::OP_INCBASE];
+			} else if (!chip.paused && rhythmSeen) {
+				// the mode left under sounding notes: channel seven is melodic again
+				melodicAfterRhythmBlocks += chip.ch[P::kChannelDrums].w[P::CH_MODE] != P::kModeSkip;
 			}
 			decayPastBlocks += past;
 			decayHeldBlocks += held;
@@ -417,10 +561,16 @@ int main(int argc, char **argv) {
 	            " \"peak_events_per_chunk\": %u, \"periods\": %u, \"period_checksum\": %u,"
 	            " \"blocks_decaying_past_sustain_level\": %u, \"blocks_entering_sustain_above_level\": %u,"
 	            " \"blocks_with_negative_increment\": %u, \"blocks_with_vibrato\": %u,"
-	            " \"blocks_paused\": %u, \"blocks_holding_attack_zero\": %u, \"blocks_holding_attack_max\": %u}\n",
+	            " \"blocks_paused\": %u, \"blocks_holding_attack_zero\": %u, \"blocks_holding_attack_max\": %u,"
+	            " \"blocks_with_drums\": %u, \"blocks_with_silent_drums\": %u, \"blocks_with_tom\": %u,"
+	            " \"blocks_with_bass_carrier_alone\": %u, \"blocks_with_bass_feedback_fm\": %u,"
+	            " \"blocks_with_bass_plain_fm\": %u, \"blocks_with_drum_vibrato\": %u,"
+	            " \"blocks_melodic_after_rhythm\": %u}\n",
 	            scenario.c_str(), seconds, totalBlocks, totalBlocks * P::kBlockFrames, chunks, chunkBlocks,
 	            writes.size(), sink.events.size(), peakEvents, play ? periods : 0, checksum,
 	            decayPastBlocks, decayHeldBlocks, negativeIncrementBlocks, vibratoBlocks,
-	            pausedBlocks, attackZeroBlocks, attackMaxBlocks);
+	            pausedBlocks, attackZeroBlocks, attackMaxBlocks,
+	            drumBlocks, drumSilentBlocks, tomBlocks, bassCarrierBlocks, bassFeedbackBlocks, bassPlainBlocks,
+	            drumVibratoBlocks, melodicAfterRhythmBlocks);
 	return 0;
 }

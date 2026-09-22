@@ -143,7 +143,7 @@ int main() {
   AtariDspAudio::Period p; AtariDspOPL::flushPending(&a, &p);
   const int key = a.chip.op[1].w[P::OP_FLAGS] & 1, bad = mismatches(a, o, false);
   std::snprintf(d, sizeof d, "decoder key %d, kernel key %d, %d words out of step, resync still due %d",
-   o._decoder->channel[0].key, key, bad, (int)AtariDspOPL::s_resync);
+   o._decoder->slotKey[0], key, bad, (int)AtariDspOPL::s_resync);
   report("pending", key == 0 && bad == 0 && !AtariDspOPL::s_resync, d);
  }
  { // period: more events inside one period than it holds
@@ -154,7 +154,7 @@ int main() {
   o._period = nullptr;
   AtariDspAudio::Period next; AtariDspOPL::flushPending(&a, &next);
   const int key = a.chip.op[1].w[P::OP_FLAGS] & 1, bad = mismatches(a, o, false);
-  std::snprintf(d, sizeof d, "decoder key %d, kernel key %d, %d words out of step", o._decoder->channel[0].key, key, bad);
+  std::snprintf(d, sizeof d, "decoder key %d, kernel key %d, %d words out of step", o._decoder->slotKey[0], key, bad);
   report("period", key == 0 && bad == 0 && !AtariDspOPL::s_resync, d);
  }
  { // reset: a reset whose own events do not fit the period it is made in

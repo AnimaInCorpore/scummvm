@@ -9,6 +9,13 @@
 // arithmetic: the 1,024-step waveforms, the log-domain envelope in the same
 // 0.1875 dB units, the feedback and modulation depth, f-number pitch.
 //
+// Rhythm mode is the chip's too, block-rate like the rest: the bass drum and
+// the tom-tom are ordinary operators at twice the level, and the hi-hat, the
+// snare and the cymbal, which play a few fixed phases picked by two
+// oscillators' phase bits and the noise, are one table of sixteen sums a
+// block and one lookup a frame. The noise generator has the chip's
+// polynomial, stepped twice a frame where the chip steps it 36 times.
+//
 // Two halves share this file:
 //
 //  * Decoder: the register-level side, which runs on the 68030. It keeps the
@@ -51,6 +58,11 @@ enum {
 	kDecayTable = 0x0a40,        // X external, 64 words
 	kVibratoTable = 0x0a80,      // X external, 8 words: the record offset of each LFO position's delta
 	kRtParams = 0x0b00,          // X external, 4 words per operator: INC, GAIN, GAINMOD, WFBASE
+	kRhythmSelect = 0x0880,      // X external, 32 words: drum table offset by phase bits
+	kRhythmPhases = 0x08a0,      // X external, 12 words: the phases the three phase-bit drums play
+	kRhythmCymbal = 0x0c00,      // Y external, 1,024 words: select column by the cymbal's phase
+	kRhythmHiHat = 0x1c00,       // X external, 1,024 words: select row address by the hi-hat's phase
+	kRhythmDrumTable = 0x00a0,   // Y internal, 16 words: this block's drum sums
 	kSsiBufferA = 0x1000,        // X external, 1,024 interleaved words (production)
 	kSsiBufferB = 0x1800,
 	kWaveBase = 0x1000,          // Y external, 1,024 words per waveform
@@ -98,14 +110,31 @@ static const int32_t kVibratoOffset[8] = {
 enum { CH_MODE = 0, CH_CONN = 1, CH_FBMUL = 2 };   // FBMUL = 2^(7 + fb), 0 for no feedback
 
 // Scalars in internal X the host writes.
-enum { SC_TREMOLO_SHIFT = 0x0010, SC_PAUSED = 0x0011, SC_CHANNELS = 0x0012, SC_MASTER_GAIN = 0x0013 };
+enum {
+	SC_TREMOLO_SHIFT = 0x0010, SC_PAUSED = 0x0011, SC_CHANNELS = 0x0012, SC_MASTER_GAIN = 0x0013,
+	SC_RHYTHM = 0x0030           // nonzero: channels six to eight are the rhythm section
+};
 
 enum EnvelopeState { kAttack = 0, kDecay = 1, kSustain = 2, kRelease = 3 };
 
 enum ChannelMode {
 	kModeSkip = 0, kModeCarrierOnly = 1, kModeFmFeedback = 2, kModeFmPlain = 3,
-	kModeAddFeedback = 4, kModeAddPlain = 5, kModeModOnlyFeedback = 6, kModeModOnlyPlain = 7
+	kModeAddFeedback = 4, kModeAddPlain = 5, kModeModOnlyFeedback = 6, kModeModOnlyPlain = 7,
+	// rhythm mode: the bass drum's three shapes, the tom-tom, and channel
+	// seven standing for the hi-hat, the snare and the cymbal together
+	kModeBassCarrier = 8, kModeBassFmFeedback = 9, kModeBassFmPlain = 10, kModeTom = 11,
+	kModeDrums = 12, kModeDrumsSilent = 13
 };
+
+// The rhythm section's operators, by record index.
+enum {
+	kOpBassModulator = 12, kOpBassCarrier = 13, kOpHiHat = 14, kOpSnare = 15, kOpTom = 16, kOpCymbal = 17,
+	kChannelBass = 6, kChannelDrums = 7, kChannelTom = 8
+};
+
+// The noise generator: the chip's x^23 + x^14 + 1 as a right-shifting Galois
+// register, which one shift and a conditional exclusive-or step.
+enum { kNoiseTaps = 0x400100, kNoiseBits = 0x000009 };
 
 // ------------------------------------------------------ DSP arithmetic
 
@@ -160,6 +189,46 @@ static inline int32_t waveSample(uint8_t wf, uint16_t phase) {
 	return out * 256;
 }
 
+// ---------------------------------------------------- rhythm mode's tables
+//
+// On the chip the hi-hat, the snare and the cymbal do not play their own
+// phase. Bits 2, 3, 7 and 8 of the hi-hat's and bits 3 and 5 of the cymbal's
+// combine into one bit, and with the noise that picks each drum's phase from
+// two or four fixed ones. The host uploads the combination as lookups: the
+// hi-hat's phase gives a row of the select table, the cymbal's a column, and
+// the entry is the drum table offset of the combined bit and hi-hat bit 8.
+
+static inline int32_t rhythmHiHatRow(uint16_t phase) {
+	const int32_t code = (((phase >> 2) ^ (phase >> 7)) & 1) | (((phase >> 3) & 1) << 1) | (((phase >> 8) & 1) << 2);
+	return kRhythmSelect + 4 * code;
+}
+
+static inline int32_t rhythmCymbalColumn(uint16_t phase) {
+	return ((phase >> 3) & 1) | (((phase >> 5) & 1) << 1);
+}
+
+// Entry [4 * row code + column]: (combined << 2) | (hi-hat bit 8 << 1).
+static inline int32_t rhythmSelect(int index) {
+	const int32_t a = index >> 2 & 1, hiHat3 = index >> 3 & 1, hiHat8 = index >> 4 & 1;
+	const int32_t cymbal3 = index & 1, cymbal5 = index >> 1 & 1;
+	const int32_t combined = a | (hiHat3 ^ cymbal5) | (cymbal3 ^ cymbal5);
+	return (combined << 2) | (hiHat8 << 1);
+}
+
+// The phases, in the order the drum table is built: the hi-hat's and the
+// cymbal's in pairs by (noise << 1 | combined), then the snare's by
+// (hi-hat bit 8 << 1 | noise).
+static inline int32_t rhythmPhase(int index) {
+	if (index >= 8) {
+		const int32_t hiHat8 = (index - 8) >> 1, noise = (index - 8) & 1;
+		return (hiHat8 << 9) | ((hiHat8 ^ noise) << 8);
+	}
+	const int32_t noise = index >> 2 & 1, combined = index >> 1 & 1;
+	if (index & 1)
+		return (combined << 9) | 0x80;
+	return (combined << 9) | ((combined ^ noise) ? 0xd0 : 0x34);
+}
+
 // ------------------------------------------------------------- the machine
 
 struct Op {
@@ -184,6 +253,10 @@ struct Chip {
 	int32_t tremoloShift, channels;
 	int32_t masterGain;   // fraction applied to the FM mix before the PCM
 	int32_t paused;       // transport-owned: freeze and silence FM, still mix PCM
+	int32_t rhythm;       // host: channels six to eight are the rhythm section
+	int32_t noise;        // the noise generator's 23 bits
+	int32_t hiHatInc, cymbalInc;   // this block's increments of the two phase-bit oscillators
+	int32_t drumTable[16];         // this block's drum sums, by (noise, combined, bit 8, noise)
 	uint32_t block;
 };
 
@@ -194,6 +267,7 @@ static inline void reset(Chip *chip, int channels) {
 	chip->channels = channels;
 	chip->tremoloShift = 4;
 	chip->masterGain = 0x7fffff;
+	chip->noise = 1;
 	for (int i = 0; i < kSlots; ++i) {
 		chip->op[i].w[OP_STATE] = kRelease;
 		chip->op[i].w[OP_ENV] = 0x1ff << 12;
@@ -219,6 +293,7 @@ static inline void poke(Chip *chip, uint16_t address, int32_t value) {
 	case SC_CHANNELS: chip->channels = value; return;
 	case SC_MASTER_GAIN: chip->masterGain = value; return;
 	case SC_PAUSED: chip->paused = value; return;
+	case SC_RHYTHM: chip->rhythm = value; return;
 	default: return;
 	}
 }
@@ -303,6 +378,65 @@ static void opBoundary(Chip *chip, int channel, int which) {
 	w[OP_INC] = inc;
 }
 
+// Twice a product of a sample by a gain, as the rhythm section sounds: the
+// DSP multiplies by the negated doubled gain, which reaches -1.0 where the
+// doubled gain itself would not fit the word, and negates the product.
+static inline int64_t doubledProduct(int32_t sample, int32_t gain) {
+	return (int64_t)sample * (int64_t)gain * 4;
+}
+
+// What a rhythm operator sounds at after the pass. The pass leaves an idle
+// operator's render parameters stale, so silence is read off its record.
+static inline int32_t rhythmGain(const Op &op) {
+	if (!(op.w[OP_FLAGS] & 1) && op.w[OP_ENV] == (0x1ff << 12))
+		return 0;
+	return op.w[OP_GAIN];
+}
+
+static inline int32_t rhythmIncrement(const Chip *chip, const Op &op) {
+	int32_t inc = op.w[OP_INCBASE];
+	if (op.w[OP_FLAGS] & 4)
+		inc = wrap24(inc + op.w[kVibratoOffset[chip->vibratoPos]]);
+	return inc;
+}
+
+static inline int32_t waveSampleOf(const Op &op, int32_t phase);
+
+// Rhythm mode, after the melodic pass has run every envelope: the render
+// modes of channels six to eight are replaced, and the hi-hat, the snare and
+// the cymbal become this block's table of drum sums.
+static void rhythmBoundary(Chip *chip) {
+	Channel &bass = chip->ch[kChannelBass];
+	switch (bass.w[CH_MODE]) {
+	case kModeFmFeedback: bass.w[CH_MODE] = kModeBassFmFeedback; break;
+	case kModeFmPlain: bass.w[CH_MODE] = kModeBassFmPlain; break;
+	case kModeCarrierOnly:
+	case kModeAddFeedback:
+	case kModeAddPlain: bass.w[CH_MODE] = kModeBassCarrier; break;   // the carrier alone, whatever the connection
+	default: bass.w[CH_MODE] = kModeSkip; break;
+	}
+	chip->ch[kChannelTom].w[CH_MODE] = rhythmGain(chip->op[kOpTom]) ? kModeTom : kModeSkip;
+
+	const Op *drums[3] = { &chip->op[kOpHiHat], &chip->op[kOpCymbal], &chip->op[kOpSnare] };
+	const int32_t gains[3] = { rhythmGain(*drums[0]), rhythmGain(*drums[1]), rhythmGain(*drums[2]) };
+	chip->hiHatInc = rhythmIncrement(chip, chip->op[kOpHiHat]);
+	chip->cymbalInc = rhythmIncrement(chip, chip->op[kOpCymbal]);
+	if (!gains[0] && !gains[1] && !gains[2]) {
+		chip->ch[kChannelDrums].w[CH_MODE] = kModeDrumsSilent;
+		return;
+	}
+	chip->ch[kChannelDrums].w[CH_MODE] = kModeDrums;
+	int64_t pair[4], snare[4];
+	for (int i = 0; i < 4; ++i) {
+		pair[i] = doubledProduct(waveSampleOf(*drums[0], rhythmPhase(2 * i)), gains[0])
+		          + doubledProduct(waveSampleOf(*drums[1], rhythmPhase(2 * i + 1)), gains[1]);
+		snare[i] = doubledProduct(waveSampleOf(*drums[2], rhythmPhase(8 + i)), gains[2]);
+	}
+	for (int i = 0; i < 4; ++i)
+		for (int j = 0; j < 4; ++j)
+			chip->drumTable[4 * i + j] = clamp24((pair[i] + snare[j]) >> 24);
+}
+
 static void blockBoundary(Chip *chip) {
 	chip->tremoloPhase += OPL_PRACTICAL_TREMOLO_STEP;
 	if (chip->tremoloPhase >= (210 << 12))
@@ -336,6 +470,8 @@ static void blockBoundary(Chip *chip) {
 			ch.hist0 = ch.hist1 = 0;
 		ch.w[CH_MODE] = mode;
 	}
+	if (chip->rhythm)
+		rhythmBoundary(chip);
 }
 
 // --------------------------------------------------------- stage bodies
@@ -354,6 +490,13 @@ static inline int32_t fetch(const Op &op, int32_t index) {
 	return waveSample((uint8_t)((op.w[OP_WFBASE] - kWaveBase) / 1024), (uint16_t)(index & 0x3ff));
 }
 
+static inline int32_t waveSampleOf(const Op &op, int32_t phase) { return fetch(op, phase); }
+
+// A mix-bound product: plain, or doubled for the rhythm section.
+static inline int32_t mixProduct(int32_t sample, int32_t gain, bool doubled) {
+	return doubled ? (int32_t)(doubledProduct(sample, gain) >> 24) : mpyHi(sample, gain);
+}
+
 // An unmodulated operator writing the modulation ring.
 static void independentWrite(Chip *chip, Op &op) {
 	for (int i = 0; i < kBlockFrames; ++i) {
@@ -364,11 +507,11 @@ static void independentWrite(Chip *chip, Op &op) {
 }
 
 // An unmodulated operator accumulating into the mix ring.
-static void independentAccumulate(Chip *chip, Op &op) {
+static void independentAccumulate(Chip *chip, Op &op, bool doubled = false) {
 	for (int i = 0; i < kBlockFrames; ++i) {
 		const int32_t sample = fetch(op, phaseIndex(op));
 		advance(op);
-		chip->mixRing[i] = clamp24((int64_t)chip->mixRing[i] + mpyHi(sample, op.w[OP_GAIN]));
+		chip->mixRing[i] = clamp24((int64_t)chip->mixRing[i] + mixProduct(sample, op.w[OP_GAIN], doubled));
 	}
 }
 
@@ -390,13 +533,55 @@ static void feedbackStage(Chip *chip, Channel &ch, Op &op, bool toMix) {
 }
 
 // A carrier modulated by the ring, accumulating into the mix.
-static void serialAccumulate(Chip *chip, Op &op) {
+static void serialAccumulate(Chip *chip, Op &op, bool doubled = false) {
 	for (int i = 0; i < kBlockFrames; ++i) {
 		const int32_t index = (chip->modRing[i] + phaseIndex(op)) & 0x3ff;
 		const int32_t sample = fetch(op, index);
 		advance(op);
-		chip->mixRing[i] = clamp24((int64_t)chip->mixRing[i] + mpyHi(sample, op.w[OP_GAIN]));
+		chip->mixRing[i] = clamp24((int64_t)chip->mixRing[i] + mixProduct(sample, op.w[OP_GAIN], doubled));
 	}
+}
+
+// The hi-hat, the snare and the cymbal: three passes over the block, as the
+// DSP runs them. The noise steps twice a frame and lends two of its bits;
+// the hi-hat's phase picks a row of the select table and the cymbal's a
+// column, and the entry and the noise bits pick the frame's drum sum.
+static void drumStage(Chip *chip) {
+	int32_t noiseRing[kBlockFrames], rowRing[kBlockFrames];
+	for (int i = 0; i < kBlockFrames; ++i) {
+		for (int step = 0; step < 2; ++step) {
+			const int32_t carry = chip->noise & 1;
+			chip->noise >>= 1;
+			if (carry)
+				chip->noise ^= kNoiseTaps;
+		}
+		noiseRing[i] = chip->noise & kNoiseBits;
+	}
+	Op &hiHat = chip->op[kOpHiHat];
+	Op &cymbal = chip->op[kOpCymbal];
+	const int32_t hiHatInc = hiHat.w[OP_INC], cymbalInc = cymbal.w[OP_INC];
+	hiHat.w[OP_INC] = chip->hiHatInc;
+	cymbal.w[OP_INC] = chip->cymbalInc;
+	for (int i = 0; i < kBlockFrames; ++i) {
+		rowRing[i] = rhythmHiHatRow((uint16_t)phaseIndex(hiHat));
+		advance(hiHat);
+	}
+	for (int i = 0; i < kBlockFrames; ++i) {
+		const int32_t select = rhythmSelect(rowRing[i] - kRhythmSelect + rhythmCymbalColumn((uint16_t)phaseIndex(cymbal)));
+		advance(cymbal);
+		chip->mixRing[i] = clamp24((int64_t)chip->mixRing[i] + chip->drumTable[noiseRing[i] + select]);
+	}
+	hiHat.w[OP_INC] = hiHatInc;
+	cymbal.w[OP_INC] = cymbalInc;
+}
+
+// With all three silent the two oscillators still run, since each one's
+// phase bits shape the others: a block's advance in one step.
+static void drumStageSilent(Chip *chip) {
+	Op &hiHat = chip->op[kOpHiHat];
+	Op &cymbal = chip->op[kOpCymbal];
+	hiHat.phase = (hiHat.phase + (uint64_t)chip->hiHatInc * (2046u * kBlockFrames)) & 0x3ffffffffull;
+	cymbal.phase = (cymbal.phase + (uint64_t)chip->cymbalInc * (2046u * kBlockFrames)) & 0x3ffffffffull;
 }
 
 // ------------------------------------------------------------ one block
@@ -439,6 +624,26 @@ static inline void renderBlock(Chip *chip, const int32_t *pcm, int32_t *out) {
 		case kModeModOnlyPlain:
 			independentAccumulate(chip, mod);
 			break;
+		case kModeBassCarrier:
+			independentAccumulate(chip, car, true);
+			break;
+		case kModeBassFmFeedback:
+			feedbackStage(chip, ch, mod, false);
+			serialAccumulate(chip, car, true);
+			break;
+		case kModeBassFmPlain:
+			independentWrite(chip, mod);
+			serialAccumulate(chip, car, true);
+			break;
+		case kModeTom:
+			independentAccumulate(chip, mod, true);
+			break;
+		case kModeDrums:
+			drumStage(chip);
+			break;
+		case kModeDrumsSilent:
+			drumStageSilent(chip);
+			break;
 		default:
 			break;
 		}
@@ -473,17 +678,26 @@ struct Decoder {
 	};
 	struct ChannelRegs {
 		uint16_t fnum;
-		uint8_t block, key, feedback, connection;
-		uint32_t trigger;
+		uint8_t block, feedback, connection;
 	};
+	// An operator is keyed by its channel's key bit, by its rhythm bit, or by
+	// both; a key-on edge is the first of them to come on.
+	enum { kKeyChannel = 1, kKeyDrum = 2 };
 
 	SlotRegs slot[kSlots];
 	ChannelRegs channel[kChannels];
+	uint8_t slotKey[kSlots];
+	uint32_t slotTrigger[kSlots];
 	uint8_t nts, newm, tremoloShift, vibratoShift;
+	uint8_t rhythm;            // register 0xbd's low six bits
+	// An OPL2 plays every operator's sine until register 1 enables the
+	// waveform select registers; the OPL3 has no such bit.
+	uint8_t waveformGate, waveformEnable;
 	int channels;
 	int32_t shadowOp[kSlots][kOpStride];
 	int32_t shadowChannel[kChannels][kChannelStride];
 	int32_t shadowScalar[3];
+	int32_t shadowRhythm;
 	Sink *sink;
 	uint32_t block;
 	// Operators whose words are still to be derived, one bit per slot index.
@@ -506,6 +720,7 @@ struct Decoder {
 		block = atBlock;
 		tremoloShift = 4;
 		vibratoShift = 1;
+		waveformGate = channelCount <= 9;
 		for (int i = 0; i < kSlots; ++i) {
 			int32_t *shadow = shadowOp[i];
 			shadow[OP_STATE] = kRelease;
@@ -529,6 +744,7 @@ struct Decoder {
 		shadowScalar[SC_CHANNELS - SC_TREMOLO_SHIFT] = channelCount;
 		sink->write(block, SC_TREMOLO_SHIFT, tremoloShift);
 		sink->write(block, SC_CHANNELS, channelCount);
+		sink->write(block, SC_RHYTHM, 0);
 	}
 
 	// Every word the shadow holds goes out as the shadow holds it: the way back
@@ -566,6 +782,7 @@ struct Decoder {
 		}
 		out->write(atBlock, SC_TREMOLO_SHIFT, shadowScalar[SC_TREMOLO_SHIFT - SC_TREMOLO_SHIFT]);
 		out->write(atBlock, SC_CHANNELS, shadowScalar[SC_CHANNELS - SC_TREMOLO_SHIFT]);
+		out->write(atBlock, SC_RHYTHM, shadowRhythm);
 	}
 
 	// Chip slot index from the OPL register slot number.
@@ -592,7 +809,7 @@ struct Decoder {
 		sink->write(block, (uint16_t)(kChannelBase + index * kChannelStride + offset), value);
 	}
 	void emitScalar(int address, int32_t value) {
-		int32_t &shadow = shadowScalar[address - SC_TREMOLO_SHIFT];
+		int32_t &shadow = address == SC_RHYTHM ? shadowRhythm : shadowScalar[address - SC_TREMOLO_SHIFT];
 		if (shadow == value)
 			return;
 		shadow = value;
@@ -655,11 +872,36 @@ struct Decoder {
 
 	void updateSlot(int index) {
 		const SlotRegs &s = slot[index];
-		const int c = index / 2;
 		emitOp(index, OP_SL, ((s.sl == 15 ? 31 : s.sl) << 4) << 12);
-		emitOp(index, OP_FLAGS, (channel[c].key ? 1 : 0) | (s.tremolo ? 2 : 0) | (s.vibrato ? 4 : 0));
-		emitOp(index, OP_WFBASE, kWaveBase + (int32_t)(newm ? (s.wf & 7) : (s.wf & 3)) * 1024);
-		emitOp(index, OP_TRIG, (int32_t)channel[c].trigger);
+		emitOp(index, OP_FLAGS, (slotKey[index] ? 1 : 0) | (s.tremolo ? 2 : 0) | (s.vibrato ? 4 : 0));
+		// The machine holds the OPL2's four waveforms; past them its Y memory
+		// is the kernel's own code, so an OPL3 selection stays inside.
+		const int32_t selected = newm ? (s.wf & 7) : (s.wf & 3);
+		const int32_t wf = (waveformGate && !waveformEnable) ? 0 : (selected % kWaveforms);
+		emitOp(index, OP_WFBASE, kWaveBase + wf * 1024);
+		emitOp(index, OP_TRIG, (int32_t)slotTrigger[index]);
+	}
+
+	void setKey(int index, uint8_t source, bool on) {
+		const uint8_t key = (uint8_t)(on ? (slotKey[index] | source) : (slotKey[index] & ~source));
+		if (key && !slotKey[index])
+			slotTrigger[index]++;
+		slotKey[index] = key;
+		dirtySlot |= slotBit(index);
+	}
+
+	// Register 0xbd's rhythm bits: hi-hat, cymbal, tom-tom, snare, bass drum
+	// from bit 0 up, and the mode in bit 5. Leaving the mode releases them.
+	void setRhythm(uint8_t value) {
+		rhythm = value;
+		const bool on = channels >= 9 && (value & 0x20);
+		setKey(kOpHiHat, kKeyDrum, on && (value & 0x01));
+		setKey(kOpCymbal, kKeyDrum, on && (value & 0x02));
+		setKey(kOpTom, kKeyDrum, on && (value & 0x04));
+		setKey(kOpSnare, kKeyDrum, on && (value & 0x08));
+		setKey(kOpBassModulator, kKeyDrum, on && (value & 0x10));
+		setKey(kOpBassCarrier, kKeyDrum, on && (value & 0x10));
+		emitScalar(SC_RHYTHM, on ? 1 : 0);
 	}
 
 	// What a write marks: one operator, or both of a channel, or every
@@ -712,6 +954,11 @@ struct Decoder {
 			else if (!high && (low & 0x0f) == 0x08) {
 				nts = (value >> 6) & 1;
 				dirtyEnvelope |= allBits();
+			} else if (!high && (low & 0x0f) == 0x01) {
+				const uint8_t enable = (value >> 5) & 1;
+				if (enable != waveformEnable && waveformGate)
+					dirtySlot |= allBits();
+				waveformEnable = enable;
 			}
 			return;
 		case 0x20:
@@ -773,6 +1020,7 @@ struct Decoder {
 				vibratoShift = (uint8_t)(((value >> 6) & 1) ^ 1);
 				emitScalar(SC_TREMOLO_SHIFT, tremoloShift);
 				dirtyIncrement |= allBits();
+				setRhythm(value & 0x3f);
 				return;
 			}
 			if ((low & 0x0f) < 9) {
@@ -780,13 +1028,10 @@ struct Decoder {
 				ChannelRegs &ch = channel[c];
 				ch.fnum = (uint16_t)((ch.fnum & 0xff) | ((value & 0x03) << 8));
 				ch.block = (value >> 2) & 0x07;
-				const uint8_t key = (value >> 5) & 1;
-				if (key && !ch.key)
-					ch.trigger++;
-				ch.key = key;
+				setKey(slotOfChannel(c, 0), kKeyChannel, (value >> 5) & 1);
+				setKey(slotOfChannel(c, 1), kKeyChannel, (value >> 5) & 1);
 				dirtyIncrement |= channelBits(c);
 				dirtyEnvelope |= channelBits(c);
-				dirtySlot |= channelBits(c);
 			}
 			return;
 		case 0xc0:

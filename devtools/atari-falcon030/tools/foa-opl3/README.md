@@ -15,13 +15,15 @@ and its own committed result file.
 | Exact DSP synthesis loop: 209% of budget | [bench-results.json](bench-results.json) | `bench-gate.py` |
 | Practical kernel against the exact one | [practical-results.json](practical-results.json) | `practical-gate.py` |
 | Practical kernel's register semantics, word for word | [practical-unit-results.json](practical-unit-results.json) | `opl-practical-unit-test` |
-| Practical DSP kernel at 49.17 kHz: word exact, 62-80% of budget | [rt-bench-results.json](rt-bench-results.json) | `rt-bench-gate.py` |
+| Practical DSP kernel at 49.17 kHz: word exact, rhythm mode included, 43-71% of budget | [rt-bench-results.json](rt-bench-results.json) | `rt-bench-gate.py` |
 | Stream mode through the SSI: word exact, no late period, also under the worst-case load | [rt-stream-results.json](rt-stream-results.json), [rt-stream-stress-results.json](rt-stream-stress-results.json) | `rt-stream-gate.py` |
+| The same with rhythm mode: every shape of it, and Cruise for a Corpse's drums | [rt-stream-rhythm-results.json](rt-stream-rhythm-results.json), [rt-stream-cruise-results.json](rt-stream-cruise-results.json) | `rt-stream-gate.py --scenario rhythm`, `--trace <cruise> --from 153` |
 | A host stall is counted: a 0.995 s silence reads 62 late periods, not 0 | [rt-stream-starved-results.json](rt-stream-starved-results.json) | `rt-stream-gate.py --starve 50` |
 | Atlantis on the emulated Falcon with the DSP build | [game-results.json](game-results.json) | `game-gate.py` |
 | Day of the Tentacle on the same build | [game-results-tentacle.json](game-results-tentacle.json) | `game-gate.py --gameid tentacle` |
 | The Secret of Monkey Island (Ultimate Talkie) on the same build | [game-results-monkey.json](game-results-monkey.json) | `game-gate.py --gameid monkey` |
 | Monkey Island 2 (Ultimate Talkie) on the same build | [game-results-monkey2.json](game-results-monkey2.json) | `game-gate.py --gameid monkey2 --click` |
+| Cruise for a Corpse, whose drums are the chip's rhythm mode | [game-results-cruise.json](game-results-cruise.json) | `game-gate.py --gameid cruise --engine cruise` |
 
 The first three sections below are the capture and the exact kernel as
 originally measured; the practical kernel and everything after it start at
@@ -127,8 +129,8 @@ approximation, so the bar is sample equality and not a tolerance.
 
 | Check | Result |
 | --- | ---: |
-| Samples compared | 4,189,988 |
-| Register writes applied | 47,846 |
+| Samples compared | 19,303,934 |
+| Register writes applied | 58,823 |
 | Mismatches | 0 |
 
 The cases are: every frequency multiplier, key-scale rate, block and a spread
@@ -136,12 +138,38 @@ of f-numbers; every attack/decay pair and every sustain/release pair in both
 envelope types; every key-scale level against total levels and blocks; all
 waveforms with both connection types and every feedback depth, in OPL2 and
 OPL3; tremolo and vibrato, shallow and deep, over a full LFO period; nine and
-eighteen channels with key cycling and mid-note patch reloads; and the
-captured 60-second Atlantis register stream replayed at its recorded times.
+eighteen channels with key cycling and mid-note patch reloads; rhythm mode
+and the waveform select enable (below); and two captured register streams
+replayed at their recorded times, 60 s of Atlantis and 300 s of Cruise for
+a Corpse.
 
-Two-operator melodic channels are the whole scope. Hardware four-operator
-pairing and rhythm mode are absent, because neither ScummVM AdLib driver
-enables them and the captured stream never touches them.
+Two-operator channels are the scope, with the rhythm mode of channels six
+to eight and the OPL2's waveform select enable, both added on 2026-09-21
+when the Falcon build took in engines beyond SCUMM: Cruise for a Corpse
+plays its percussion through register `0xBD` (654 rhythm writes in the
+300 s capture: snare, tom-tom and bass drum) and would have been without
+drums. The rhythm case keys the bass drum in both connections and the four
+single-operator drums in every combination over eight patch variants, puts
+drum keys under and over the channels' own, leaves and enters the mode
+under sounding notes, runs it on the low bank of an eighteen-channel chip,
+and holds the hi-hat and the snare past the noise generator's period
+(2^23 - 1 steps, 36 a sample). Four deliberate bugs - the snare's noise
+tap, the bass drum's doubled level, the cymbal's phase, the hi-hat's
+modulation - each fail it within four samples. Hardware four-operator
+pairing is still absent; no AdLib driver built for the Falcon enables it.
+
+The waveform select enable (register 1, bit 5) is the one place the kernel
+models what the oracle cannot show: Nuked-OPL3 is an OPL3, which has no
+such bit, and an OPL2 plays every operator's sine while it is clear,
+whatever the waveform registers hold. The kernel models the gate when
+asked to be an OPL2 (`opl2WaveformGate`), and is checked against the oracle
+given the waveforms the gate lets through. It matters: Cruise's
+`initCard` writes `0x01 = 0x20` and then `0x01 = 0x00`, and later selects
+waveform 1 for two instruments, which a real AdLib plays as sines (as
+DOSBox's and MAME's cores do, and ScummVM's Nuked does not). Beneath a
+Steel Sky's init sequence comes from its game data; captured, it is
+`0xBD = 0xC0`, `0x01 = 0x20`, `0x08 = 0x00`, and nothing else in its driver
+writes `0xBD`, so it needs neither.
 
 ### What this settled about the DSP implementation
 
@@ -292,6 +320,38 @@ value within a block ever reaches the boundary pass, so the rendering is
 bit-identical to deriving at every write (`practical-test` output, all
 ten scenes).
 
+**Rhythm mode** (2026-09-21) keeps to the same trade. The bass drum and the
+tom-tom are ordinary operators at twice a melodic operator's level, as on
+the chip; a gain of 1.0 does not fit the DSP's word, so they carry the
+doubled gain negated, which reaches -1.0, and their stages negate the
+product. The hi-hat, the snare and the cymbal do not play their own phase
+on the chip: six phase bits of the hi-hat's and the cymbal's oscillators
+combine into one bit, and with a noise bit that picks each drum's phase
+from two or four fixed ones. With block-rate envelopes a block's three
+drums are therefore one table of sixteen sums, built at the boundary from
+ten waveform fetches, and a frame is lookups: the hi-hat's phase gives a
+row of a 32-entry select table, the cymbal's a column, the noise the drum
+table's row. Both oscillators run whether or not their own drum sounds,
+since each shapes the others; with all three silent a block's advance is
+one product. The noise generator has the chip's polynomial
+(x^23 + x^14 + 1) as a Galois register stepped twice a frame, one fresh bit
+for the hi-hat and one for the snare, where the chip steps it 36 times a
+sample: the same white sequence family at a period of 85 s instead of 4.7,
+not the chip's bit for bit, which nothing block-rate could hold anyway. An
+operator's key is its channel's key bit or its drum's bit, with the chip's
+edges: a drum keyed over a held channel key does not retrigger, and
+leaving the mode releases the drums.
+
+One difference is the rate's and cannot be tuned away: the fastest of those
+phase bits is a square wave at 128 times the oscillator's pitch, which for
+a bright hi-hat is past 49 kHz and folds to a different frequency at
+49,170 Hz than at 49,716 Hz. The gate's second hi-hat and cymbal tuning is
+there to show it and is held to its level alone.
+
+The decoder is also an OPL2 where the chip is one: with nine channels it
+keeps the waveform select enable, and a selection made while the enable is
+clear is held and plays as a sine until register 1 sets it.
+
 What is not given up is the chip's register semantics, and a review on
 2026-09-17 found four places where the first version had let them go:
 
@@ -334,7 +394,7 @@ What is not given up is the chip's register semantics, and a review on
   falling off only as the control's rounded increment drifts.
 - **A reset resets the machine.** `Decoder::reset` sends the whole reset
   state whatever its shadow held (every host-owned word, and the envelope,
-  state and applied key-on count the DSP owns), 344 events for nine
+  state and applied key-on count the DSP owns), 345 events for nine
   channels, because a cleared shadow alone leaves the DSP playing and then
   swallows the zeros a driver writes to silence it.
 
@@ -382,8 +442,25 @@ are held to a level instead (the strongest below -30 dB, or no more than
 | every multiplier at block 7, held | 16 | 1.0000 | 0.00 / 0.14 dB | 0.55 / 1.10 dB | 0.02 dB | 0.2 c | to 24.5 kHz; eight are past half the chip's phase range and play its alias |
 | tremolo, both depths | 2 | 1.0000 | 0.01 / 0.16 dB | | | | depth 1.72 vs 1.71 dB, 5.33 vs 5.22 dB |
 | vibrato, both depths, and none | 3 | 1.0000 | 0.00 / 0.12 dB | | | | depth 11.5 vs 11.8 c, 26.4 vs 26.5 c (13.7 and 27.3 before), period 165 ms both; f-number 200 stays unmodulated in both |
-| nine-channel polyphony | | 0.9946 | 0.07 / 0.88 dB | | | | |
-| Atlantis, 60 s | | 0.9821 | 0.70 / 7.89 dB | | | | mix of coincident partials; +0.6 dB in 8-15 kHz |
+| nine-channel polyphony | | 0.9946 | 0.07 / 0.89 dB | | | | |
+| rhythm mode: twelve held drums, then a pattern | | 0.9935 | 0.04 / 1.24 dB | | 0.70 dB | | each drum's level within 0.18 dB; bands are the worst drum's (the hi-hat), over six windows of the noise |
+| Atlantis, 60 s | | 0.9825 | 0.68 / 7.89 dB | | | | mix of coincident partials; +0.6 dB in 8-15 kHz |
+| Cruise for a Corpse, 60 s from 105 s | | 0.9972 | 0.10 / 3.17 dB | | | | tom-tom, snare and bass drum through rhythm mode |
+
+The two traces need one allowance on the reference's side. A capture stamps
+every write of a driver tick with the tick's time, and a sample-exact chip
+given a key-off and a key-on in one sample never sees the key-off: the note
+is not retriggered, and a percussive patch falls silent for good. Cruise
+rekeys every note that way - replayed as stamped, the exact kernel (and
+Nuked) play a few bars and then nothing, at an RMS of 9 against the
+practical kernel's 2,600. On the card each port write takes longer than the
+chip's 20 microsecond sample, so the chip does see the key-off, which is
+also what the practical kernel's counted key-on edges give; the reference
+render therefore puts one sample between two writes of the same key
+register (`0xB0`-`0xB8`, `0xBD`). Atlantis has a few such pairs too: its
+correlation moved from 0.9821 to 0.9825. The Cruise window starts on the
+register image the first 105 s left, not on those writes replayed in an
+instant, for the same reason.
 
 The onset skew is at most 2.7 ms on the synthetic scenarios and 2.8 ms on
 the trace (10.4 ms before the attack factor was refitted). The polyphonic
@@ -392,7 +469,7 @@ the block quantization shifts, not from levels. The envelope figures let
 each 20 ms window match anywhere within the range of its neighbours, so
 an onset straddling a window edge is no error; they grade the loudness
 contour and say nothing about spectra. The same windows one to one differ
-by 0.04 to 0.32 dB on the synthetic scenarios and 1.09 dB on the trace
+by 0.04 to 0.32 dB on the synthetic scenarios and 1.07 dB on the trace
 (`envelope_db_mean_abs_unaligned`).
 
 **Strong feedback is not periodic, on the chip either.** Isolated, a
@@ -434,17 +511,33 @@ short-circuit the boundary pass.
 compares every output word with the host reference and attributes Hatari's
 DSP profile by code range. From [rt-bench-results.json](rt-bench-results.json):
 
-| | Nine feedback FM channels, tremolo and vibrato, held | Atlantis, first 4 s |
-| --- | ---: | ---: |
-| Frames compared | 49,152 | 196,672 |
-| Mismatches | 0 | 0 |
-| Stages (per-frame) | 183.8 | 130.6 |
-| Per-operator boundary pass | 19.5 | 17.4 |
-| Loaders, modes, driver | 11.9 | 10.9 |
-| Block and channel boundary | 10.5 | 9.8 |
-| Emit, clear, events | 7.1 | 7.0 |
-| **Instruction cycles per frame** | **233.2** | **176.1** |
-| Share of the 326.3-cycle budget at 49.17 kHz | 71% | 54% |
+| | Nine feedback FM channels, tremolo and vibrato, held | Rhythm mode, every shape | Atlantis, first 4 s | Cruise, 4 s from 153 s |
+| --- | ---: | ---: | ---: | ---: |
+| Frames compared | 49,152 | 49,152 | 196,672 | 196,672 |
+| Mismatches | 0 | 0 | 0 | 0 |
+| Stages (per-frame) | 183.8 | 138.6 | 130.6 | 95.5 |
+| Per-operator boundary pass | 19.5 | 17.2 | 17.4 | 14.2 |
+| Loaders, modes, driver | 11.9 | 10.2 | 10.9 | 8.9 |
+| Block and channel boundary | 10.5 | 14.9 | 9.8 | 13.4 |
+| Emit, clear, events | 7.5 | 7.9 | 7.4 | 7.3 |
+| **Instruction cycles per frame** | **233.2** | **188.8** | **176.1** | **139.4** |
+| Share of the 326.3-cycle budget at 49.17 kHz | 71% | 58% | 54% | 43% |
+
+Rhythm mode does not move the worst case. The three phase-bit drums cost
+one noise pass (eight to ten instructions a frame), the hi-hat's phase
+(four) and the cymbal's with the lookups and the mix (nine), and the
+tom-tom five: under thirty for channels seven and eight, which as two
+feedback FM channels cost about thirty-six. What it adds is per block: the
+rhythm boundary (the modes, the two increments, five gains, ten fetches
+and sixteen sums) is the 4 cycles a frame by which the rhythm columns' block
+boundary exceeds the others. The rhythm case opens on the mode at its most
+expensive - six feedback FM channels, the bass drum in feedback FM, the
+four other drums held with vibrato on both oscillators - and then takes
+every shape the section has (each drum alone, all silent, the bass drum in
+each connection, the mode left and entered under sounding notes, a reset,
+an OPL2 waveform held back and released); the gate fails if it stops
+reaching any of them. The melodic cases' figures and both stream checksums
+are what they were before rhythm mode existed.
 
 A third case, `paths`, is there for exactness alone: the stress case plus
 what music rarely does, so that the DSP's code for it is compared word for
@@ -481,9 +574,10 @@ its own parameters, nothing else reads those words, and the idle path never
 kept them true anyway. A key-up operator is released with an unconditional
 store instead of a compare, and the rare key-on work left internal P for
 external. The output did not change by a word in any case or in either
-stream checksum. The whole program is 1,261 words; the stages and the
-operator pass live in the 512 words of internal program RAM, everything
-else in external.
+stream checksum. The whole program is 1,566 words with rhythm mode (1,261
+before); the stages, rhythm's among them, and the operator pass live in
+the 512 words of internal program RAM (437 used), everything else in
+external.
 
 ## Stream mode
 
@@ -512,7 +606,13 @@ by checksum against the host reference. From
 stream, 1,280 periods submitted and rendered, none late, checksum equal;
 and from [rt-stream-stress-results.json](rt-stream-stress-results.json),
 `--scenario stress`: 10 s of nine feedback FM channels with both LFOs held,
-640 periods, none late, checksum equal.
+640 periods, none late, checksum equal. Rhythm mode has two records of its
+own: [rt-stream-rhythm-results.json](rt-stream-rhythm-results.json),
+`--scenario rhythm`, the bench's rhythm case stretched to 10 s, so the mode
+at its most expensive is held for three of them, and
+[rt-stream-cruise-results.json](rt-stream-cruise-results.json), 20 s of the
+Cruise for a Corpse stream from 153 s, where its snare and bass drum are
+densest; 640 and 1,280 periods, none late, checksums equal.
 
 "None late" means more than it once did. The kernel used to judge a period
 only when it finished rendering one, and a host that stops sending renders
@@ -614,6 +714,18 @@ game got to.
 So a v6 game and the two Monkey Islands fit in the 14 MB beside the DSP
 transport at least through their openings.
 
+Cruise for a Corpse ([game-results-cruise.json](game-results-cruise.json),
+`--gameid cruise --engine cruise --extra "" --seconds 1200`) is there for
+rhythm mode, on the build that takes in the SCI, Sky and Cruise engines.
+The 16 MHz machine spends the first four minutes on the Delphine logo and
+the load behind it, so a 200 s run records silence; over 1,200 s the music
+starts at 252 s and 519 of the seconds are loud, peaking at -15.9 dBFS,
+with 77,150 periods submitted, none late, no protocol error and 15
+extension periods. The recording was checked for presence and level like
+the others; that its drums are in it rests on the host and DSP gates above,
+which render the same driver's captured writes, not on anything measured in
+the recording.
+
 None of those figures is reproducible to the digit. Four runs of the same
 Tentacle binary gave 6,152 to 6,173 periods, 43 to 69 extension periods and
 peaks from -23.5 to -24.1 dBFS; the run is not deterministic and why was
@@ -666,6 +778,17 @@ presence and level, not auditioned.
 - Sam & Max data was not available here, so the layered OPL3 path remains
   unmeasured; the kernel and decoder support eighteen channels, the DSP
   image is built for nine.
+- Rhythm mode's noise is the chip's generator, not the chip's sequence, and
+  the hi-hat's and the cymbal's fastest phase bits fold where the codec
+  rate puts them. Cruise for a Corpse's drums were scored from its captured
+  register stream on the host and word for word on the emulated DSP; the
+  game's run on the emulated Falcon shows its music present and the
+  transport on time, not that the drums in it are right, and nobody has
+  listened to either.
+- The OPL2's waveform select enable follows the datasheet's reading (the
+  selection is ignored while the enable is clear, and comes into force when
+  it is set). No emulator here can confirm that against a chip: the
+  reference is an OPL3.
 - The exact kernel's sample equality holds at the chip's native 49,716 Hz;
   the practical kernel is not sample exact by design.
 - The game gate runs at full music volume, where both volume paths give
@@ -716,8 +839,17 @@ make -C devtools/atari-falcon030/tools/foa-opl3/build/headless \
   -f Makefile -f ../../kernel.mk opl-kernel-test
 python3 devtools/atari-falcon030/tools/foa-opl3/kernel-gate.py \
   --trace build-falcon030/opl3-capture/run-a/opl-writes.ev \
-  --output build-falcon030/opl3-kernel
+  --rhythm-trace <cruise opl-writes.ev> --output build-falcon030/opl3-kernel
 ```
+
+The rhythm trace is a capture of Cruise for a Corpse. `build-capture.sh`
+builds the SCUMM engine only; the same configure line with
+`--enable-engine=sky,cruise` in a second build directory, and an ini whose
+target names `engineid=cruise`, `gameid=cruise`, give
+`scummvm-opl-capture` for it (`foa_capture_ms=300000`; the music starts at
+50 s and the drums at 108 s of the virtual clock). `--rhythm-trace` is
+optional on the three gates that take it, and their committed records were
+made with it.
 
 The practical kernel's gates, in the same tree:
 
@@ -726,12 +858,16 @@ make -C devtools/atari-falcon030/tools/foa-opl3/build/headless \
   -f Makefile -f ../../kernel.mk opl-practical-unit-test opl-practical-test opl-rt-fixture
 devtools/atari-falcon030/tools/foa-opl3/build/headless/opl-practical-unit-test
 python3 devtools/atari-falcon030/tools/foa-opl3/practical-gate.py \
-  --trace <opl-writes.ev> --seconds 60 --wav --output build-falcon030/opl3-practical
+  --trace <opl-writes.ev> --rhythm-trace <cruise opl-writes.ev> --seconds 60 --wav \
+  --output build-falcon030/opl3-practical
 sh devtools/atari-falcon030/tools/foa-opl3/build-dsp.sh
 python3 devtools/atari-falcon030/tools/foa-opl3/rt-bench-gate.py \
-  --trace <opl-writes.ev> --seconds 4 --output build-falcon030/opl3-rt-bench
+  --trace <opl-writes.ev> --rhythm-trace <cruise opl-writes.ev> --seconds 4 \
+  --output build-falcon030/opl3-rt-bench
 python3 devtools/atari-falcon030/tools/foa-opl3/rt-stream-gate.py \
   --trace <opl-writes.ev> --seconds 20 --output build-falcon030/opl3-rt-stream
+python3 devtools/atari-falcon030/tools/foa-opl3/rt-stream-gate.py \
+  --scenario rhythm --seconds 10 --output build-falcon030/opl3-rt-stream-rhythm
 python3 devtools/atari-falcon030/tools/foa-opl3/pause-gate.py
 python3 devtools/atari-falcon030/tools/foa-opl3/pcm-silence-gate.py \
   --output build-falcon030/opl3-pcm-silence

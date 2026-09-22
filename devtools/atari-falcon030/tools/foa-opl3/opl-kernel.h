@@ -2,10 +2,11 @@
 // directly: flat arrays, index routing instead of pointers, no division and
 // no value wider than the 24-bit word the target actually has.
 //
-// Scope: two-operator melodic channels on both register banks, OPL2 (nine
-// channels) and OPL3 two-operator mode (eighteen). Hardware four-operator
-// pairing and rhythm mode are deliberately absent; neither ScummVM AdLib
-// driver enables them, and the captured Atlantis stream never touches them.
+// Scope: two-operator channels on both register banks, OPL2 (nine channels)
+// and OPL3 two-operator mode (eighteen), with the rhythm mode of channels six
+// to eight (Cruise for a Corpse plays its percussion through it) and the
+// OPL2's waveform select enable. Hardware four-operator pairing is
+// deliberately absent; no AdLib driver built for the Falcon enables it.
 //
 // This is the reference the DSP assembly is transliterated from, and the
 // oracle its output is compared against. It is checked sample for sample
@@ -26,6 +27,12 @@ enum { kChannels = 18, kSlots = 36 };
 enum ModSource { kModZero = 0, kModSelfFeedback = 1, kModPartner = 2 };
 
 enum EnvelopeGen { kAttack = 0, kDecay = 1, kSustain = 2, kRelease = 3 };
+
+// A slot is keyed by its channel's key bit, by its rhythm bit, or by both.
+enum KeySource { kKeyChannel = 0x01, kKeyDrum = 0x02 };
+
+// The chip's slot numbers of the rhythm section.
+enum RhythmSlot { kSlotHiHat = 13, kSlotSnare = 16, kSlotCymbal = 17 };
 
 static const uint8_t kFreqMultiply[16] = { 1, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 20, 24, 24, 30, 30 };
 static const uint8_t kKslRom[16] = { 0, 32, 40, 45, 48, 51, 53, 55, 56, 58, 59, 60, 61, 62, 63, 64 };
@@ -105,6 +112,22 @@ struct Chip {
 	uint8_t newm;   // OPL3 mode
 	uint8_t nts;
 	uint8_t channels;   // 9 for OPL2, 18 for OPL3 two-operator
+
+	// An OPL2 plays every operator's sine until register 1 enables the
+	// waveform select registers, whatever they hold; the OPL3 has no such
+	// bit, and Nuked-OPL3, the oracle, models the OPL3.
+	uint8_t opl2WaveformGate;
+	uint8_t waveformEnable;
+
+	// Rhythm mode: register 0xbd's low six bits, the 23-bit noise generator
+	// (36 steps per sample, one per slot of the chip's cycle) with the bits
+	// the hi-hat and the snare read, and the phase bits the hi-hat and the
+	// cymbal lend to each other and to the snare.
+	uint8_t rhythm;
+	uint32_t noise;
+	uint8_t noiseHiHat, noiseSnare;
+	uint8_t hiHatBit2, hiHatBit3, hiHatBit7, hiHatBit8;
+	uint8_t cymbalBit3, cymbalBit5;
 
 	int32_t rightPending;   // the right mix is one sample behind the left
 };
@@ -273,7 +296,12 @@ static void envelopeStep(Chip *chip, Slot *slot) {
 
 // ------------------------------------------------------------- slot render
 
+static inline bool rhythmOn(const Chip *chip) { return (chip->rhythm & 0x20) != 0; }
+
 static inline int16_t modulationOf(const Chip *chip, const Slot *slot) {
+	// The four single-operator drums take no modulation, not even their own.
+	if (rhythmOn(chip) && (slot->channel == 7 || slot->channel == 8))
+		return 0;
 	switch (slot->modSource) {
 	case kModSelfFeedback: return slot->feedbackMod;
 	case kModPartner: return chip->slot[chip->channel[slot->channel].slot0].out;
@@ -281,7 +309,37 @@ static inline int16_t modulationOf(const Chip *chip, const Slot *slot) {
 	}
 }
 
-static void processSlot(Chip *chip, Slot *slot, uint8_t feedback) {
+// The phase the waveform sees. In rhythm mode the hi-hat, the snare and the
+// cymbal do not play their own: each is one of a few fixed phases chosen by
+// phase bits of the hi-hat's and the cymbal's oscillators and by the noise.
+static inline uint16_t rhythmPhase(Chip *chip, uint8_t index, uint16_t phase) {
+	if (index == kSlotHiHat) {
+		chip->hiHatBit2 = (uint8_t)((phase >> 2) & 1);
+		chip->hiHatBit3 = (uint8_t)((phase >> 3) & 1);
+		chip->hiHatBit7 = (uint8_t)((phase >> 7) & 1);
+		chip->hiHatBit8 = (uint8_t)((phase >> 8) & 1);
+	}
+	if (!rhythmOn(chip))
+		return phase;
+	if (index == kSlotCymbal) {
+		chip->cymbalBit3 = (uint8_t)((phase >> 3) & 1);
+		chip->cymbalBit5 = (uint8_t)((phase >> 5) & 1);
+	}
+	const uint16_t mixed = (uint16_t)((chip->hiHatBit2 ^ chip->hiHatBit7) | (chip->hiHatBit3 ^ chip->cymbalBit5)
+	                                  | (chip->cymbalBit3 ^ chip->cymbalBit5));
+	switch (index) {
+	case kSlotHiHat:
+		return (uint16_t)((mixed << 9) | ((mixed ^ chip->noiseHiHat) ? 0xd0 : 0x34));
+	case kSlotSnare:
+		return (uint16_t)((chip->hiHatBit8 << 9) | ((chip->hiHatBit8 ^ chip->noiseSnare) << 8));
+	case kSlotCymbal:
+		return (uint16_t)((mixed << 9) | 0x80);
+	default:
+		return phase;
+	}
+}
+
+static void processSlot(Chip *chip, Slot *slot, uint8_t index, uint8_t feedback) {
 	// Feedback uses this slot's two previous outputs, before the new one.
 	slot->feedbackMod = feedback ? (int16_t)((slot->prevOut + slot->out) >> (9 - feedback)) : 0;
 	slot->prevOut = slot->out;
@@ -289,13 +347,15 @@ static void processSlot(Chip *chip, Slot *slot, uint8_t feedback) {
 	envelopeStep(chip, slot);
 
 	const uint32_t inc = slot->regVib ? slot->phaseIncVib[chip->vibPos] : slot->phaseInc;
-	slot->phaseOut = (uint16_t)((slot->phase >> 9) & 0x3ff);
+	const uint16_t ownPhase = (uint16_t)((slot->phase >> 9) & 0x3ff);
 	if (slot->phaseReset)
 		slot->phase = 0;
 	slot->phase = (slot->phase + inc) & 0x7ffff;
+	slot->phaseOut = rhythmPhase(chip, index, ownPhase);
 
 	const uint16_t phase = (uint16_t)(slot->phaseOut + (uint16_t)modulationOf(chip, slot));
-	const uint16_t packed = waveform(slot->regWf, phase);
+	const uint8_t wf = (chip->opl2WaveformGate && !chip->waveformEnable) ? 0 : slot->regWf;
+	const uint16_t packed = waveform(wf, phase);
 	const int16_t negate = (int16_t)(packed & 0x8000 ? -1 : 0);
 	uint32_t level = (uint32_t)(packed & 0x7fff) + ((uint32_t)slot->envOut << 3);
 	if (level > 0x1fff)
@@ -314,15 +374,38 @@ static inline int16_t clipSample(int32_t sample) {
 	return (int16_t)sample;
 }
 
+// What a channel adds to a mix whose late slots start at delayedFrom. In
+// rhythm mode every drum sounds twice as loud as a melodic operator: the
+// bass drum is its carrier alone whatever the connection, and channels seven
+// and eight are two independent drums each.
+static inline int16_t channelOutput(const Chip *chip, uint8_t index, uint8_t delayedFrom) {
+	const Channel *channel = &chip->channel[index];
+	const Slot *carrier = &chip->slot[channel->slot1];
+	const Slot *modulator = &chip->slot[channel->slot0];
+	const int16_t carrierOut = (channel->slot1 >= delayedFrom) ? carrier->prevOut : carrier->out;
+	const int16_t modulatorOut = (channel->slot0 >= delayedFrom) ? modulator->prevOut : modulator->out;
+	if (rhythmOn(chip) && index >= 6 && index <= 8)
+		return (int16_t)(index == 6 ? 2 * carrierOut : 2 * modulatorOut + 2 * carrierOut);
+	return (int16_t)(channel->connection ? carrierOut + modulatorOut : carrierOut);
+}
+
 // One native-rate stereo frame. The right output trails the left by one
 // sample, exactly as the chip model does.
 static inline void generate(Chip *chip, int16_t *left, int16_t *right) {
 	*right = clipSample(chip->rightPending);
 
+	// The noise generator steps once per slot of the chip's cycle, 36 times a
+	// sample; the hi-hat (slot 13) and the snare (slot 16) read its low bit
+	// as their turn finds it.
+	chip->noiseHiHat = (uint8_t)((chip->noise >> 13) & 1);
+	chip->noiseSnare = (uint8_t)((chip->noise >> 16) & 1);
+	for (uint8_t step = 0; step < 36; ++step)
+		chip->noise = (chip->noise >> 1) | ((((chip->noise >> 14) ^ chip->noise) & 1) << 22);
+
 	for (uint8_t index = 0; index < chip->channels; ++index) {
 		Channel *channel = &chip->channel[index];
-		processSlot(chip, &chip->slot[channel->slot0], channel->feedback);
-		processSlot(chip, &chip->slot[channel->slot1], channel->feedback);
+		processSlot(chip, &chip->slot[channel->slot0], channel->slot0, channel->feedback);
+		processSlot(chip, &chip->slot[channel->slot1], channel->slot1, channel->feedback);
 	}
 
 	int32_t mixLeft = 0;
@@ -331,13 +414,7 @@ static inline void generate(Chip *chip, int16_t *left, int16_t *right) {
 		if (!channel->outLeftMask)
 			continue;
 		// Slots 15 and above reach the left mix one sample late.
-		const Slot *carrier = &chip->slot[channel->slot1];
-		const Slot *modulator = &chip->slot[channel->slot0];
-		int16_t accumulated = (channel->slot1 >= 15) ? carrier->prevOut : carrier->out;
-		if (channel->connection)
-			accumulated = (int16_t)(accumulated
-			                        + ((channel->slot0 >= 15) ? modulator->prevOut : modulator->out));
-		mixLeft += accumulated;
+		mixLeft += channelOutput(chip, index, 15);
 	}
 	*left = clipSample(mixLeft);
 
@@ -381,13 +458,7 @@ static inline void generate(Chip *chip, int16_t *left, int16_t *right) {
 		Channel *channel = &chip->channel[index];
 		if (!channel->outRightMask)
 			continue;
-		const Slot *carrier = &chip->slot[channel->slot1];
-		const Slot *modulator = &chip->slot[channel->slot0];
-		int16_t accumulated = (channel->slot1 >= 33) ? carrier->prevOut : carrier->out;
-		if (channel->connection)
-			accumulated = (int16_t)(accumulated
-			                        + ((channel->slot0 >= 33) ? modulator->prevOut : modulator->out));
-		mixRight += accumulated;
+		mixRight += channelOutput(chip, index, 33);
 	}
 	chip->rightPending = mixRight;
 }
@@ -404,6 +475,7 @@ static inline void reset(Chip *chip, uint8_t channels) {
 	chip->channels = channels;
 	chip->tremoloShift = 4;
 	chip->vibShift = 1;
+	chip->noise = 1;
 	for (uint8_t index = 0; index < kSlots; ++index) {
 		chip->slot[index].envRaw = 0x1ff;
 		chip->slot[index].envOut = 0x1ff;
@@ -421,6 +493,23 @@ static inline void reset(Chip *chip, uint8_t channels) {
 	}
 }
 
+static inline void setKey(Slot *slot, uint8_t source, uint8_t on) {
+	slot->key = (uint8_t)((on & 1) ? (slot->key | source) : (slot->key & ~source));
+}
+
+// Register 0xbd's rhythm bits: hi-hat, cymbal, tom-tom, snare, bass drum from
+// bit 0 up, and the mode itself in bit 5. Leaving the mode releases the drums.
+static inline void setRhythm(Chip *chip, uint8_t value) {
+	chip->rhythm = value;
+	const uint8_t on = (uint8_t)((value >> 5) & 1);
+	setKey(&chip->slot[chip->channel[7].slot0], kKeyDrum, (uint8_t)(on & value));
+	setKey(&chip->slot[chip->channel[8].slot1], kKeyDrum, (uint8_t)(on & (value >> 1)));
+	setKey(&chip->slot[chip->channel[8].slot0], kKeyDrum, (uint8_t)(on & (value >> 2)));
+	setKey(&chip->slot[chip->channel[7].slot1], kKeyDrum, (uint8_t)(on & (value >> 3)));
+	setKey(&chip->slot[chip->channel[6].slot0], kKeyDrum, (uint8_t)(on & (value >> 4)));
+	setKey(&chip->slot[chip->channel[6].slot1], kKeyDrum, (uint8_t)(on & (value >> 4)));
+}
+
 static inline void writeRegister(Chip *chip, uint16_t reg, uint8_t value) {
 	const uint8_t high = (uint8_t)((reg >> 8) & 1);
 	const uint8_t low = (uint8_t)(reg & 0xff);
@@ -433,6 +522,8 @@ static inline void writeRegister(Chip *chip, uint16_t reg, uint8_t value) {
 			chip->newm = (uint8_t)(value & 1);
 		else if (!high && (low & 0x0f) == 0x08)
 			chip->nts = (uint8_t)((value >> 6) & 1);
+		else if (!high && (low & 0x0f) == 0x01)
+			chip->waveformEnable = (uint8_t)((value >> 5) & 1);
 		return;
 	case 0x20:
 	case 0x30:
@@ -502,7 +593,8 @@ static inline void writeRegister(Chip *chip, uint16_t reg, uint8_t value) {
 				for (uint8_t index = 0; index < kSlots; ++index)
 					updatePhaseIncrement(chip, &chip->slot[index]);
 			}
-			return;   // rhythm mode is out of scope and never enabled here
+			setRhythm(chip, (uint8_t)(value & 0x3f));
+			return;
 		}
 		if ((low & 0x0f) < 9) {
 			const uint8_t index = (uint8_t)(9 * high + (low & 0x0f));
@@ -511,8 +603,8 @@ static inline void writeRegister(Chip *chip, uint16_t reg, uint8_t value) {
 			channel->block = (uint8_t)((value >> 2) & 0x07);
 			refreshChannel(chip, index);
 			const uint8_t on = (uint8_t)((value >> 5) & 1);
-			chip->slot[channel->slot0].key = on;
-			chip->slot[channel->slot1].key = on;
+			setKey(&chip->slot[channel->slot0], kKeyChannel, on);
+			setKey(&chip->slot[channel->slot1], kKeyChannel, on);
 		}
 		return;
 	case 0xc0:

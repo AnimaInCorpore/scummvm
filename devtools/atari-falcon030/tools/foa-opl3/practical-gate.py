@@ -61,6 +61,10 @@ THRESHOLDS = {
     "rms_ratio_min": 0.9,
     "rms_ratio_max": 1.1,
     "hf_excess_db_max": 4.0,   # the brightest Atlantis passage aliases 3.4 dB of 8-15 kHz energy
+    # Rhythm mode's held drums: each one's level, and its third-octave bands
+    # within 25 dB of its strongest, averaged over six windows of the noise.
+    "drum_level_db_max": 0.5,
+    "drum_band_db_mean_abs_max": 1.5,
     "tremolo_depth_db_max": 0.4,
     "vibrato_depth_cents_max": 3.0,
 }
@@ -70,6 +74,7 @@ PARTIAL_MATCH_HZ = 20.0
 NOTE_CHECK_S = 0.150          # a note's spectral window starts this far in
 NOTE_RECHECK_S = (0.300, 0.450)   # a held note's reference is compared with itself here
 MAX_SPECTRAL_CHECKS = 64
+HF_SHARE_FLOOR_DB = -40.0     # a quieter 8-15 kHz share is not graded for excess
 
 
 def load_pcm(path):
@@ -360,6 +365,39 @@ def band_ratio_db(bin_hz, mag, low_hz=8000.0):
     return 10.0 * math.log10(max(high, 1e-12) / total)
 
 
+DRUM_WINDOWS = 6
+DRUM_BAND_RANGE_DB = 25.0
+
+
+def average_spectrum(pcm, rate, start_s):
+    total = None
+    for k in range(DRUM_WINDOWS):
+        bin_hz, mag = spectrum(pcm, rate, int((start_s + 0.12 * k) * rate))
+        total = [m * m for m in mag] if total is None else [t + m * m for t, m in zip(total, mag)]
+    return bin_hz, [math.sqrt(t / DRUM_WINDOWS) for t in total]
+
+
+def score_drums(exact, exact_rate, practical, practical_rate, drums):
+    """One held drum at a time: the level over the hold, and the third-octave
+    bands of a power spectrum averaged over the hold, since one window of
+    noise says little. A pitched drum's bands are centred on its note."""
+    out = []
+    for on, off, hz in drums:
+        level = db(rms(practical[int((on + 0.1) * practical_rate):int((off - 0.1) * practical_rate)])
+                   / max(rms(exact[int((on + 0.1) * exact_rate):int((off - 0.1) * exact_rate)]), 1e-9))
+        entry = {"at_s": round(on, 3), "level_db": round(level, 3), "bands_graded": hz >= 0.0}
+        if hz >= 0.0:
+            centre = hz or 1000.0
+            bands_e = band_levels(*average_spectrum(exact, exact_rate, on + 0.15), centre)
+            bands_p = band_levels(*average_spectrum(practical, practical_rate, on + 0.15), centre)
+            diffs = [abs(e - p) for e, p in zip(bands_e, bands_p) if e > max(bands_e) - DRUM_BAND_RANGE_DB]
+            entry["bands_compared"] = len(diffs)
+            entry["band_db_mean_abs"] = round(sum(diffs) / len(diffs), 3)
+            entry["band_db_max_abs"] = round(max(diffs), 3)
+        out.append(entry)
+    return out
+
+
 def score(name, exact, exact_rate, practical, practical_rate, notes, held):
     raw_p = envelope(practical, practical_rate)
     env_e, env_p = aligned(envelope(exact, exact_rate), raw_p)
@@ -428,7 +466,11 @@ def score(name, exact, exact_rate, practical, practical_rate, notes, held):
                                                                  int(t0 * practical_rate))), 2)})
     result["spectral_windows"] = spectral
     if spectral:
-        result["hf_excess_db_max"] = round(max(w["hf_db_practical"] - w["hf_db_exact"] for w in spectral), 2)
+        # A pure tone's 8-15 kHz share is its phase truncation floor, 60 dB
+        # down, and differs by rate: only a share that can be heard counts.
+        result["hf_excess_db_max"] = round(max(
+            [w["hf_db_practical"] - w["hf_db_exact"] for w in spectral
+             if max(w["hf_db_practical"], w["hf_db_exact"]) > HF_SHARE_FLOOR_DB] or [0.0]), 2)
     if spectral and notes:
         stable = [w for w in spectral if not w["reference_unstable"]]
         result["unstable_reference_windows"] = len(spectral) - len(stable)
@@ -487,6 +529,11 @@ def grade(result, polyphonic):
     if result.get("spectral_windows") and polyphonic:
         if result["hf_excess_db_max"] > t["hf_excess_db_max"]:
             failures.append("high-frequency excess")
+    for drum in result.get("drums", []):
+        if abs(drum["level_db"]) > t["drum_level_db_max"]:
+            failures.append("drum level")
+        if drum["bands_graded"] and drum["band_db_mean_abs"] > t["drum_band_db_mean_abs_max"]:
+            failures.append("drum bands")
     for pair in result.get("lfo", []):
         e, p = pair["exact"], pair["practical"]
         if "depth_db" in e:
@@ -509,6 +556,10 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--trace", type=Path, help="captured opl-writes.ev to replay")
     parser.add_argument("--seconds", type=float, default=60.0)
+    parser.add_argument("--rhythm-trace", type=Path,
+                        help="a second captured stream, of a game that uses rhythm mode (Cruise for a Corpse)")
+    parser.add_argument("--rhythm-from", type=float, default=105.0,
+                        help="where its window starts, on the register image the earlier writes left")
     parser.add_argument("--wav", action="store_true", help="also keep WAV files for auditioning")
     parser.add_argument("--binary", type=Path, default=HERE / "build/headless/opl-practical-test")
     args = parser.parse_args()
@@ -519,6 +570,8 @@ def main():
     command = [str(args.binary), str(args.output), "--seconds", str(args.seconds)]
     if args.trace:
         command += ["--trace", str(args.trace.resolve())]
+    if args.rhythm_trace:
+        command += ["--rhythm-trace", str(args.rhythm_trace.resolve()), "--rhythm-from", str(args.rhythm_from)]
     if args.wav:
         command.append("--wav")
     manifest = json.loads(subprocess.run(command, capture_output=True, text=True, check=True).stdout)
@@ -530,7 +583,10 @@ def main():
         result = score(entry["name"], exact, entry["exact_rate"], practical, entry["practical_rate"],
                        entry["notes"], entry["held"])
         result["register_writes"] = entry["writes"]
-        result["failures"] = grade(result, entry["name"] in ("atlantis", "polyphony"))
+        if entry.get("drums"):
+            result["drums"] = score_drums(exact, entry["exact_rate"], practical, entry["practical_rate"],
+                                          entry["drums"])
+        result["failures"] = grade(result, entry["name"] in ("atlantis", "polyphony", "rhythm", "cruise"))
         results.append(result)
         if result["failures"]:
             failed.append(entry["name"])
@@ -547,6 +603,9 @@ def main():
                  if "pitch_cents_max_abs" in result else
                  f" | {len(result['spectral_windows'])} spectra: hf {result['hf_excess_db_max']:+.1f} dB"
                  if result.get("spectral_windows") else "")
+              + (f" | {len(result['drums'])} drums: level {max(abs(d['level_db']) for d in result['drums']):.2f} dB"
+                 f" bands {max(d.get('band_db_mean_abs', 0.0) for d in result['drums']):.2f} dB"
+                 if result.get("drums") else "")
               + (" | lfo " + " ".join(f"{k}={pair['exact'][k]}/{pair['practical'][k]}"
                                      for pair in result["lfo"] for k in pair["exact"] if k != "mean_hz")
                  if result.get("lfo") else "")
@@ -564,6 +623,9 @@ def main():
         "scummvm_worktree_dirty": dirty,
         "source_sha256": {name: hashlib.sha256((HERE / name).read_bytes()).hexdigest() for name in sources},
         "trace_sha256": hashlib.sha256(args.trace.read_bytes()).hexdigest() if args.trace else None,
+        "rhythm_trace_sha256": (hashlib.sha256(args.rhythm_trace.read_bytes()).hexdigest()
+                                if args.rhythm_trace else None),
+        "rhythm_trace_from_s": args.rhythm_from if args.rhythm_trace else None,
         "thresholds": THRESHOLDS,
         "method": {
             "exact_reference": "opl-kernel.h at 49,716 Hz, bit exact against Nuked-OPL3",

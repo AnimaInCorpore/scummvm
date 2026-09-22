@@ -10,6 +10,11 @@
 //  * reset: a reset under a held note leaves the machine as a fresh one
 //  * attack: zero and maximum rates hold mid-attack, maximum key-on is instant
 //  * pause: FM state is frozen and silent, PCM still plays, resume is continuous
+//  * rhythm: the lookups the DSP picks the drums' phases with give the exact
+//    kernel's phases for every pair of oscillator phases and noise bits; an
+//    operator's key is its channel's or its drum's, with the chip's edges;
+//    the drums sound at twice a melodic operator's level
+//  * waveform select enable: an OPL2's waveforms wait for register 1
 //
 // usage: opl-practical-unit-test
 #include <cstdio>
@@ -318,6 +323,144 @@ void checkReset() {
 		fail("reset test did not start an audible new song");
 }
 
+// The three phase-bit drums, for all 1,024 x 1,024 oscillator phases and both
+// noise bits: the phases the practical kernel's lookups select against the
+// ones the exact kernel computes.
+unsigned long checkRhythmSelection() {
+	E::Chip chip;
+	E::reset(&chip, 9);
+	chip.rhythm = 0x20;
+	unsigned long checked = 0;
+	for (uint16_t hiHat = 0; hiHat < 1024; ++hiHat) {
+		for (uint16_t cymbal = 0; cymbal < 1024; ++cymbal) {
+			const int32_t row = P::rhythmHiHatRow(hiHat);
+			const int32_t select = P::rhythmSelect(row - P::kRhythmSelect + P::rhythmCymbalColumn(cymbal));
+			for (int noise = 0; noise < 4; ++noise, ++checked) {
+				chip.noiseHiHat = (uint8_t)(noise >> 1);
+				chip.noiseSnare = (uint8_t)(noise & 1);
+				E::rhythmPhase(&chip, E::kSlotCymbal, cymbal);
+				const uint16_t wantHiHat = E::rhythmPhase(&chip, E::kSlotHiHat, hiHat);
+				const uint16_t wantSnare = E::rhythmPhase(&chip, E::kSlotSnare, 0);
+				const uint16_t wantCymbal = E::rhythmPhase(&chip, E::kSlotCymbal, cymbal);
+				// the drum table's index: the hi-hat's noise bit in bit 3, the snare's in bit 0
+				const int index = ((noise >> 1) << 3) + (noise & 1) + select;
+				const int pair = index >> 2, snare = index & 3;
+				if (P::rhythmPhase(2 * pair) != wantHiHat || P::rhythmPhase(2 * pair + 1) != wantCymbal
+				    || P::rhythmPhase(8 + snare) != wantSnare) {
+					fail("rhythm phase selection", hiHat, cymbal, noise);
+					return checked;
+				}
+			}
+		}
+	}
+	// The noise generator: the chip's recurrence, s[n + 23] = s[n + 14] ^ s[n].
+	int32_t noise = 1;
+	uint8_t bits[4096];
+	for (int n = 0; n < 4096; ++n) {
+		bits[n] = (uint8_t)(noise & 1);
+		noise = (noise >> 1) ^ ((noise & 1) ? P::kNoiseTaps : 0);
+	}
+	for (int n = 0; n + 23 < 4096; ++n)
+		if (bits[n + 23] != (bits[n + 14] ^ bits[n])) {
+			fail("noise recurrence", n);
+			break;
+		}
+	return checked;
+}
+
+// Random writes to the rhythm register and the three channels' key bits:
+// each of the six operators is keyed when the chip's slot is, and sees a
+// key-on edge when the chip's slot does.
+unsigned checkRhythmKeys() {
+	static const uint8_t slots[6] = { 12, 15, 13, 16, 14, 17 };   // the chip's, in record order 12..17
+	Pair p;
+	uint32_t seed = 12345, edges[6] = { 0, 0, 0, 0, 0, 0 };
+	unsigned writes = 0;
+	for (; writes < 4000; ++writes) {
+		seed = seed * 1664525u + 1013904223u;
+		const uint8_t value = (uint8_t)(seed >> 16);
+		uint8_t before[6];
+		for (int i = 0; i < 6; ++i)
+			before[i] = p.exact.slot[slots[i]].key;
+		if (seed & 0x0300)
+			p.write(0xbd, (uint8_t)((value & 0x1f) | ((seed & 0x0c00) ? 0x20 : 0x00)));
+		else
+			p.write((uint16_t)(0xb6 + (seed >> 12) % 3), (uint8_t)(value & 0x3f));
+		p.decoder.flush();
+		for (int i = 0; i < 6; ++i) {
+			const uint8_t after = p.exact.slot[slots[i]].key;
+			edges[i] += after && !before[i];
+			const int32_t *w = p.practical.op[12 + i].w;
+			if (((w[P::OP_FLAGS] & 1) != 0) != (after != 0))
+				fail("rhythm key", writes, i);
+			if ((uint32_t)w[P::OP_TRIG] != edges[i])
+				fail("rhythm key-on edges", writes, i, w[P::OP_TRIG], edges[i]);
+		}
+		if ((p.practical.rhythm != 0) != ((p.exact.rhythm & 0x20) != 0))
+			fail("rhythm mode", writes);
+	}
+	p.decoder.reset(&p.sink, 9, p.block);
+	if (p.practical.rhythm)
+		fail("rhythm mode after a reset");
+
+	// Twice the level: the tom-tom against the same operator as a melodic
+	// modulator under the additive connection, both at no attenuation.
+	int32_t peaks[2] = { 0, 0 };
+	for (int rhythm = 0; rhythm < 2; ++rhythm) {
+		Pair q;
+		q.write(0x01, 0x20);
+		for (uint8_t op = 0x12; op <= 0x15; op += 3) {
+			q.write(0x20 + op, 0x21);
+			q.write(0x40 + op, 0x00);
+			q.write(0x60 + op, op == 0x12 ? 0xf0 : 0x00);   // the carrier never attacks: it stays silent
+			q.write(0x80 + op, 0x0f);
+		}
+		q.write(0xc8, 0x01);
+		q.write(0xa8, 0x57);
+		q.write(0xb8, (uint8_t)(rhythm ? 0x09 : 0x29));
+		q.write(0xbd, (uint8_t)(rhythm ? 0x24 : 0x00));
+		q.decoder.flush();
+		int32_t out[P::kBlockFrames];
+		for (int b = 0; b < 40; ++b) {
+			P::renderBlock(&q.practical, nullptr, out);
+			for (int i = 0; i < P::kBlockFrames; ++i)
+				if (out[i] > peaks[rhythm])
+					peaks[rhythm] = out[i];
+		}
+	}
+	if (!peaks[0] || peaks[1] < 2 * peaks[0] - 2 || peaks[1] > 2 * peaks[0] + 2)
+		fail("the tom-tom is not twice a melodic operator", peaks[0], peaks[1]);
+	return writes;
+}
+
+// An OPL2 holds a waveform selection back until register 1 enables it, and
+// takes it back when the enable clears; an OPL3 has no such bit.
+void checkWaveformEnable() {
+	Pair p;
+	p.write(0xe0, 0x02);
+	p.decoder.flush();
+	if (p.practical.op[0].w[P::OP_WFBASE] != P::kWaveBase)
+		fail("waveform played before the enable", p.practical.op[0].w[P::OP_WFBASE]);
+	p.write(0x01, 0x20);
+	p.decoder.flush();
+	if (p.practical.op[0].w[P::OP_WFBASE] != P::kWaveBase + 2 * 1024)
+		fail("held waveform not played once enabled", p.practical.op[0].w[P::OP_WFBASE]);
+	p.write(0x01, 0x00);
+	p.decoder.flush();
+	if (p.practical.op[0].w[P::OP_WFBASE] != P::kWaveBase)
+		fail("waveform played after the enable cleared", p.practical.op[0].w[P::OP_WFBASE]);
+
+	P::Chip chip;
+	P::reset(&chip, 18);
+	P::DirectSink sink(&chip);
+	P::Decoder opl3;
+	opl3.reset(&sink, 18);
+	opl3.write(0, 0xe0, 0x02);
+	opl3.flush();
+	if (chip.op[0].w[P::OP_WFBASE] != P::kWaveBase + 2 * 1024)
+		fail("an OPL3 has no waveform select enable", chip.op[0].w[P::OP_WFBASE]);
+}
+
 } // namespace
 
 int main() {
@@ -327,8 +470,12 @@ int main() {
 	const unsigned attacks = checkAttackChanges();
 	checkPause();
 	checkReset();
+	const unsigned long selections = checkRhythmSelection();
+	const unsigned rhythmWrites = checkRhythmKeys();
+	checkWaveformEnable();
 	std::printf("{\"increments_checked\": %lu, \"sustain_level_cases\": %lu,"
-	            " \"sustain_level_cases_settled_alike\": %lu, \"attack_change_cases\": %u, \"failures\": %u}\n",
-	            pitches, levels, settled, attacks, g_failures);
+	            " \"sustain_level_cases_settled_alike\": %lu, \"attack_change_cases\": %u,"
+	            " \"rhythm_phase_selections\": %lu, \"rhythm_key_writes\": %u, \"failures\": %u}\n",
+	            pitches, levels, settled, attacks, selections, rhythmWrites, g_failures);
 	return g_failures ? 1 : 0;
 }

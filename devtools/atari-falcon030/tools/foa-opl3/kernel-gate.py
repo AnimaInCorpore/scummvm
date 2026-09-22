@@ -25,13 +25,16 @@ def sha(data):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--trace", type=Path, required=True, help="captured opl-writes.ev to replay")
+    parser.add_argument("--rhythm-trace", type=Path,
+                        help="a second captured stream, of a game that uses rhythm mode (Cruise for a Corpse)")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if not BINARY.is_file():
         parser.error("build opl-kernel-test first (see README)")
     args.output.mkdir(parents=True, exist_ok=False)
 
-    completed = subprocess.run([str(BINARY), str(args.trace.resolve())],
+    completed = subprocess.run([str(BINARY), str(args.trace.resolve())]
+                               + ([str(args.rhythm_trace.resolve())] if args.rhythm_trace else []),
                                capture_output=True, text=True, check=True)
     summary = json.loads(completed.stdout.strip().splitlines()[-1])
     if not summary["bit_exact"] or summary["mismatches"]:
@@ -48,6 +51,7 @@ def main():
         "scummvm_worktree_dirty": dirty,
         "source_sha256": {name: sha((HERE / name).read_bytes()) for name in SOURCES},
         "trace_sha256": sha(args.trace.read_bytes()),
+        "rhythm_trace_sha256": sha(args.rhythm_trace.read_bytes()) if args.rhythm_trace else None,
         "reference": summary["reference"],
         "samples_compared": summary["samples_compared"],
         "register_writes": summary["register_writes"],
@@ -59,12 +63,19 @@ def main():
                   "timbre: all waveforms, both connections, every feedback depth, OPL2 and OPL3",
                   "modulation: tremolo and vibrato, shallow and deep, over a full LFO period",
                   "polyphony: 9 and 18 channels with key cycling and mid-note patch reloads",
-                  "the captured Atlantis register stream replayed at its recorded times"],
+                  "rhythm: the bass drum in both connections and the four single-operator drums in every"
+                  " key combination, waveform and level; drum keys under and over the channels' own; the"
+                  " mode left and entered under sounding notes; the low bank of an 18-channel chip; the"
+                  " noise generator past its period",
+                  "waveform select enable: an OPL2's gate, against the oracle given what it lets through",
+                  "the captured Atlantis register stream replayed at its recorded times"]
+                 + (["the captured Cruise for a Corpse register stream, which plays its percussion through"
+                     " rhythm mode, replayed at its recorded times"] if args.rhythm_trace else []),
         "rom_words": {"log_sine": 256, "exponential": 256,
                       "note": "The eight 1,024-entry waveform tables a desktop build uses are"
                               " reconstructed from these two, so the whole ROM is 512 words"},
         "scope": {"two_operator_melodic_channels": True, "four_operator_mode": False,
-                  "rhythm_mode": False},
+                  "rhythm_mode": True, "opl2_waveform_select_enable": True},
         "not_established": [
             "No DSP assembly was measured; this is the host reference the kernel is written from",
             "No synthesis, transport or deadline cost was timed on a Falcon or in emulation",

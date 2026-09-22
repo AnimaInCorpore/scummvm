@@ -25,6 +25,7 @@ renders while the host is silent. The late count at the end of the stall
 must now match the playback time that passed, within a period either way.
 """
 import argparse
+from datetime import date
 import hashlib
 import json
 from pathlib import Path
@@ -103,9 +104,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--trace", type=Path, help="captured opl-writes.ev (the trace scenario)")
-    parser.add_argument("--scenario", choices=("trace", "stress"), default="trace",
-                        help="stress: nine feedback FM channels with tremolo and vibrato held, the kernel's worst case")
+    parser.add_argument("--scenario", choices=("trace", "stress", "rhythm"), default="trace",
+                        help="stress: nine feedback FM channels with tremolo and vibrato held, the kernel's worst "
+                             "case; rhythm: rhythm mode at its most expensive, then every shape it takes")
     parser.add_argument("--seconds", type=float, default=10.0)
+    parser.add_argument("--from", dest="start", type=float, default=0.0,
+                        help="start the trace's window this many seconds in, on the register image left by then")
     parser.add_argument("--vbls", type=int, default=20000)
     parser.add_argument("--starve", type=int, default=0, metavar="FRAMES",
                         help="withhold every refill for this many video frames halfway through, and require "
@@ -118,7 +122,8 @@ def main():
 
     fixture = subprocess.run([str(HERE / "build/headless/opl-rt-fixture"), args.scenario,
                               str(case / "OPLDATA.BIN"), str(case / "EXPECT.BIN")]
-                             + (["--trace", str(args.trace.resolve())] if args.scenario == "trace" else [])
+                             + (["--trace", str(args.trace.resolve()), "--from", str(args.start)]
+                                if args.scenario == "trace" else [])
                              + ["--seconds", str(args.seconds), "--play", str(case / "PLAYDATA.BIN")],
                              capture_output=True, text=True, check=True)
     shape = json.loads(fixture.stdout)
@@ -164,12 +169,13 @@ def main():
     periods_rendered = status & 0xfff
     late = status >> 12
     result = {
-        "date": "2026-09-18",
+        "date": date.today().isoformat(),
         "gate": "practical OPL kernel stream mode on the emulated Falcon: transport, timing, exactness",
         "source_sha256": {name: hashlib.sha256((HERE / name).read_bytes()).hexdigest()
                           for name in ("dsp/oplrt.asm", "m68k/oplplay.s", "rt-fixture.cpp", "opl-practical.h")},
         "scenario": args.scenario,
         "trace_sha256": hashlib.sha256(args.trace.read_bytes()).hexdigest() if args.trace else None,
+        "trace_from_s": args.start if args.scenario == "trace" else None,
         "seconds": shape["seconds"],
         "periods_submitted": shape["periods"],
         "periods_rendered": periods_rendered,

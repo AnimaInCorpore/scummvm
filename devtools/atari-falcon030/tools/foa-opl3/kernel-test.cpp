@@ -254,9 +254,157 @@ static void polyphonyCase(uint8_t channels) {
 	pair.run(4000);
 }
 
+// Rhythm mode: the bass drum in both connections, the four single-operator
+// drums in every key combination, waveform and level, the drums' keys under
+// and over the channels' own, the mode left and entered under sounding
+// notes, and a long run of the noise generator.
+static void rhythmPatches(Pair &pair, uint8_t variant, uint8_t bassConnection) {
+	for (uint8_t ch = 6; ch < 9; ++ch) {
+		const uint8_t mod = kModOffset[ch];
+		const uint8_t car = (uint8_t)(mod + 3);
+		pair.write(0x20 + mod, (uint8_t)(0x01 + ((ch + variant) & 7) + ((variant & 1) << 6)));
+		pair.write(0x20 + car, (uint8_t)(0x02 + ((ch * 3 + variant) & 7) + ((variant & 2) << 6)));
+		pair.write(0x40 + mod, (uint8_t)((variant * 5 + ch) & 0x1f));
+		pair.write(0x40 + car, (uint8_t)((variant * 3 + ch) & 0x0f));
+		pair.write(0x60 + mod, (uint8_t)(0xf0 | ((6 + variant + ch) & 0xf)));
+		pair.write(0x60 + car, (uint8_t)(((variant & 4) ? 0xa0 : 0xf0) | ((5 + variant) & 0xf)));
+		pair.write(0x80 + mod, (uint8_t)(0x40 | ((4 + variant) & 0xf)));
+		pair.write(0x80 + car, (uint8_t)(0x20 | ((6 + ch) & 0xf)));
+		pair.write(0xe0 + mod, (uint8_t)((variant + ch) & 3));
+		pair.write(0xe0 + car, (uint8_t)((variant + ch + 1) & 3));
+		pair.write(0xc0 + ch, (uint8_t)((((variant + ch) & 7) << 1) | (ch == 6 ? bassConnection : (variant & 1))));
+		const uint16_t fnum = (uint16_t)(0x120 + 0x53 * ch + 0x31 * variant);
+		pair.write(0xa0 + ch, (uint8_t)(fnum & 0xff));
+		pair.write(0xb0 + ch, (uint8_t)((((variant + ch) & 7) << 2) | ((fnum >> 8) & 3)));
+	}
+}
+
+static void rhythmCase() {
+	g_case = "rhythm";
+	Pair pair;
+	for (uint8_t variant = 0; variant < 8; ++variant) {
+		for (uint8_t bassConnection = 0; bassConnection < 2; ++bassConnection) {
+			pair.reset(9);
+			pair.write(0x01, 0x20);
+			// A melodic voice beside the drums, so the mix is not theirs alone.
+			patch(pair, 0, 0, kModOffset[0], kModOffset[0] + 3, 0x21, 0x10, 0xf3, 0x25, 0, 0x06);
+			pair.write(0xa0, 0x41);
+			pair.write(0xb0, 0x32);
+			rhythmPatches(pair, variant, bassConnection);
+			pair.write(0xbd, (uint8_t)(0x20 | (variant << 6)));
+			pair.run(100);
+			for (uint8_t keys = 1; keys < 32; ++keys) {
+				pair.write(0xbd, (uint8_t)(0x20 | (variant << 6) | keys));
+				pair.run(180);
+				pair.write(0xbd, (uint8_t)(0x20 | (variant << 6)));
+				pair.run(90);
+			}
+		}
+	}
+
+	// The channels' own keys under rhythm mode, a drum key over a held channel
+	// key (no retrigger) and the other way round, then the mode left under
+	// sounding drums (they are released, and the channels turn melodic again)
+	// and entered under sounding melodic notes.
+	for (uint8_t variant = 0; variant < 4; ++variant) {
+		pair.reset(9);
+		pair.write(0x01, 0x20);
+		rhythmPatches(pair, (uint8_t)(variant + 3), (uint8_t)(variant & 1));
+		pair.write(0xbd, 0x20);
+		for (uint8_t ch = 6; ch < 9; ++ch) {
+			pair.write(0xb0 + ch, (uint8_t)(0x20 | (ch << 2) | 1));
+			pair.run(200);
+		}
+		pair.write(0xbd, 0x3f);
+		pair.run(300);
+		for (uint8_t ch = 6; ch < 9; ++ch) {
+			pair.write(0xb0 + ch, (uint8_t)((ch << 2) | 1));
+			pair.run(150);
+		}
+		pair.write(0xbd, 0x20);
+		pair.run(200);
+		pair.write(0xbd, 0x3f);
+		pair.run(250);
+		pair.write(0xbd, 0x1f);   // the mode bit clear: the drum bits mean nothing
+		pair.run(400);
+		for (uint8_t ch = 6; ch < 9; ++ch)
+			pair.write(0xb0 + ch, (uint8_t)(0x20 | (ch << 2) | 2));
+		pair.run(300);
+		pair.write(0xbd, 0x3f);
+		pair.run(400);
+		pair.write(0xbd, 0x00);
+		pair.run(300);
+	}
+
+	// Rhythm mode on the low bank of an eighteen-channel chip.
+	pair.reset(18);
+	pair.write(0x105, 0x01);
+	rhythmPatches(pair, 5, 0);
+	pair.write(0xbd, 0x3f);
+	pair.run(600);
+	pair.write(0xbd, 0x20);
+	pair.run(200);
+
+	// The noise generator's period is 2^23 - 1 steps, 233,017 samples: a run
+	// past it with the hi-hat and the snare held.
+	pair.reset(9);
+	pair.write(0x01, 0x20);
+	rhythmPatches(pair, 2, 0);
+	for (uint8_t ch = 7; ch < 9; ++ch)
+		for (uint8_t which = 0; which < 2; ++which) {
+			pair.write(0x20 + kModOffset[ch] + 3 * which, 0x21);   // sustaining
+			pair.write(0x80 + kModOffset[ch] + 3 * which, 0x0f);
+		}
+	pair.write(0xbd, 0x2b);
+	pair.run(260000);
+}
+
+// The OPL2's waveform select enable, which the OPL3 oracle does not have: with
+// the gate modelled and the enable clear every operator plays its sine, and
+// the selection it held comes into force when the enable is set. Compared
+// against the oracle given the waveforms the gate lets through.
+static void waveformEnableCase() {
+	g_case = "waveform-enable";
+	for (uint8_t wf = 0; wf < 4; ++wf) {
+		NK::opl3_chip reference;
+		OplKernel::Chip kernel;
+		NK::OPL3_Reset(&reference, 49716);
+		OplKernel::reset(&kernel, 9);
+		kernel.opl2WaveformGate = 1;
+		struct Step { uint16_t reg; uint8_t value; uint8_t oracle; };
+		const Step steps[] = {
+			{ 0x20, 0x21, 0x21 }, { 0x23, 0x21, 0x21 }, { 0x40, 0x12, 0x12 }, { 0x43, 0x00, 0x00 },
+			{ 0x60, 0xf2, 0xf2 }, { 0x63, 0xf2, 0xf2 }, { 0x80, 0x24, 0x24 }, { 0x83, 0x24, 0x24 },
+			{ 0xe0, wf, 0 }, { 0xe3, wf, 0 },                // held, not played: the enable is clear
+			{ 0xc0, 0x04, 0x04 }, { 0xa0, 0x98, 0x98 }, { 0xb0, 0x2c, 0x2c }
+		};
+		for (size_t i = 0; i < sizeof(steps) / sizeof(steps[0]); ++i) {
+			NK::OPL3_WriteReg(&reference, steps[i].reg, steps[i].oracle);
+			OplKernel::writeRegister(&kernel, steps[i].reg, steps[i].value);
+			++g_writes;
+		}
+		for (int phase = 0; phase < 3; ++phase) {
+			if (phase) {
+				// Set, then cleared again: the held selection plays, then the sine.
+				OplKernel::writeRegister(&kernel, 0x01, phase == 1 ? 0x20 : 0x00);
+				NK::OPL3_WriteReg(&reference, 0xe0, phase == 1 ? wf : 0);
+				NK::OPL3_WriteReg(&reference, 0xe3, phase == 1 ? wf : 0);
+			}
+			for (unsigned i = 0; i < 400; ++i) {
+				int16_t expected[2], got[2];
+				NK::OPL3_Generate(&reference, expected);
+				OplKernel::generate(&kernel, &got[0], &got[1]);
+				++g_samples;
+				if (expected[0] != got[0] || expected[1] != got[1])
+					fail("the gated waveform differs from the oracle's");
+			}
+		}
+	}
+}
+
 // Replay a captured post-AdLib-driver trace at its recorded microsecond times.
-static void traceCase(const char *path) {
-	g_case = "atlantis-trace";
+static void traceCase(const char *path, const char *name) {
+	g_case = name;
 	FILE *file = std::fopen(path, "r");
 	if (!file)
 		fail("cannot open trace");
@@ -299,8 +447,12 @@ int main(int argc, char **argv) {
 	modulationSweep();
 	polyphonyCase(9);
 	polyphonyCase(18);
+	rhythmCase();
+	waveformEnableCase();
 	if (argc > 1)
-		traceCase(argv[1]);
+		traceCase(argv[1], "atlantis-trace");
+	if (argc > 2)
+		traceCase(argv[2], "rhythm-trace");   // a game that plays its drums through rhythm mode
 	std::printf("{\"samples_compared\": %llu, \"register_writes\": %llu, \"mismatches\": 0,"
 	            " \"reference\": \"Nuked-OPL3 (ScummVM tree)\", \"bit_exact\": true}\n",
 	            g_samples, g_writes);

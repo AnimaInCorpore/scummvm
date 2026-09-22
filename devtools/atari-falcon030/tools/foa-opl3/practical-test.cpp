@@ -5,6 +5,11 @@
 // spectral check. Nothing here measures a Falcon.
 //
 // usage: opl-practical-test <output-dir> [--trace opl-writes.ev] [--seconds N] [--wav]
+//                           [--rhythm-trace opl-writes.ev] [--rhythm-from S]
+//
+// The rhythm trace is a second captured stream, of a game that plays its
+// percussion through rhythm mode (Cruise for a Corpse); its window starts
+// where the drums do, on the register image the earlier writes left.
 #define FORBIDDEN_SYMBOL_ALLOW_ALL
 #include <cstdio>
 #include <cstdlib>
@@ -35,6 +40,10 @@ struct Script {
 	std::string name;
 	std::vector<Event> events;
 	std::vector<Note> notes;   // single-voice scripts only: what the gate checks one by one
+	// Held rhythm-mode drums, one at a time. hz centres the bands of a pitched
+	// drum on its note and is zero for the others; a negative hz marks a drum
+	// the gate grades on level alone.
+	std::vector<Note> drums;
 	uint8 mult[9];             // the carrier's multiplier register, per channel
 	bool held;                 // every note is held at a constant level: stationary by construction
 	double seconds;
@@ -213,14 +222,100 @@ std::vector<Script> scenarios() {
 		s.finish(0.0);
 		all.push_back(s);
 	}
+	{
+		// Rhythm mode. First every drum alone and held (a sustaining envelope at
+		// full level), with two tunings of the hi-hat's and the cymbal's
+		// oscillators and the bass drum in both connections, for the spectra;
+		// then a pattern of percussive hits over a melodic voice, for the
+		// contour and the onsets.
+		Script s("rhythm");
+		s.write(0x01, 0x20);
+		static const uint8 multipliers[2][2] = { { 0x01, 0x01 }, { 0x04, 0x05 } };   // hi-hat, cymbal
+		for (int tuning = 0; tuning < 2; ++tuning) {
+			for (uint8 ch = 6; ch < 9; ++ch)
+				for (uint8 which = 0; which < 2; ++which) {
+					const uint8 op = (uint8)(kModOffset[ch] + 3 * which);
+					uint8 mult = 0x01;
+					if (ch == 7 && !which)
+						mult = multipliers[tuning][0];
+					if (ch == 8 && which)
+						mult = multipliers[tuning][1];
+					s.write(0x20 + op, (uint8)(0x20 | mult));
+					s.write(0x40 + op, (ch == 6 && !which) ? 0x14 : 0x00);
+					s.write(0x60 + op, 0xf0);
+					s.write(0x80 + op, 0x09);
+					s.write(0xe0 + op, (uint8)(tuning && ch == 7 ? 1 : 0));
+				}
+			s.write(0xc6, 0x06);
+			s.write(0xc7, 0x00);
+			s.write(0xc8, 0x00);
+			s.write(0xa6, 0x57); s.write(0xb6, 0x09);   // bass drum: f-number 0x157, block 2
+			s.write(0xa7, 0x03); s.write(0xb7, 0x0a);   // snare and hi-hat: 0x203, block 2
+			s.write(0xa8, 0x57); s.write(0xb8, 0x09);   // tom-tom and cymbal: 0x157, block 2
+			static const uint8 keys[6] = { 0x01, 0x02, 0x04, 0x08, 0x10, 0x10 };
+			for (int drum = 0; drum < 6; ++drum) {
+				if (drum == 5)
+					s.write(0xc6, 0x07);   // the additive connection: the carrier alone
+				s.write(0xbd, 0x20);
+				// The hi-hat and the cymbal are built from their oscillators' phase
+				// bits, the fastest of which is a square wave at 128 times the
+				// oscillator's pitch: under the second tuning that is past 49 kHz
+				// and folds to another frequency at each kernel's own rate, so
+				// the two spectra cannot line up and only the level is held.
+				const bool pitched = drum >= 2 && drum != 3;
+				const bool folds = tuning == 1 && drum < 2;
+				s.drums.push_back(Note{s.at, s.at + 1.0, folds ? -1.0 : pitched ? noteHz(0x157, 2, 1) : 0.0});
+				s.write(0xbd, (uint8)(0x20 | keys[drum]));
+				s.wait(1.0);
+				s.write(0xbd, 0x20);
+				s.wait(0.25);
+			}
+		}
+		// The pattern: percussive envelopes, the drums keyed in combinations.
+		for (uint8 ch = 6; ch < 9; ++ch)
+			for (uint8 which = 0; which < 2; ++which) {
+				const uint8 op = (uint8)(kModOffset[ch] + 3 * which);
+				s.write(0x20 + op, 0x01);
+				s.write(0x40 + op, (ch == 6 && !which) ? 0x10 : (ch == 7 && !which) ? 0x08 : 0x02);
+				s.write(0x60 + op, (uint8)(0xf0 | (ch == 6 ? 0x6 : ch == 7 ? 0x8 : 0x5)));
+				s.write(0x80 + op, (uint8)(0xf0 | (ch == 6 ? 0x6 : ch == 7 ? 0x8 : 0x5)));
+				s.write(0xe0 + op, 0x00);
+			}
+		s.write(0xc6, 0x08);
+		patch(s, 0, 0x21, 0x1a, 0x04, 0xf3, 0x36, 0, 0x04);
+		static const uint8 pattern[16] = {
+			0x11, 0x01, 0x09, 0x01, 0x11, 0x05, 0x09, 0x03, 0x11, 0x01, 0x09, 0x05, 0x15, 0x11, 0x0b, 0x1f
+		};
+		for (int step = 0; step < 16; ++step) {
+			if (!(step & 3)) {
+				s.write(0xa0, (uint8)(0x41 + step * 7));
+				s.write(0xb0, 0x2e);
+			}
+			s.write(0xbd, 0x20);
+			s.wait(0.004);
+			s.write(0xbd, (uint8)(0x20 | pattern[step]));
+			s.wait(0.121);
+			if ((step & 3) == 3)
+				s.write(0xb0, 0x0e);
+		}
+		s.write(0xbd, 0x20);
+		s.finish(0.6);
+		all.push_back(s);
+	}
 	return all;
 }
 
-bool loadTrace(const char *path, double seconds, Script &s) {
+bool loadTrace(const char *path, double seconds, Script &s, double from = 0.0) {
 	FILE *file = std::fopen(path, "r");
 	if (!file)
 		return false;
 	char line[256];
+	// Writes before the window only leave their register image, applied once
+	// at its start: replayed in an instant they would be key-on edges.
+	int image[512];
+	for (int i = 0; i < 512; ++i)
+		image[i] = -1;
+	bool started = false;
 	while (std::fgets(line, sizeof(line), file)) {
 		if (line[0] != 'W')
 			continue;
@@ -229,9 +324,19 @@ bool loadTrace(const char *path, double seconds, Script &s) {
 		unsigned reg, value;
 		if (std::sscanf(line, "W %llu %c %x %x", &when, &context, &reg, &value) != 4)
 			continue;
-		const double at = when / 1000000.0;
+		const double at = when / 1000000.0 - from;
 		if (at > seconds)
 			break;
+		if (at < 0.0) {
+			image[reg & 0x1ff] = (int)value;
+			continue;
+		}
+		if (!started) {
+			for (int i = 0; i < 512; ++i)
+				if (image[i] >= 0)
+					s.events.push_back(Event{0.0, (uint16)i, (uint8)image[i]});
+			started = true;
+		}
 		s.events.push_back(Event{at, (uint16)reg, (uint8)value});
 	}
 	std::fclose(file);
@@ -269,18 +374,36 @@ void writeWav(const std::string &path, const std::vector<int16> &pcm, uint32 rat
 	std::fclose(file);
 }
 
-// The exact kernel, writes applied at their native sample.
+// The exact kernel, writes applied at their native sample - except that a
+// key register (0xb0-0xb8, 0xbd) written twice within one sample gets a
+// sample between the two writes. A captured trace stamps every write of a
+// driver tick with the tick's time, and a sample-exact chip given a key-off
+// and a key-on in the same sample never sees the key-off: the note is not
+// retriggered and a percussive patch falls silent for good (Cruise for a
+// Corpse rekeys every note that way; its music stops after a few bars). On
+// the card each port write takes longer than the chip's 20 microsecond
+// sample, so the chip does see it, which is also what the practical kernel's
+// counted key-on edges give.
 std::vector<int16> renderExact(const Script &s) {
 	OplKernel::Chip chip;
 	OplKernel::reset(&chip, 9);
+	chip.opl2WaveformGate = 1;   // an OPL2, as the practical decoder is for nine channels
 	const uint64 total = (uint64)(s.seconds * kNativeRate);
 	std::vector<int16> pcm;
 	pcm.reserve(total);
 	size_t next = 0;
 	int16 left, right;
 	for (uint64 sample = 0; sample < total; ++sample) {
+		bool keyWritten[16];
+		memset(keyWritten, 0, sizeof(keyWritten));
 		while (next < s.events.size() && (uint64)(s.events[next].seconds * kNativeRate) <= sample) {
-			OplKernel::writeRegister(&chip, s.events[next].reg, s.events[next].value);
+			const uint16 reg = s.events[next].reg;
+			if (reg >= 0xb0 && reg <= 0xbd) {
+				if (keyWritten[reg - 0xb0])
+					break;   // the rest of this tick's writes follow a sample later
+				keyWritten[reg - 0xb0] = true;
+			}
+			OplKernel::writeRegister(&chip, reg, s.events[next].value);
 			++next;
 		}
 		OplKernel::generate(&chip, &left, &right);
@@ -326,11 +449,16 @@ int main(int argc, char **argv) {
 	}
 	const std::string outDir = argv[1];
 	const char *trace = nullptr;
-	double seconds = 60.0;
+	const char *rhythmTrace = nullptr;
+	double seconds = 60.0, rhythmFrom = 0.0;
 	bool wav = false;
 	for (int i = 2; i < argc; ++i) {
 		if (!std::strcmp(argv[i], "--trace") && i + 1 < argc)
 			trace = argv[++i];
+		else if (!std::strcmp(argv[i], "--rhythm-trace") && i + 1 < argc)
+			rhythmTrace = argv[++i];
+		else if (!std::strcmp(argv[i], "--rhythm-from") && i + 1 < argc)
+			rhythmFrom = std::atof(argv[++i]);
 		else if (!std::strcmp(argv[i], "--seconds") && i + 1 < argc)
 			seconds = std::atof(argv[++i]);
 		else if (!std::strcmp(argv[i], "--wav"))
@@ -342,6 +470,14 @@ int main(int argc, char **argv) {
 		Script s("atlantis");
 		if (!loadTrace(trace, seconds, s)) {
 			std::fprintf(stderr, "cannot read trace %s\n", trace);
+			return 1;
+		}
+		all.push_back(s);
+	}
+	if (rhythmTrace) {
+		Script s("cruise");
+		if (!loadTrace(rhythmTrace, seconds, s, rhythmFrom)) {
+			std::fprintf(stderr, "cannot read trace %s\n", rhythmTrace);
 			return 1;
 		}
 		all.push_back(s);
@@ -366,11 +502,19 @@ int main(int argc, char **argv) {
 			              s.notes[n].hz);
 			notes += text;
 		}
+		std::string drums;
+		for (size_t n = 0; n < s.drums.size(); ++n) {
+			char text[64];
+			std::snprintf(text, sizeof(text), "%s[%.6f, %.6f, %.4f]", n ? ", " : "", s.drums[n].on, s.drums[n].off,
+			              s.drums[n].hz);
+			drums += text;
+		}
 		std::printf("  {\"name\": \"%s\", \"seconds\": %.6f, \"writes\": %llu, \"exact_rate\": %.1f,"
 		            " \"practical_rate\": %.6f, \"exact_samples\": %zu, \"practical_frames\": %zu,"
-		            " \"held\": %s, \"notes\": [%s]}%s\n",
+		            " \"held\": %s, \"notes\": [%s], \"drums\": [%s]}%s\n",
 		            s.name.c_str(), s.seconds, writes, kNativeRate, kCodecRate, exact.size(),
-		            practical.size(), s.held ? "true" : "false", notes.c_str(), i + 1 < all.size() ? "," : "");
+		            practical.size(), s.held ? "true" : "false", notes.c_str(), drums.c_str(),
+		            i + 1 < all.size() ? "," : "");
 	}
 	std::printf("]\n");
 	return 0;

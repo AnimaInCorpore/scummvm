@@ -173,8 +173,9 @@ struct PeriodSink : OplPractical::Sink {
 
 void AtariDspOPL::flushPending(AtariDspAudio *audio, AtariDspAudio::Period *period) {
 	// A fresh period takes the whole queue, the largest resend (every slot,
-	// the machine's words too), the master gain and pause state, and still has room.
-	static_assert(kPendingMax + OplPractical::kSlots * 18 + OplPractical::kChannels * 2 + 2 + 2
+	// the machine's words too, and the three scalars), the master gain and pause
+	// state, and still has room.
+	static_assert(kPendingMax + OplPractical::kSlots * 18 + OplPractical::kChannels * 2 + 3 + 2
 	              <= AtariDspAudio::kMaxEvents, "a full queue and its resync must fit one period");
 	for (uint32 i = 0; i < s_pendingCount; ++i) {
 		if (!audio->addEvent(period, 0, (uint16)s_pending[2 * i], s_pending[2 * i + 1])) {

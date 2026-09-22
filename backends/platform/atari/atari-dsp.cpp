@@ -380,6 +380,21 @@ bool AtariDspAudio::uploadTables() {
 		for (int phase = 0; phase < 1024; ++phase)
 			buffer[wf * 1024 + phase] = (uint32)P::waveSample((uint8)wf, (uint16)phase) & 0xffffff;
 	uploadWords(true, P::kWaveBase, buffer, P::kWaveforms * 1024);
+
+	// Rhythm mode's lookups: the select table's row by the hi-hat's phase and
+	// its column by the cymbal's, the table, and the phases the drums play.
+	for (int phase = 0; phase < 1024; ++phase)
+		buffer[phase] = (uint32)P::rhythmHiHatRow((uint16)phase);
+	uploadWords(false, P::kRhythmHiHat, buffer, 1024);
+	for (int phase = 0; phase < 1024; ++phase)
+		buffer[phase] = (uint32)P::rhythmCymbalColumn((uint16)phase);
+	uploadWords(true, P::kRhythmCymbal, buffer, 1024);
+	for (int i = 0; i < 32; ++i)
+		buffer[i] = (uint32)P::rhythmSelect(i);
+	uploadWords(false, P::kRhythmSelect, buffer, 32);
+	for (int i = 0; i < 12; ++i)
+		buffer[i] = (uint32)P::rhythmPhase(i);
+	uploadWords(false, P::kRhythmPhases, buffer, 12);
 	return true;
 }
 
