@@ -13,9 +13,11 @@ from pathlib import Path
 import subprocess
 import sys
 
+from gate_env import program, source_sha256
+
 HERE = Path(__file__).resolve().parent
 SOURCES = ("opl-kernel.h", "kernel-test.cpp", "generate-tables.py", "kernel.mk", "kernel-gate.py")
-BINARY = HERE / "build/headless/opl-kernel-test"
+BINARY = program(HERE / "build/headless/opl-kernel-test")
 
 
 def sha(data):
@@ -49,7 +51,7 @@ def main():
         "gate": "DSP-shaped OPL kernel against Nuked-OPL3, sample for sample",
         "scummvm_commit": repository,
         "scummvm_worktree_dirty": dirty,
-        "source_sha256": {name: sha((HERE / name).read_bytes()) for name in SOURCES},
+        "source_sha256": {name: source_sha256(HERE / name) for name in SOURCES},
         "trace_sha256": sha(args.trace.read_bytes()),
         "rhythm_trace_sha256": sha(args.rhythm_trace.read_bytes()) if args.rhythm_trace else None,
         "reference": summary["reference"],

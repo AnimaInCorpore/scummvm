@@ -20,6 +20,11 @@ Established: the integrated build boots the DSP, streams, and the game runs
 with it under Hatari. Not established: any comparison against the exact
 kernel from inside the game (the game's clock is real time here, so no two
 runs are alike), or anything on hardware.
+
+A Windows build of Hatari has no control FIFO, so there the gate can neither
+start a sound recording nor quit through it: Hatari records an AVI from
+power-on instead, whose sound track is the recording, and is stopped once
+enough periods have streamed. --play and --click need the FIFO.
 """
 import argparse
 import hashlib
@@ -34,13 +39,57 @@ import time
 import wave
 from pathlib import Path
 
+from gate_env import CONTROL_FIFO, HATARI, TOS404 as TOS, link_directory, unlink_directory
+
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[3]
-HATARI = Path.home() / "Work/F030Arcade/third_party/hatari/build/src/hatari"
-# The game needs TOS 4.04 (4.02 dies in its video mode switch); the kernel benches run on 4.02.
-TOS = Path.home() / "Work/F030Arcade/third_party/tos/tos404.img"
 # The transport's period: 768 frames at the codec's 49,170 Hz, 15.62 ms.
 PERIODS_PER_SECOND = 25175000.0 / 512.0 / 768.0
+
+
+AVI_CHUNKS = (b"RIFF", b"LIST", b"JUNK", b"00dc", b"00db", b"01wb", b"ix00", b"ix01", b"idx1")
+
+
+def write_avi_sound(avi, wav):
+    """The sound track of a Hatari AVI (stream 1, PCM) as a WAV file.
+    False when the AVI holds no sound. A stopped Hatari leaves the file
+    unfinalized, with no RIFF size, and Hatari does not pad an odd chunk to
+    an even length as RIFF would, so neither is relied on."""
+    rate = channels = bits = None
+    stream = None
+    pcm = bytearray()
+    with avi.open("rb") as f:
+        def walk(end):
+            nonlocal rate, channels, bits, stream
+            while f.tell() + 8 <= end:
+                tag = f.read(4)
+                size = struct.unpack("<I", f.read(4))[0]
+                start = f.tell()
+                if tag in (b"RIFF", b"LIST"):
+                    if not size or start + size > end:
+                        size = end - start   # not finalized
+                    f.read(4)
+                    walk(start + size)
+                elif tag == b"strh":
+                    stream = f.read(4)
+                elif tag == b"strf" and stream == b"auds":
+                    _, channels, rate, _, _, bits = struct.unpack("<HHIIHH", f.read(16))
+                elif tag == b"01wb":
+                    pcm.extend(f.read(size))
+                f.seek(start + size)
+                if size & 1 and f.read(4) not in AVI_CHUNKS:
+                    f.seek(start + size + 1)   # a padded chunk after all
+                else:
+                    f.seek(start + size)
+        walk(avi.stat().st_size)
+    if not rate or not pcm:
+        return False
+    with wave.open(str(wav), "wb") as w:
+        w.setnchannels(channels)
+        w.setsampwidth(bits // 8)
+        w.setframerate(rate)
+        w.writeframes(bytes(pcm))
+    return True
 
 
 def main():
@@ -75,6 +124,8 @@ def main():
                              "In Hatari's 320x200 screenshots the game's origin is at (60,72) and the scale is 2, "
                              "so game X,Y = ((sx-60)/2, (sy-72)/2)")
     args = parser.parse_args()
+    if not CONTROL_FIFO and (args.play or args.click):
+        parser.error("--play and --click drive Hatari through its control FIFO, which this host's build lacks")
     for required in (HATARI, TOS, args.binary):
         if not required.is_file():
             parser.error(f"missing {required}")
@@ -87,7 +138,7 @@ def main():
     app.mkdir(parents=True)
     shutil.copy2(args.binary, app / "SCUMMVM.PRG")
     folder = args.gameid.upper()
-    (hd / folder).symlink_to(args.game.resolve(), target_is_directory=True)
+    link_directory(hd / folder, args.game.resolve())
     ini = ("[scummvm]\ngui_theme=builtin\ngui_renderer=normal\n"
            + f"music_driver=adlib\nopl_driver={args.opl}\nautosave_period=0\n"
            + f"atari_dsp_audio={'false' if args.no_dsp_audio else 'true'}\n"
@@ -108,11 +159,18 @@ def main():
            if args.profile else ""))
     (case / "end.ini").write_text(f"profile symbols 80\nprofile save {case / 'cpu-profile.txt'}\nquit 0\n")
     fifo = case / "control.fifo"
+    avi = case / "output.avi"
+    if CONTROL_FIFO:
+        control = ["--cmd-fifo", str(fifo)]
+    elif args.sound_rate != "off":
+        control = ["--avirecord", "on", "--avi-vcodec", "png", "--avi-file", str(avi)]
+    else:
+        control = []
     command = [str(HATARI), "--machine", "falcon", "--monitor", args.monitor, "--memsize", "14",
                "--cpuclock", "16", "--fpu", "68882", "--dsp", "emu", "--tos", str(TOS), "--harddrive", str(hd),
                "--fast-boot", "on", "--fast-forward", "off" if args.play else "on",
                "--sound", "48000" if args.play else args.sound_rate,
-               "--confirm-quit", "off", "--conout", "2", "--cmd-fifo", str(fifo),
+               "--confirm-quit", "off", "--conout", "2"] + control + [
                "--natfeats", "off" if args.no_natfeats else "on", "--screenshot-dir", str(case),
                "--cpu-exact", "off" if args.no_cpu_exact else "on", "--compatible", "off" if args.no_cpu_exact else "on",
                "--run-vbls", str(int(args.seconds * 50) * 4 + 12000),
@@ -126,35 +184,44 @@ def main():
     with (case / "hatari.log").open("w") as log:
         proc = subprocess.Popen(command, cwd=case, env=env, stdout=log, stderr=subprocess.STDOUT)
         try:
-            deadline = time.monotonic() + 10
-            while True:
-                try:
-                    descriptor = os.open(fifo, os.O_WRONLY | os.O_NONBLOCK)
-                    break
-                except OSError:
-                    if proc.poll() is not None or time.monotonic() > deadline:
-                        raise RuntimeError("Hatari did not open its control FIFO")
-                    time.sleep(0.05)
-            os.close(descriptor)
+            send = None
+            if CONTROL_FIFO:
+                deadline = time.monotonic() + 10
+                while True:
+                    try:
+                        descriptor = os.open(fifo, os.O_WRONLY | os.O_NONBLOCK)
+                        break
+                    except OSError:
+                        if proc.poll() is not None or time.monotonic() > deadline:
+                            raise RuntimeError("Hatari did not open its control FIFO")
+                        time.sleep(0.05)
+                os.close(descriptor)
 
-            def send(text):
-                with os.fdopen(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK), "w") as control:
-                    control.write(text + "\n")
+                def send(text):
+                    with os.fdopen(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK), "w") as control:
+                        control.write(text + "\n")
+
+            def stop():
+                # Quitting through the control FIFO finalizes the recording;
+                # without one Hatari is stopped, and its AVI read unfinalized.
+                if send:
+                    send("hatari-shortcut quit")
+                else:
+                    proc.kill()
 
             if args.play:
                 proc.wait()
-            elif args.sound_rate != "off":
+            elif send and args.sound_rate != "off":
                 send(f"hatari-path soundout {case / 'output.wav'}")
                 time.sleep(0.1)
                 send("hatari-shortcut recsound")
             # The emulator runs faster than real time and the game logs
             # nothing while playing, so the transport's own period counter
-            # (68.3 periods per second of audio) paces the run; quitting
-            # through the control FIFO finalizes the recording.
+            # (64 periods per second of audio) paces the run.
             target = int(args.seconds * PERIODS_PER_SECOND)
             clicks = sorted((float(c.split(":")[0]) * PERIODS_PER_SECOND, int(c.split(":")[1]), int(c.split(":")[2]))
                             for c in args.click)
-            deadline = time.monotonic() + (3600 if args.profile else 900)
+            deadline = time.monotonic() + (3600 if args.profile else 1800)
             while proc.poll() is None:
                 text = (case / "hatari.log").read_text(errors="replace")
                 submitted = [int(line.split("AtariDspAudio: ")[1].split()[0]) for line in text.splitlines()
@@ -177,13 +244,14 @@ def main():
                     time.sleep(0.3)
                 if submitted and submitted[-1] >= target and not args.profile:
                     # A screenshot of where the game got to, then quit.
-                    send("hatari-shortcut screenshot")
-                    time.sleep(1.5)
-                    send("hatari-shortcut quit")
+                    if send:
+                        send("hatari-shortcut screenshot")
+                        time.sleep(1.5)
+                    stop()
                     break
                 if "~OSystem_Atari" in text:
                     time.sleep(1)
-                    send("hatari-shortcut quit")
+                    stop()
                     break
                 if time.monotonic() > deadline:
                     raise RuntimeError("Hatari timeout")
@@ -194,6 +262,9 @@ def main():
                 proc.kill()
                 proc.wait()
             fifo.unlink(missing_ok=True)
+            unlink_directory(hd / folder)
+    if avi.is_file() and write_avi_sound(avi, case / "output.wav"):
+        avi.unlink()   # its frames, about a megabyte a second, are of no use here
 
     text = (case / "hatari.log").read_text(errors="replace")
     counters = [line for line in text.splitlines() if "AtariDspAudio:" in line and "periods" in line]

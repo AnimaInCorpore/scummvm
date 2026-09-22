@@ -14,6 +14,8 @@ from pathlib import Path
 import subprocess
 import sys
 
+from gate_env import source_sha256
+
 HERE = Path(__file__).resolve().parent
 SOURCES = ("trace-opl.cpp", "opl.mk", "build-capture.sh", "capture-opl.py",
            "analyze-opl.py", "test-analyze-opl.py", "capture-gate.py")
@@ -58,7 +60,7 @@ def main():
         "gate": "Repeated virtual-clock Atlantis capture of post-AdLib-driver OPL writes",
         "scummvm_commit": repository,
         "scummvm_worktree_dirty": dirty,
-        "source_sha256": {name: sha((HERE / name).read_bytes()) for name in SOURCES},
+        "source_sha256": {name: source_sha256(HERE / name) for name in SOURCES},
         "binary_sha256": manifest["binary_sha256"],
         "game_sha256": manifest["game_sha256"],
         "capture_ms": args.milliseconds,

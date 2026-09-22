@@ -30,10 +30,9 @@ import shutil
 import struct
 import subprocess
 
+from gate_env import HATARI, TOS402 as TOS, source_sha256
+
 HERE = Path(__file__).resolve().parent
-MXDRV = Path.home() / "Work/F030MXDRV"
-HATARI = Path.home() / "Work/F030Arcade/third_party/hatari/build/src/hatari"
-TOS = MXDRV / "third_party/f030dsp3d/tools/tos402.rom"
 
 OSCILLATOR = 32084988
 CLOCKS_PER_CYCLE = 2
@@ -207,7 +206,7 @@ def main():
         "gate": "practical OPL kernel on the emulated Falcon DSP56001: exactness and cycle cost",
         "scummvm_commit": repository,
         "scummvm_worktree_dirty": dirty,
-        "source_sha256": {name: hashlib.sha256((HERE / name).read_bytes()).hexdigest() for name in sources},
+        "source_sha256": {name: source_sha256(HERE / name) for name in sources},
         "trace_sha256": hashlib.sha256(args.trace.read_bytes()).hexdigest(),
         "rhythm_trace_sha256": (hashlib.sha256(args.rhythm_trace.read_bytes()).hexdigest()
                                 if args.rhythm_trace else None),

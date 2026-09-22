@@ -11,6 +11,7 @@ if [ ! -f config.mk ]; then
         --enable-engine=scumm --disable-engine=scumm_7_8 --disable-engine=he \
         --disable-detection-full --opengl-mode=none --disable-tts \
         --disable-libcurl --disable-fluidsynth --disable-mt32emu \
-        --disable-readline --disable-debug --enable-optimizations
+        --disable-readline --disable-debug --enable-optimizations \
+        --disable-taskbar --disable-system-dialogs
 fi
 make -j8 -f Makefile -f "$task_dir/opl.mk" scummvm-opl-capture

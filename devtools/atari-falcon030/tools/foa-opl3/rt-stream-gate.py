@@ -34,14 +34,11 @@ import shutil
 import struct
 import subprocess
 
+from gate_env import HATARI, MXDRV, TOS402 as TOS, VASM, VLINK, source_sha256
+
 HERE = Path(__file__).resolve().parent
-MXDRV = Path.home() / "Work/F030MXDRV"
-HATARI = Path.home() / "Work/F030Arcade/third_party/hatari/build/src/hatari"
-VASM = MXDRV / "build/tools/vasm/vasmm68k_mot"
-VLINK = MXDRV / "build/tools/vlink/vlink"
 # One period: 768 frames at the codec's 49,170 Hz (25.175 MHz / 512).
 PERIOD_SECONDS = 768 * 512.0 / 25175000.0
-TOS = MXDRV / "third_party/f030dsp3d/tools/tos402.rom"
 
 LABEL_RE = re.compile(r"^\s*\d+\s+([A-Za-z_][A-Za-z0-9_]*):\s*(;.*)?$")
 ADDRESS_RE = re.compile(r"^\s*\d+\s+P:([0-9A-F]+)\b")
@@ -171,7 +168,7 @@ def main():
     result = {
         "date": date.today().isoformat(),
         "gate": "practical OPL kernel stream mode on the emulated Falcon: transport, timing, exactness",
-        "source_sha256": {name: hashlib.sha256((HERE / name).read_bytes()).hexdigest()
+        "source_sha256": {name: source_sha256(HERE / name)
                           for name in ("dsp/oplrt.asm", "m68k/oplplay.s", "rt-fixture.cpp", "opl-practical.h")},
         "scenario": args.scenario,
         "trace_sha256": hashlib.sha256(args.trace.read_bytes()).hexdigest() if args.trace else None,

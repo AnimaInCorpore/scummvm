@@ -3,10 +3,11 @@
 ScummVM Atari backend, from the same LOD files and loader conventions the
 Falcon test hosts use (the sibling project's generate_dsp_stage2.py)."""
 import argparse
-import hashlib
 import importlib.util
 import sys
 from pathlib import Path
+
+from gate_env import source_sha256
 
 
 def main():
@@ -23,7 +24,7 @@ def main():
     boot = stage2.make_boot_image(args.bootstrap)
     stream, sections, program_words = stage2.make_program_stream(args.program)
     source = Path(__file__).resolve().parent / "dsp/oplrt.asm"
-    digest = hashlib.sha256(source.read_bytes()).hexdigest()[:16]
+    digest = source_sha256(source)[:16]
 
     def rows(values, per_line, fmt):
         out = []
@@ -48,7 +49,7 @@ def main():
         "static const unsigned long kAtariDspOplStream[%d] = {\n%s\n};\n\n#endif\n"
     ) % (digest, len(boot), len(boot), len(boot_bytes), rows(boot_bytes, 12, "0x%02x"),
          program_words, sections, len(stream), stage2.STAGE2_REPLY_OK, len(stream), rows(stream, 8, "0x%06x"))
-    args.output.write_text(text)
+    args.output.write_bytes(text.encode())
     print(f"wrote {args.output}: {len(boot)} boot words, {len(stream)} stream words")
 
 

@@ -35,6 +35,8 @@ from array import array
 from pathlib import Path
 import subprocess
 
+from gate_env import program, source_sha256
+
 HERE = Path(__file__).resolve().parent
 ENVELOPE_WINDOW_S = 0.020
 SPECTRUM_POINTS = 4096
@@ -561,7 +563,7 @@ def main():
     parser.add_argument("--rhythm-from", type=float, default=105.0,
                         help="where its window starts, on the register image the earlier writes left")
     parser.add_argument("--wav", action="store_true", help="also keep WAV files for auditioning")
-    parser.add_argument("--binary", type=Path, default=HERE / "build/headless/opl-practical-test")
+    parser.add_argument("--binary", type=Path, default=program(HERE / "build/headless/opl-practical-test"))
     args = parser.parse_args()
     if not args.binary.is_file():
         parser.error(f"build {args.binary} first (see README)")
@@ -621,7 +623,7 @@ def main():
         "gate": "practical block-rate OPL kernel against the exact kernel, perceptual metrics",
         "scummvm_commit": repository,
         "scummvm_worktree_dirty": dirty,
-        "source_sha256": {name: hashlib.sha256((HERE / name).read_bytes()).hexdigest() for name in sources},
+        "source_sha256": {name: source_sha256(HERE / name) for name in sources},
         "trace_sha256": hashlib.sha256(args.trace.read_bytes()).hexdigest() if args.trace else None,
         "rhythm_trace_sha256": (hashlib.sha256(args.rhythm_trace.read_bytes()).hexdigest()
                                 if args.rhythm_trace else None),

@@ -12,8 +12,10 @@ from pathlib import Path
 import re
 import subprocess
 
+from gate_env import program
+
 HERE = Path(__file__).resolve().parent
-BINARY = HERE / "build/headless/scummvm-opl-capture"
+BINARY = program(HERE / "build/headless/scummvm-opl-capture")
 
 
 def digest(path):

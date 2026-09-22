@@ -7,16 +7,24 @@
 #                 booted through the sibling's two-stage loader
 #   OPLPLAY.TOS   the same kernel in its SSI stream mode, fed a captured
 #                 register stream through the period refill protocol
+#
+# The checkout is found as gate_env.py finds it: $MXDRV, else under
+# ~/Work, else beside this repository. DOSBox is $DOSBOX, else
+# dosbox-staging or dosbox on the path.
 set -eu
 task_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 mxdrv=${MXDRV:-$HOME/Work/F030MXDRV}
+if [ -z "${MXDRV:-}" ] && [ ! -d "$mxdrv" ]; then
+    mxdrv=$(CDPATH= cd -- "$task_dir/../../../../.." && pwd)/F030MXDRV
+fi
 tools="$mxdrv/third_party/f030dsp3d/tools/asm56k"
 vasm="$mxdrv/build/tools/vasm/vasmm68k_mot"
 vlink="$mxdrv/build/tools/vlink/vlink"
 for required in "$tools/ASM56000.EXE" "$vasm" "$vlink" "$mxdrv/src/dsp/stage2_loader.asm"; do
     [ -f "$required" ] || { echo "error: missing $required" >&2; exit 1; }
 done
-command -v dosbox-staging >/dev/null 2>&1 || { echo "error: dosbox-staging is required" >&2; exit 1; }
+dosbox=${DOSBOX:-$(command -v dosbox-staging || command -v dosbox || true)}
+[ -n "$dosbox" ] || { echo "error: DOSBox Staging is required (set DOSBOX)" >&2; exit 1; }
 
 mkdir -p "$task_dir/build"
 python3 "$task_dir/generate-tables.py" --header "$task_dir/opl-tables.h" \
@@ -42,7 +50,7 @@ CLDLOD.EXE OPLBOOT.CLD > OPLBOOT.LOD
 EXIT
 BATCH
 rm -f OPL.CLD OPL.LOD OPL.LST OPLRT.CLD OPLRT.LOD OPLRT.LST OPLBOOT.CLD OPLBOOT.LOD OPLBOOT.LST
-dosbox-staging --noprimaryconf --set output=texture "$task_dir/dsp/BUILD.BAT" >/dev/null 2>&1 || true
+"$dosbox" --noprimaryconf --set output=texture "$task_dir/dsp/BUILD.BAT" >/dev/null 2>&1 || true
 for listing in OPL OPLRT OPLBOOT; do
     [ -f "$listing.LST" ] || { echo "error: $listing.ASM did not assemble; see dsp/" >&2; exit 1; }
     grep -qE '^0 +Errors' "$listing.LST" || { echo "error: $listing.ASM failed; see dsp/$listing.LST" >&2; exit 1; }

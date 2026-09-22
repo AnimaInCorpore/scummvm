@@ -7,7 +7,6 @@ DSP image. Both forms of silence must leave zero history for the next refill.
 Only the standalone 68030 test host is adapted to send PCM and read it back.
 """
 import argparse
-import hashlib
 import importlib.util
 import json
 import os
@@ -15,6 +14,8 @@ from pathlib import Path
 import shutil
 import struct
 import subprocess
+
+from gate_env import source_sha256
 
 HERE = Path(__file__).resolve().parent
 SPEC = importlib.util.spec_from_file_location("stream_gate", HERE / "rt-stream-gate.py")
@@ -105,7 +106,7 @@ def main():
     build_host(output)
     cases = [run_case(output, explicit, sign) for sign in (1, -1) for explicit in (False, True)]
     result = {"cases": cases, "passed": all(case["passed"] for case in cases),
-              "source_sha256": {name: hashlib.sha256((HERE / name).read_bytes()).hexdigest()
+              "source_sha256": {name: source_sha256(HERE / name)
                                 for name in ("dsp/oplrt.asm", "m68k/oplplay.s", "pcm-silence-gate.py")}}
     (output / "results.json").write_text(json.dumps(result, indent=2) + "\n")
     raise SystemExit(0 if result["passed"] else 1)

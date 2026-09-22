@@ -825,6 +825,20 @@ the key-edge accounting.
 
 The DSP benchmark needs the sibling project's toolchain: `asm56000` under
 dosbox-staging, `vasm`/`vlink`, and the DSP-calibrated Hatari.
+[gate_env.py](gate_env.py) finds them in an F030MXDRV and an F030Arcade
+checkout under `~/Work` or beside this repository, or wherever `MXDRV`,
+`F030ARCADE` and `HATARI` point. The records' source hashes are taken over
+LF line ends, so a Windows checkout with `core.autocrlf` records the
+committed files.
+
+On Windows everything runs under MSYS2: the host tree is configured and
+built from the MINGW64 shell (`build-capture.sh` leaves out the taskbar and
+system dialogs, which would need SDL, and `opl.mk` links the Win32 helpers
+the null backend's file code uses), the calibrated Hatari is
+`build-ucrt64/src/hatari.exe` and needs `C:\msys64\ucrt64\bin` on the path,
+and `build-dsp.sh` takes DOSBox Staging from `DOSBOX` when it is not on the
+path. That Hatari has no control FIFO, so the game gate records the sound
+track of an AVI instead and takes neither `--click` nor `--play`.
 
 ```sh
 sh devtools/atari-falcon030/tools/foa-opl3/build-dsp.sh
