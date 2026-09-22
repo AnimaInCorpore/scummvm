@@ -6,9 +6,12 @@
 # Stock Falcon030 target: 16 MHz 68030 + 68882, 14 MB RAM, DSP56001.
 #
 # Differs from build-release030.sh ("Atari Lite", which states a 16 MB
-# minimum a real Falcon cannot reach) by being a game-only build: SCUMM
-# engine, single game, statically linked, so as much of the 14 MB as
-# possible is left for the game and for on-machine MT-32 synthesis.
+# minimum a real Falcon cannot reach) by being a game-only build: the SCUMM,
+# SCI, Sky and Cruise engines, single game, statically linked, so as much of
+# the 14 MB as possible is left for the game and for on-machine MT-32
+# synthesis. All four engines' DOS games drive the AdLib that the DSP
+# synthesizes; SCI32 stays out on its own, as it depends on
+# --disable-highres's highres feature.
 #
 # -m68030 already selects the m68020-60 multilib and emits hardware FPU
 # instructions, so it is the 68882 build; there is no -m68882 option in GCC
@@ -71,7 +74,7 @@ then
 	--disable-bink \
 	--enable-verbose-build \
 	--disable-all-engines \
-	--enable-engine=scumm \
+	--enable-engine=scumm,sci,sky,cruise \
 	--disable-translation \
 	--disable-cloud \
 	--disable-tts \

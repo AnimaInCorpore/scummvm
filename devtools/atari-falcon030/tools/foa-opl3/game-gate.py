@@ -47,7 +47,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--game", type=Path, required=True, help="the game's data directory")
-    parser.add_argument("--gameid", default="atlantis", help="SCUMM game id of the build's profile: atlantis, monkey2, tentacle")
+    parser.add_argument("--gameid", default="atlantis", help="game id of the build's profile: atlantis, monkey2, tentacle, or an SCI game")
+    parser.add_argument("--engine", default="scumm", help="the target's engine id: scumm or sci")
     parser.add_argument("--extra", default="CD", help="the target's extra field, e.g. CD, Floppy, or empty")
     parser.add_argument("--binary", type=Path,
                         default=ROOT / "build-falcon030/scummvm-2026.3.1git-atari-lite/scummvm.prg")
@@ -93,7 +94,7 @@ def main():
            + "music_volume=256\nsfx_volume=256\nspeech_volume=256\n"
            + f"speech_mute={'false' if args.speech else 'true'}\nsubtitles=true\n"
            + "".join(line + "\n" for line in args.ini_extra.split(";") if line)
-           + f"\n[{args.gameid}]\nplatform=pc\ngameid={args.gameid}\nengineid=scumm\n"
+           + f"\n[{args.gameid}]\nplatform=pc\ngameid={args.gameid}\nengineid={args.engine}\n"
            + f"language=en\nextra={args.extra}\npath=C:\\{folder}\n")
     (app / "SCUMMVM.INI").write_text(ini)
     (case / "args.bin").write_bytes(args.gameid.encode() + b"\0")
