@@ -44,7 +44,7 @@ no_pcm_words:
         reads += (f"        move.l  #${0x060c00 + i:06x},d0\n        bsr     dsp_exchange\n"
                   f"        move.l  d0,result_pcm+{i * 4}\n")
     source = replace_once(source, "        ; the gate quits the emulator at the stop command: write first", reads)
-    source = replace_once(source, "Fwrite  file_handle,#8,result_status", "Fwrite  file_handle,#24,result_status")
+    source = replace_once(source, "Fwrite  file_handle,#12,result_status", "Fwrite  file_handle,#24,result_status")
     source = replace_once(source, "        Cconws  txt_written\n        move.l  #CMD_STREAM_STOP,d0\n        bsr     dsp_exchange",
                           "        Cconws  txt_written\n        move.l  #$080000,d0\n        bsr     dsp_exchange")
     source = replace_once(source, "result_checksum: ds.l 1", "result_checksum: ds.l 1\nresult_pcm:     ds.l 4")

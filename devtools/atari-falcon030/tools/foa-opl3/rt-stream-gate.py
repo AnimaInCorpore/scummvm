@@ -4,7 +4,7 @@ production transport on the emulated Falcon, and check that every period
 rendered on time and that the emitted words reproduce the host reference.
 
 The stream host boots the kernel, routes the DSP's SSI to the DAC at
-49.170 kHz, and submits one 15-block period per refill through the real
+49.170 kHz, and submits one 768-frame period per refill through the real
 protocol: READY handshake, paced host-port blast of the events and PCM
 flag, acknowledgement. The kernel counts every period the transmitter plays
 without a fresh render - one it caught mid-render, or a replay while the
@@ -38,7 +38,9 @@ from gate_env import HATARI, MXDRV, TOS402 as TOS, VASM, VLINK, source_sha256
 
 HERE = Path(__file__).resolve().parent
 # One period: 768 frames at the codec's 49,170 Hz (25.175 MHz / 512).
-PERIOD_SECONDS = 768 * 512.0 / 25175000.0
+CODEC_RATE = 25175000.0 / 512.0
+PERIOD_FRAMES = 768
+PERIOD_SECONDS = PERIOD_FRAMES / CODEC_RATE
 
 LABEL_RE = re.compile(r"^\s*\d+\s+([A-Za-z_][A-Za-z0-9_]*):\s*(;.*)?$")
 ADDRESS_RE = re.compile(r"^\s*\d+\s+P:([0-9A-F]+)\b")
@@ -85,10 +87,10 @@ starve_loop:
 no_starvation:
         subq.l  #1,period_count""")
     source = source.replace("submit_period:\n", "starve_ticks:\n        move.l  $4ba,d0\n        rts\n\nsubmit_period:\n", 1)
-    source = source.replace("result_checksum: ds.l 1",
-                            "result_checksum: ds.l 1\nresult_stall_ticks: ds.l 1\n"
+    source = source.replace("result_margin:  ds.l 1",
+                            "result_margin:  ds.l 1\nresult_stall_ticks: ds.l 1\n"
                             "result_stall_status: ds.l 1\nstarve_start: ds.l 1", 1)
-    source = source.replace("Fwrite  file_handle,#8,result_status", "Fwrite  file_handle,#16,result_status", 1)
+    source = source.replace("Fwrite  file_handle,#12,result_status", "Fwrite  file_handle,#20,result_status", 1)
     (case / "oplplay-starved.s").write_text(source)
     subprocess.run([str(VASM), str(case / "oplplay-starved.s"), "-quiet", "-Felf", "-m68030",
                     "-I", str(MXDRV / "src/m68k"), "-I", str(HERE / "dsp"), "-o", str(case / "oplplay.o")],
@@ -147,10 +149,10 @@ def main():
     result_file = case / "RESULT.BIN"
     if not result_file.is_file():
         raise SystemExit(f"the run produced no result; see {case}/debug.log")
-    status, checksum = struct.unpack(">II", result_file.read_bytes()[:8])
+    status, checksum, slack_words = struct.unpack(">III", result_file.read_bytes()[:12])
     stall = None
     if args.starve:
-        stall_ticks, stall_status = struct.unpack(">II", result_file.read_bytes()[8:16])
+        stall_ticks, stall_status = struct.unpack(">II", result_file.read_bytes()[12:20])
         seconds = stall_ticks / 200.0
         # The period in flight when the host went quiet still plays fresh, so
         # the replays are the stall's length in periods, give or take one.
@@ -183,6 +185,14 @@ def main():
         "checksum_dsp": checksum,
         "word_exact": checksum == shape["period_checksum"] and periods_rendered == shape["periods"],
         "on_time": late == 0,
+        # The least time any render on time left before the transmitter reached
+        # the half it rendered: the stream's tightest deadline, the host's
+        # transport included. Zero once the transmitter caught a render; the
+        # replays of a host stall are late periods but render nothing.
+        "block_frames": shape["block_frames"],
+        "min_slack_frames": slack_words // 2,
+        "min_slack_ms": round(slack_words / 2 / CODEC_RATE * 1000.0, 3),
+        "min_slack_percent_of_period": round(100.0 * slack_words / 2 / PERIOD_FRAMES, 1),
         "starvation": stall,
         "not_established": [
             "No audio captured or auditioned from the emulator; the checksum proves the rendered words",

@@ -34,7 +34,7 @@
  * The AdLib driver above it is unchanged: it writes registers and asks for
  * a 250 Hz timer. Register writes go through the practical kernel's decoder
  * into parameter events for the DSP's operator records, stamped with the
- * 64-frame block of the period being produced; the timer callbacks run
+ * 48-frame block of the period being produced; the timer callbacks run
  * inside period production, on the audio clock, so a callback's writes land
  * in the block that corresponds to its time. AtariMixerManager owns the
  * transport, whose interrupt calls producePeriod() once per 768-frame

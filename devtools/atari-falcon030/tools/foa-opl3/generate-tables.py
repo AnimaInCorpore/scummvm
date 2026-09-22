@@ -10,8 +10,8 @@ two 256-entry tables are exactly that size, so the whole waveform ROM lives
 on chip: the eight 1,024-entry unpacked waveform tables a desktop build uses
 are reconstructed from the quarter sine by index and sign arithmetic instead.
 
-The practical kernel renders at the Falcon codec's 32,779.9479 Hz in blocks
-of 32 frames, and advances its envelopes and LFO once per block. Its tables
+The practical kernel renders at the Falcon codec's 49,169.921875 Hz in blocks
+of 48 frames, and advances its envelopes and LFO once per block. Its tables
 are derived here from the exact envelope machine rather than typed in:
 each rate's attack curve and decay slope are measured by running that
 machine, then retimed to the codec rate and folded into one step per block.
@@ -26,9 +26,18 @@ EXP = [2 * (int(round((2 ** ((255 - i) / 256.0) - 1) * 1024)) + 1024) for i in r
 NATIVE_RATE = 49716.0
 CODEC_RATE = 25175000.0 / 256.0 / 2.0   # the codec's 49,170 Hz: within 1.1% of the chip's native rate
 RATIO = NATIVE_RATE / CODEC_RATE
-BLOCK_FRAMES = 64   # 1.30 ms: every per-block cost on the DSP amortizes over the block
+# 0.98 ms: a write takes effect at the start of its block, so up to a block
+# early, and envelopes and LFOs step once a block. Every per-block cost on the
+# DSP amortizes over the block, so a shorter one costs cycles: the stress case
+# takes 71% of the budget at 64 frames, 76% at 48 and 86% at 32, where the
+# tightest stream period leaves half a millisecond, less than the game's
+# transport needs. The rt-bench and rt-stream gates measure both.
+BLOCK_FRAMES = 48
 NATIVE_PER_BLOCK = BLOCK_FRAMES * RATIO
-PERIOD_BLOCKS = 12  # the stream transport's period: 768 frames, 15.62 ms
+PERIOD_FRAMES = 768  # the stream transport's period, 15.62 ms, whatever the block
+if PERIOD_FRAMES % BLOCK_FRAMES:
+    raise SystemExit("a period must be a whole number of blocks")
+PERIOD_BLOCKS = PERIOD_FRAMES // BLOCK_FRAMES
 PCM_DIVIDER = 4     # host PCM runs at the codec rate over this
 # The attack factor is fitted from full attenuation down to this level (-6 dB),
 # and the attack ends this many units above zero: the chip's curve is an

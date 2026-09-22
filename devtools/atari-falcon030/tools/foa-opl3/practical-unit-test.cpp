@@ -36,6 +36,11 @@ void fail(const char *what, long a = 0, long b = 0, long c = 0, long d = 0) {
 		std::fprintf(stderr, "FAIL %s (%ld, %ld, %ld, %ld)\n", what, a, b, c, d);
 }
 
+// The exact chip's samples in as many practical blocks, to the nearest.
+int nativeSamples(int blocks) {
+	return (int)(blocks * P::kBlockFrames * 49716.0 / OPL_PRACTICAL_CODEC_RATE + 0.5);
+}
+
 struct Pair {
 	E::Chip exact;
 	P::Chip practical;
@@ -114,8 +119,7 @@ unsigned long checkSustainLevel(unsigned long *comparedOut) {
 					p.write(0xa0, 0x41);
 					p.write(0xb0, 0x32);
 					int16_t left, right;
-					const int nativePerBlock = 65;   // 64 codec frames, to the nearest native sample
-					for (int i = 0; i < wait * nativePerBlock; ++i)
+					for (int i = 0; i < nativeSamples(wait); ++i)
 						E::generate(&p.exact, &left, &right);
 					p.renderBlocks(wait);
 					// The block-rate envelope runs up to a block behind the chip's, so
@@ -138,7 +142,7 @@ unsigned long checkSustainLevel(unsigned long *comparedOut) {
 							fail("attenuation fell after a sustain level write", rate, before, after, wait);
 						previous = env;
 					}
-					for (int i = 0; i < 4000 * nativePerBlock; ++i)
+					for (int i = 0; i < nativeSamples(4000); ++i)
 						E::generate(&p.exact, &left, &right);
 					// Both have settled: in sustain at some level, or decayed to silence.
 					const int exactEnv = p.exact.slot[3].envRaw;

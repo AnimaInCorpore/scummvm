@@ -77,6 +77,8 @@ NOTE_CHECK_S = 0.150          # a note's spectral window starts this far in
 NOTE_RECHECK_S = (0.300, 0.450)   # a held note's reference is compared with itself here
 MAX_SPECTRAL_CHECKS = 64
 HF_SHARE_FLOOR_DB = -40.0     # a quieter 8-15 kHz share is not graded for excess
+MIX_BANDS_HZ = ((20.0, 3000.0), (3000.0, 8000.0), (8000.0, 15000.0))
+MIX_BAND_STEP_S = 0.5         # a mix's band levels are compared this often
 
 
 def load_pcm(path):
@@ -124,9 +126,10 @@ def aligned(env_e, env_p):
     side: each exact window is compared with the range the practical
     envelope spans over the three neighbouring windows, so an onset that
     straddles a window edge differently in the two signals counts as no
-    error. A write lands on a block boundary up to one block (0.98 ms)
-    before its exact time; the skew itself is measured at 1 ms resolution
-    by onset_skew(), and anything slower than a window still shows here."""
+    error. A write lands on a block boundary up to one block (0.98 ms at 48
+    frames) before its exact time; onset_skew() measures the skew to the
+    sample, the render's block stamps give every key-on's lead, and anything
+    slower than a window still shows here."""
     n = min(len(env_e), len(env_p))
     out = []
     for i in range(n):
@@ -367,6 +370,12 @@ def band_ratio_db(bin_hz, mag, low_hz=8000.0):
     return 10.0 * math.log10(max(high, 1e-12) / total)
 
 
+def mix_band_levels(bin_hz, mag):
+    """The energy of each of MIX_BANDS_HZ, in dB."""
+    return [10.0 * math.log10(max(sum(m * m for i, m in enumerate(mag) if low <= i * bin_hz < high), 1e-12))
+            for low, high in MIX_BANDS_HZ]
+
+
 DRUM_WINDOWS = 6
 DRUM_BAND_RANGE_DB = 25.0
 
@@ -466,6 +475,23 @@ def score(name, exact, exact_rate, practical, practical_rate, notes, held):
                 "hf_db_exact": round(band_ratio_db(*spectrum(exact, exact_rate, int(t0 * exact_rate))), 2),
                 "hf_db_practical": round(band_ratio_db(*spectrum(practical, practical_rate,
                                                                  int(t0 * practical_rate))), 2)})
+        # A share moves when any band does, and a few loud stretches are a
+        # small sample of a mix: the absolute level of each broad band,
+        # practical against exact, in a window every half second of sound.
+        diffs = []
+        t0 = 0.0
+        while t0 + SPECTRUM_SECONDS <= result["seconds"]:
+            if env_e[min(int((t0 + SPECTRUM_SECONDS / 2) / ENVELOPE_WINDOW_S), n - 1)] > SILENCE_DB:
+                e = mix_band_levels(*spectrum(exact, exact_rate, int(t0 * exact_rate)))
+                p = mix_band_levels(*spectrum(practical, practical_rate, int(t0 * practical_rate)))
+                diffs.append([b - a for a, b in zip(e, p)])
+            t0 += MIX_BAND_STEP_S
+        if diffs:
+            result["mix_band_windows"] = len(diffs)
+            result["mix_band_db_mean"] = [round(sum(d[k] for d in diffs) / len(diffs), 3)
+                                          for k in range(len(MIX_BANDS_HZ))]
+            result["mix_band_db_mean_abs"] = [round(sum(abs(d[k]) for d in diffs) / len(diffs), 3)
+                                              for k in range(len(MIX_BANDS_HZ))]
     result["spectral_windows"] = spectral
     if spectral:
         # A pure tone's 8-15 kHz share is its phase truncation floor, 60 dB
@@ -585,6 +611,11 @@ def main():
         result = score(entry["name"], exact, entry["exact_rate"], practical, entry["practical_rate"],
                        entry["notes"], entry["held"])
         result["register_writes"] = entry["writes"]
+        # How early the block boundary applies a write, from the practical
+        # render's own block stamps: every write, and the writes that key a note.
+        result["key_ons"] = entry["key_ons"]
+        result["write_lead_ms_mean"], result["write_lead_ms_max"] = entry["write_lead_ms"]
+        result["key_on_lead_ms_mean"], result["key_on_lead_ms_max"] = entry["key_on_lead_ms"]
         if entry.get("drums"):
             result["drums"] = score_drums(exact, entry["exact_rate"], practical, entry["practical_rate"],
                                           entry["drums"])
@@ -595,6 +626,7 @@ def main():
         print(f"{entry['name']:>10}: env corr {result['envelope_correlation']:.4f}"
               f" level {result['envelope_db_mean_abs']:.2f} dB (max {result['envelope_db_max_abs']:.2f})"
               f" onset skew {result['onset_skew_ms_mean']:+.1f}/{result['onset_skew_ms_max']:.1f} ms"
+              f" key-on lead {result['key_on_lead_ms_mean']:.2f}/{result['key_on_lead_ms_max']:.2f} ms"
               f" rms {result['rms_ratio']:.3f}"
               + (f" | {len(result['spectral_windows'])} spectra: partials {result['partial_db_mean_abs_max']:.2f}"
                  f"/{result['partial_db_max_abs']:.2f} dB ({result['unstable_reference_windows']} on bands alone)"
@@ -605,6 +637,9 @@ def main():
                  if "pitch_cents_max_abs" in result else
                  f" | {len(result['spectral_windows'])} spectra: hf {result['hf_excess_db_max']:+.1f} dB"
                  if result.get("spectral_windows") else "")
+              + (f" | {result['mix_band_windows']} windows: bands "
+                 + "/".join(f"{v:.2f}" for v in result["mix_band_db_mean_abs"]) + " dB"
+                 if result.get("mix_band_windows") else "")
               + (f" | {len(result['drums'])} drums: level {max(abs(d['level_db']) for d in result['drums']):.2f} dB"
                  f" bands {max(d.get('band_db_mean_abs', 0.0) for d in result['drums']):.2f} dB"
                  if result.get("drums") else "")
@@ -628,11 +663,14 @@ def main():
         "rhythm_trace_sha256": (hashlib.sha256(args.rhythm_trace.read_bytes()).hexdigest()
                                 if args.rhythm_trace else None),
         "rhythm_trace_from_s": args.rhythm_from if args.rhythm_trace else None,
+        "block_frames": manifest[0]["block_frames"],
         "thresholds": THRESHOLDS,
         "method": {
             "exact_reference": "opl-kernel.h at 49,716 Hz, bit exact against Nuked-OPL3",
-            "candidate": "opl-practical.h at 49,169.92 Hz, 64-frame blocks, block-rate envelope and LFO,"
-                         " writes applied at block boundaries",
+            "candidate": f"opl-practical.h at 49,169.92 Hz, {manifest[0]['block_frames']}-frame blocks,"
+                         " block-rate envelope and LFO, writes applied at block boundaries",
+            "lead": "how early a write takes effect: its time minus the start of the block that applies"
+                    " it, over every write and over the writes that key a note",
             "envelope": "RMS per 20 ms window in dBFS at each signal's own rate, each exact window"
                         " compared with the range the practical envelope spans over the neighbouring"
                         " three windows; correlation, mean and max absolute dB difference over windows"

@@ -4,8 +4,9 @@
 ; records from OPLDATA.BIN, routes the DSP's SSI to the DAC at 49.170 kHz,
 ; and streams the periods of PLAYDATA.BIN through the production refill
 ; protocol with direct host-port writes paced on TXDE. At the end it stops
-; the stream, queries the period, late and checksum counters, and writes
-; them to RESULT.BIN for the gate.
+; the stream, queries the period, late and checksum counters and the least
+; slack any period left, and writes them to RESULT.BIN for the gate: the
+; status word, the checksum, and the slack in ring words, two per frame.
 ;
 ; PLAYDATA.BIN is big-endian 32-bit: 'OPLP', period count, then per period:
 ; event count, two words per event, and a PCM flag (0: silent).
@@ -22,6 +23,7 @@ CMD_REFILL      equ     $0A0000
 CMD_STREAM_STOP equ     $0B0000
 CMD_STATUS      equ     $0C0000
 CMD_CHECKSUM    equ     $0D0000
+CMD_MARGIN      equ     $0E0000
 REPLY_PING      equ     $4F5052
 REPLY_READY     equ     $524459
 
@@ -142,6 +144,9 @@ periods_done:
         move.l  #CMD_STATUS,d0
         bsr     dsp_exchange
         move.l  d0,result_status
+        move.l  #CMD_MARGIN,d0
+        bsr     dsp_exchange
+        move.l  d0,result_margin
         ; let the last rendered periods play out before stopping
         move.w  #6,d3
 drain_loop:
@@ -156,7 +161,7 @@ drain_loop:
         tst.l   d0
         bmi     fail_create
         move.w  d0,file_handle
-        Fwrite  file_handle,#8,result_status
+        Fwrite  file_handle,#12,result_status
         Fclose  file_handle
         Cconws  txt_written
         move.l  #CMD_STREAM_STOP,d0
@@ -302,6 +307,7 @@ payload_words:  ds.l 1
 protocol_errors: ds.l 1
 result_status:  ds.l 1
 result_checksum: ds.l 1
+result_margin:  ds.l 1
 dsp_tx_word:    ds.l 1
 dsp_rx_word:    ds.l 1
 dsp_stage2_reply: ds.l 1

@@ -65,7 +65,9 @@ RANGES = {
     "emit": ("emit_block", "block_boundary"),
     "block_and_channel_boundary": ("block_boundary", "render_block"),
     "render_block": ("render_block", "apply_events"),
-    "apply_events": ("apply_events", "external_code_end"),
+    # Up to the stream code: past it sit the host-port waits the bench's own
+    # uploads and read-backs spend between chunks.
+    "apply_events": ("apply_events", "command_stream_start"),
 }
 
 
@@ -99,7 +101,7 @@ def run_case(name, fixture_args, output, vbls):
     shutil.copy(HERE / "build/OPLRT.TOS", case)
 
     symbols = listing_symbols(HERE / "dsp/OPLRT.LST")
-    for label in ("profile_start", "profile_end", "hot_code_end", "external_code_end"):
+    for label in ("profile_start", "profile_end", "hot_code_end", "command_stream_start", "external_code_end"):
         if label not in symbols:
             raise SystemExit(f"{label} is missing from the DSP listing")
     (case / "start.ini").write_text(
@@ -143,6 +145,7 @@ def run_case(name, fixture_args, output, vbls):
     per_frame = round(sum(breakdown.values()), 2)
     return {
         "scenario": name,
+        "block_frames": shape["block_frames"],
         "seconds": shape["seconds"],
         "frames": frames,
         "blocks": shape["blocks"],

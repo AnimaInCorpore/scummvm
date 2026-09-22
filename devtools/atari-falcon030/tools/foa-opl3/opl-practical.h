@@ -1,10 +1,10 @@
 // Practical (approximate) two-operator OPL kernel for the Falcon DSP56001,
 // as a host reference.
 //
-// The exact kernel in opl-kernel.h costs about twice the DSP's budget because
-// the chip's envelope advances every sample. This kernel gives that up: it
+// The measured exact DSP synthesis loop already exceeds the budget before
+// per-sample envelopes are added. This kernel amortizes control work: it
 // renders at the Falcon codec's 49,169.92 Hz in operator-major blocks of
-// 64 frames, advances every envelope and the LFO once per block, and applies
+// 48 frames, advances every envelope and the LFO once per block, and applies
 // register writes at block boundaries. Everything else keeps the chip's
 // arithmetic: the 1,024-step waveforms, the log-domain envelope in the same
 // 0.1875 dB units, the feedback and modulation depth, f-number pitch.

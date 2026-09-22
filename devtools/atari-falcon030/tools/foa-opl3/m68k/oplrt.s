@@ -13,6 +13,7 @@
 ;   count, and two words per event.
 
         include "xbios.i"
+        include "oplrttab.inc"          ; the generated block constants, shared with the kernel
 
         global  start
 
@@ -116,7 +117,7 @@ chunk_loop:
 
         ; ---- read the frames back, one word each
         move.l  chunk_blocks,d7
-        lsl.l   #6,d7                   ; 64 frames per block
+        mulu.l  #OPL_BLOCK_FRAMES,d7
         lea     frame_buffer,a4
         move.l  #FRAME_BASE,d6
         move.l  d7,d5

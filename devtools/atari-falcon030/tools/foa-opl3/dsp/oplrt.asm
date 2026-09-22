@@ -2,28 +2,29 @@
 ;
 ; The DSP side of opl-practical.h: a memory-image machine whose operator and
 ; channel records the 68030 writes, and whose output must match that host
-; reference word for word. It renders 64-frame blocks at the codec rate,
-; operator-major: each operator runs one hardware loop over the block, the
-; modulator writing an internal ring the carrier consumes. Envelopes and the
-; LFO advance once per block, at the boundary, from tables the host uploads.
+; reference word for word. It renders blocks of BLOCK_FRAMES frames (48,
+; 0.98 ms) at the codec rate, operator-major: each operator runs one hardware
+; loop over the block, the modulator writing an internal ring the carrier
+; consumes. Envelopes and the LFO advance once per block, at the boundary,
+; from tables the host uploads.
 ;
-; This file is the bench/exactness build: it owns no SSI and no interrupt,
-; and takes its events from a table the host uploads. The production
-; transport adds a period-paced host protocol on top of render_block.
+; The bench takes its events from a table the host uploads and reads the
+; frames back. The stream mode owns the SSI and renders one 768-frame period
+; of PERIOD_BLOCKS blocks per refill from the host, the production transport.
 ;
-; Memory map (words)
+; Memory map (words). A ring holds one block; its area is sized for 64.
 ;   P internal $0080-$01ff  stages, rhythm stages, per-operator boundary pass
 ;   P external $2000-       start, command loop, per-block and per-channel code
 ;   X internal $0000-$003f  scalars ($10-$13 host-written)
-;   X internal $0040-$007f  modulation ring, 64 words
+;   X internal $0040-$007f  modulation ring
 ;   X internal $0080-$0091  feedback history, newer product, 18 channels
 ;   X internal $00b0-$00b7  rhythm: drum sum parts, high words (low words in Y)
-;   X internal $00c0-$00ff  rhythm: select row of each frame, 64 words
-;   Y internal $0000-$003f  mix ring, 64 words
+;   X internal $00c0-$00ff  rhythm: select row of each frame
+;   Y internal $0000-$003f  mix ring
 ;   Y internal $0040-$0063  gain pairs of feedback modulators, [history, onward]
 ;   Y internal $0080-$0091  feedback history, older product
 ;   Y internal $00a0-$00af  rhythm: this block's sixteen drum sums
-;   Y internal $00c0-$00ff  rhythm: drum table row of each frame's noise, 64 words
+;   Y internal $00c0-$00ff  rhythm: drum table row of each frame's noise
 ;   X external $0200-$03ff  gain table 2^(-envOut/32) / 2, 512 words
 ;   X external $0400-$087f  operator records, 32 words each, 36 operators
 ;   X external $0880-$089f  rhythm: drum table offset by select row and column
@@ -33,8 +34,10 @@
 ;   X external $0a40-$0a7f  decay step per block, by rate
 ;   X external $0a80-$0a87  record offset of the vibrato delta, by LFO position
 ;   X external $0b00-$0b8f  per-operator render parameters, 4 words each
+;   X external $0c00-$0eff  stream: one period's PCM, expanded to 768 frames
+;   X external $1000-$1bff  stream: the SSI ring, two periods of stereo
 ;   X external $1c00-$1fff  rhythm: select row address by the hi-hat's phase
-;   X external $2000-$2fff  bench output, 128 blocks
+;   X external $2000-$2fff  bench output, 4,096 frames
 ;   X external $3000-$3fff  bench events, (block << 16 | address), value
 ;   X external $2000-$3fff  stream events, same format, 4,096 of them
 ;   Y external $0400-$087f  phase fractions, the L-space partners of the records
@@ -70,8 +73,8 @@ STREAM_EVENT_BASE equ   $2000           ; stream mode: the bench output area, 4,
 
 PCM_STAGE       equ     $0c00           ; expanded PCM of one period, 768 words
 SSI_RING        equ     $1000           ; two periods of interleaved stereo
-BLOCK_FRAMES    equ     OPL_BLOCK_FRAMES ; 64: 1.30 ms at the codec's 49,170 Hz
-PERIOD_BLOCKS   equ     OPL_PERIOD_BLOCKS ; 12: 768 frames, 15.62 ms
+BLOCK_FRAMES    equ     OPL_BLOCK_FRAMES ; 48: 0.98 ms at the codec's 49,170 Hz
+PERIOD_BLOCKS   equ     OPL_PERIOD_BLOCKS ; 16: 768 frames, 15.62 ms
 SSI_HALF_WORDS  equ     2*BLOCK_FRAMES*PERIOD_BLOCKS
 SSI_RING_WORDS  equ     2*SSI_HALF_WORDS
 PCM_PER_PERIOD  equ     OPL_PCM_PER_PERIOD ; 192: host PCM at a quarter of the codec rate
@@ -130,7 +133,7 @@ CMD_PING        equ     $01
 CMD_WRITE_X     equ     $02             ; address word, count word, then the data
 CMD_WRITE_Y     equ     $03
 CMD_EVENTS      equ     $04             ; arg = event count in the event table
-CMD_RENDER      equ     $05             ; arg = block count, at most 128
+CMD_RENDER      equ     $05             ; arg = block count, at most 4,096 frames of them
 CMD_READ_X      equ     $06             ; arg = address
 CMD_REWIND      equ     $07             ; output and event pointers to their bases
 CMD_STOP        equ     $08             ; end of the profiled run
@@ -139,6 +142,7 @@ CMD_REFILL      equ     $0a             ; one period: events, then PCM
 CMD_STREAM_STOP equ     $0b
 CMD_STATUS      equ     $0c             ; reply late periods << 12 | periods rendered
 CMD_CHECKSUM    equ     $0d             ; reply the running sum of emitted words
+CMD_MARGIN      equ     $0e             ; reply the least slack of any period, in ring words
 REPLY_PING      equ     $4f5052         ; "OPR"
 REPLY_READY     equ     $524459         ; "RDY": the receive loop is parked
 REPLY_ERROR     equ     $ffffff
@@ -203,6 +207,7 @@ rhythm_inc_tc:  ds      1               ; whose phase bits the drums share
 rhythm_g_hh:    ds      1               ; this block's drum gains, doubled and negated
 rhythm_g_sd:    ds      1
 rhythm_g_tc:    ds      1
+min_slack:      ds      1               ; stream: the least ring words a render left before its deadline
 
 ; ------------------------------------------------------------ entry vectors
 
@@ -1480,13 +1485,15 @@ ae_done:
 
 ; ------------------------------------------------------------ stream mode
 ;
-; The DSP owns the codec: a 1,920-word SSI ring holds two 480-frame periods
+; The DSP owns the codec: a 3,072-word SSI ring holds two 768-frame periods
 ; of interleaved stereo, r6/m6 transmit it under interrupt, and the kernel
 ; renders each period into the half the transmitter has just left. A period
-; arrives from the host as events plus 160 mono PCM samples (a third of the
-; codec rate, expanded here by linear interpolation) and is rendered as
+; arrives from the host as events plus 192 mono PCM samples (a quarter of
+; the codec rate, expanded here by linear interpolation) and is rendered as
 ; soon as its half is free. A period that is not ready in time repeats the
-; old audio; track_halves watches the transmitter to count each one.
+; old audio; track_halves watches the transmitter to count each one, and
+; every render on time notes how much of the other half the transmitter
+; still had to play: the least of those is the stream's tightest deadline.
 
 command_stream_start:
         movep   #0,x:m_crb
@@ -1509,6 +1516,8 @@ css_cleared:
         move    a1,x:checksum
         move    a1,x:pcm_previous
         move    a1,x:pcm_present
+        move    #>SSI_HALF_WORDS,a
+        move    a1,x:min_slack
         move    #>1,a
         move    a1,x:stream_next_half   ; half A plays silence first
         move    #>emit_block_stream,a
@@ -1543,6 +1552,9 @@ stream_loop:
         move    #>CMD_CHECKSUM,x0
         cmp     x0,b
         jeq     command_checksum
+        move    #>CMD_MARGIN,x0
+        cmp     x0,b
+        jeq     command_margin
         move    #>CMD_PING,x0
         cmp     x0,b
         jne     stream_unknown
@@ -1678,7 +1690,32 @@ rp_rendered:
         move    x:stream_next_half,b
         move    x:tx_half_seen,a
         cmp     b,a
-        jeq     rp_counted              ; caught mid-render: already late
+        jeq     rp_caught               ; caught mid-render: already late
+        ; The slack: the ring words the transmitter still has to play before
+        ; it reaches the half just rendered, counted back from that half's
+        ; first word modulo the ring. More than a half means it has just got
+        ; there after all.
+        move    #>SSI_RING,a
+        tst     b
+        jeq     rp_slack_start
+        move    #>SSI_RING+SSI_HALF_WORDS,a
+rp_slack_start:
+        move    r6,x0
+        sub     x0,a
+        jgt     rp_slack_ahead
+        move    #>SSI_RING_WORDS,x0
+        add     x0,a
+rp_slack_ahead:
+        move    #>SSI_HALF_WORDS,x0
+        cmp     x0,a
+        jle     rp_slack_note
+        clr     a
+rp_slack_note:
+        move    x:min_slack,x0
+        cmp     x0,a
+        jge     rp_slack_kept
+        move    a1,x:min_slack
+rp_slack_kept:
         move    #>1,a
         tst     b
         jeq     rp_fresh_a
@@ -1686,6 +1723,10 @@ rp_rendered:
         jmp     rp_counted
 rp_fresh_a:
         move    a1,x:fresh_a
+        jmp     rp_counted
+rp_caught:
+        clr     a
+        move    a1,x:min_slack
 rp_counted:
         move    x:stream_next_half,a
         move    #>1,x0
@@ -1713,6 +1754,11 @@ send_status:
 
 command_checksum:
         move    x:checksum,a
+        jsr     host_send
+        jmp     stream_loop
+
+command_margin:
+        move    x:min_slack,a
         jsr     host_send
         jmp     stream_loop
 

@@ -193,29 +193,51 @@ The [capture harness](tools/foa-opl3/README.md) records the register writes
 ScummVM's real AdLib driver makes while Atlantis runs, in a separate headless
 executable on a virtual clock, with repeated runs byte identical. It measures
 burst sizes, callback alignment and keyed-voice occupancy. It renders no audio
-and reaches no OPL emulator. The normal Falcon build is unchanged.
+and reaches no OPL emulator. The capture itself leaves the normal Falcon
+build unchanged.
 
 The same directory holds a two-operator OPL synthesis kernel, bit exact
 against Nuked-OPL3 over parameter sweeps and the captured stream, its
 DSP56001 transliteration, and a benchmark on an emulated Falcon. The DSP
 kernel reproduces the reference word for word at nine and eighteen channels.
 
-**The exact kernel does not fit**: synthesis alone costs 1,025 instruction
-cycles per frame for Atlantis's own nine-channel arrangement, 209% of the
-32.780 kHz budget. **The practical kernel does.** It renders at the codec's
-49.17 kHz, next to the chip's own rate (at 32.78 kHz its aliasing was audible
-as blurred instruments), in 64-frame blocks with block-rate envelopes and
-LFO, is scored against the exact kernel by a perceptual gate (sustained tones
-within a dB and a cent), costs 54% of the budget on the Atlantis stream and
-71% with nine feedback FM channels held, word exact against its host
-reference on the emulated DSP, and streams through the SSI with no late
-period even under that worst case. The Falcon
+**The measured exact DSP kernel does not fit**: synthesis alone costs 1,025
+instruction cycles per frame for Atlantis's own nine-channel arrangement, 209% of the
+32.780 kHz budget or 314% at 49.17 kHz, before envelopes and LFOs.
+This is an implementation result, not a proof that every exact algorithm
+is impossible. **The practical OPL2 kernel does fit its tested workloads.**
+It renders at the codec's 49.17 kHz, next to the chip's own rate (at 32.78 kHz its aliasing was audible
+as blurred instruments), in 48-frame blocks with block-rate envelopes and
+LFO, so a register write takes effect at most 0.98 ms early, and includes
+rhythm mode. It is scored against the exact kernel by
+envelope, pitch and spectral checks; the sustained-tone fixture's errors
+are below a dB and a cent, but that is not a bound on every patch. Its
+kernel costs 58% of the budget on the Atlantis excerpt and 76% with nine
+feedback FM channels held, excluding production transport and SSI overhead.
+It is word exact against its practical host reference on the emulated DSP;
+separate SSI stream tests pass without late periods, including that stress
+fixture, whose tightest period leaves 2.17 ms of 15.62. The Falcon
 build embeds it: `opl_driver=atari_dsp` synthesizes the AdLib score on the
 DSP, which also carries the mixer's speech and effects, and `game-gate.py`
-runs the game with it on the emulated Falcon and records the music. Both
-synthesis and delivery run from an interrupt, so the game's loop stalls at
-scene changes (seconds) no longer freeze the music. Nothing has run on
-hardware. See the same directory's README for every figure.
+runs the game with it on the emulated Falcon and records the music (Atlantis
+with the 48-frame blocks, the other games before them). Both
+host period production and delivery run from an interrupt, while synthesis
+runs on the DSP. Extension periods keep FM playing across long scene loads
+but delay the sequencer by 15.62 ms each. Nothing has run on hardware. See
+the same directory's README for every figure and qualification limit.
+
+The [quality improvements and OPL3 roadmap](docs/opl3-feasibility.md#quality-improvements-and-opl3-roadmap)
+records the control-block change: 48 frames instead of 64, keeping the
+768-frame transport period, with 32 frames measured and left out because
+the tightest stream periods would leave the game's transport about half a
+millisecond. It proposes native-rate synthesis with resampling and more
+accurate rhythm noise. Approximate eighteen-channel OPL3 needs a
+separate benchmark and missing features: the current practical path has
+four waveforms, a mono mix and no four-operator pairing. Simply doubling
+its active synthesis stages exceeds the 49.17 kHz budget. The quoted
+Atlantis/Cruise correlations (0.9862/0.9972, the Cruise one with 64-frame
+blocks) measure aligned loudness envelopes, not waveform fidelity or a
+percentage of accuracy.
 
 **Speech needs an uncompressed `monster.sou`.** The build defines no codec -
 the DSP is busy with the OPL kernel and the 68030 has nothing spare beside

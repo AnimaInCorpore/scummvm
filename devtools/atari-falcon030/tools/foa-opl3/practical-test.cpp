@@ -412,8 +412,28 @@ std::vector<int16> renderExact(const Script &s) {
 	return pcm;
 }
 
+// How far ahead of its time the block boundary applies a write, over every
+// write and over the writes that start a note (a key-on edge of any slot).
+struct Lead {
+	unsigned long long writes, keyOns;
+	double writeSum, writeMax, keyOnSum, keyOnMax;
+	Lead() : writes(0), keyOns(0), writeSum(0), writeMax(0), keyOnSum(0), keyOnMax(0) {}
+	void note(double ms, bool keyOn) {
+		++writes;
+		writeSum += ms;
+		if (ms > writeMax)
+			writeMax = ms;
+		if (keyOn) {
+			++keyOns;
+			keyOnSum += ms;
+			if (ms > keyOnMax)
+				keyOnMax = ms;
+		}
+	}
+};
+
 // The practical kernel, writes applied at the boundary of their block.
-std::vector<int16> renderPractical(const Script &s, unsigned long long *writesOut) {
+std::vector<int16> renderPractical(const Script &s, unsigned long long *writesOut, Lead *lead) {
 	OplPractical::Chip chip;
 	OplPractical::reset(&chip, 9);
 	OplPractical::DirectSink sink(&chip);
@@ -428,7 +448,14 @@ std::vector<int16> renderPractical(const Script &s, unsigned long long *writesOu
 	for (uint64 block = 0; block < blocks; ++block) {
 		while (next < s.events.size()
 		       && (uint64)(s.events[next].seconds * kCodecRate) / OplPractical::kBlockFrames <= block) {
+			uint64 before = 0, after = 0;
+			for (int i = 0; i < OplPractical::kSlots; ++i)
+				before += decoder.slotTrigger[i];
 			decoder.write((uint32)block, s.events[next].reg, s.events[next].value);
+			for (int i = 0; i < OplPractical::kSlots; ++i)
+				after += decoder.slotTrigger[i];
+			const double due = s.events[next].seconds * kCodecRate;
+			lead->note((due - (double)(block * OplPractical::kBlockFrames)) * 1000.0 / kCodecRate, after != before);
 			++next;
 		}
 		decoder.flush();
@@ -488,7 +515,8 @@ int main(int argc, char **argv) {
 		const Script &s = all[i];
 		std::vector<int16> exact = renderExact(s);
 		unsigned long long writes = 0;
-		std::vector<int16> practical = renderPractical(s, &writes);
+		Lead lead;
+		std::vector<int16> practical = renderPractical(s, &writes, &lead);
 		writePcm(outDir + "/" + s.name + "-exact.pcm", exact);
 		writePcm(outDir + "/" + s.name + "-practical.pcm", practical);
 		if (wav) {
@@ -511,9 +539,14 @@ int main(int argc, char **argv) {
 		}
 		std::printf("  {\"name\": \"%s\", \"seconds\": %.6f, \"writes\": %llu, \"exact_rate\": %.1f,"
 		            " \"practical_rate\": %.6f, \"exact_samples\": %zu, \"practical_frames\": %zu,"
+		            " \"block_frames\": %d, \"key_ons\": %llu,"
+		            " \"write_lead_ms\": [%.4f, %.4f], \"key_on_lead_ms\": [%.4f, %.4f],"
 		            " \"held\": %s, \"notes\": [%s], \"drums\": [%s]}%s\n",
 		            s.name.c_str(), s.seconds, writes, kNativeRate, kCodecRate, exact.size(),
-		            practical.size(), s.held ? "true" : "false", notes.c_str(), drums.c_str(),
+		            practical.size(), (int)OplPractical::kBlockFrames, lead.keyOns,
+		            lead.writes ? lead.writeSum / lead.writes : 0.0, lead.writeMax,
+		            lead.keyOns ? lead.keyOnSum / lead.keyOns : 0.0, lead.keyOnMax,
+		            s.held ? "true" : "false", notes.c_str(), drums.c_str(),
 		            i + 1 < all.size() ? "," : "");
 	}
 	std::printf("]\n");

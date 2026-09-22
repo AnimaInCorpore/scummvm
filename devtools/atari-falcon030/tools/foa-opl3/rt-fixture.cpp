@@ -15,8 +15,8 @@
 // --from starts the trace's window S seconds in, on the register image the
 // earlier writes left.
 //
-// With --play the events are also written as stream-mode periods of 15
-// blocks with silent PCM ('OPLP', period count, then per period: event
+// With --play the events are also written as stream-mode periods of 768
+// frames with silent PCM ('OPLP', period count, then per period: event
 // count, the event pairs, a zero PCM flag), and the manifest carries the
 // checksum the DSP's stream emit must reproduce: the sum of the limited
 // output words over every period, modulo 2^24.
@@ -556,7 +556,8 @@ int main(int argc, char **argv) {
 		std::fclose(pl.file);
 	}
 
-	std::printf("{\"scenario\": \"%s\", \"seconds\": %.3f, \"blocks\": %u, \"frames\": %u, \"chunks\": %u,"
+	std::printf("{\"scenario\": \"%s\", \"block_frames\": %d, \"period_blocks\": %d,"
+	            " \"seconds\": %.3f, \"blocks\": %u, \"frames\": %u, \"chunks\": %u,"
 	            " \"chunk_blocks\": %u, \"register_writes\": %zu, \"parameter_events\": %zu,"
 	            " \"peak_events_per_chunk\": %u, \"periods\": %u, \"period_checksum\": %u,"
 	            " \"blocks_decaying_past_sustain_level\": %u, \"blocks_entering_sustain_above_level\": %u,"
@@ -566,7 +567,8 @@ int main(int argc, char **argv) {
 	            " \"blocks_with_bass_carrier_alone\": %u, \"blocks_with_bass_feedback_fm\": %u,"
 	            " \"blocks_with_bass_plain_fm\": %u, \"blocks_with_drum_vibrato\": %u,"
 	            " \"blocks_melodic_after_rhythm\": %u}\n",
-	            scenario.c_str(), seconds, totalBlocks, totalBlocks * P::kBlockFrames, chunks, chunkBlocks,
+	            scenario.c_str(), (int)P::kBlockFrames, (int)OPL_PRACTICAL_PERIOD_BLOCKS,
+	            seconds, totalBlocks, totalBlocks * P::kBlockFrames, chunks, chunkBlocks,
 	            writes.size(), sink.events.size(), peakEvents, play ? periods : 0, checksum,
 	            decayPastBlocks, decayHeldBlocks, negativeIncrementBlocks, vibratoBlocks,
 	            pausedBlocks, attackZeroBlocks, attackMaxBlocks,

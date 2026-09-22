@@ -54,7 +54,10 @@ struct MixerImpl : Mixer {
 
 STUBS = r'''
 struct AtariDspAudio {
- enum { kPeriodFrames = 768, kBlockFrames = 64, kPeriodBlocks = 12, kPcmPerPeriod = 192 };
+ enum {
+  kBlockFrames = OPL_PRACTICAL_BLOCK_FRAMES, kPeriodBlocks = OPL_PRACTICAL_PERIOD_BLOCKS,
+  kPeriodFrames = kBlockFrames * kPeriodBlocks, kPcmPerPeriod = kPeriodFrames / OPL_PRACTICAL_PCM_DIVIDER
+ };
  struct Period { int paused = -1; int sample = -1; } period;
  int submitted = 0, lastPause = -1, lastSample = -1;
  Period *beginPeriod(bool) { period = Period(); return &period; }
