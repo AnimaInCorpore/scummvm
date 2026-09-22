@@ -19,7 +19,7 @@ and its own committed result file.
 | Stream mode through the SSI: word exact, no late period, also under the worst-case load, whose tightest period leaves 2.17 ms | [rt-stream-results.json](rt-stream-results.json), [rt-stream-stress-results.json](rt-stream-stress-results.json) | `rt-stream-gate.py` |
 | The same with rhythm mode: every shape of it, and Cruise for a Corpse's drums | [rt-stream-rhythm-results.json](rt-stream-rhythm-results.json), [rt-stream-cruise-results.json](rt-stream-cruise-results.json) | `rt-stream-gate.py --scenario rhythm`, `--trace <cruise> --from 153` |
 | A host stall is counted: a 0.995 s silence reads 62 late periods, not 0 | [rt-stream-starved-results.json](rt-stream-starved-results.json) | `rt-stream-gate.py --starve 50` |
-| Atlantis on the emulated Falcon with the DSP build, 48-frame blocks; the four below with 64 | [game-results.json](game-results.json) | `game-gate.py` |
+| Atlantis on the emulated Falcon with the DSP build, 48-frame blocks; Tentacle and the Monkey Islands with 64 | [game-results.json](game-results.json) | `game-gate.py` |
 | Day of the Tentacle on the same build | [game-results-tentacle.json](game-results-tentacle.json) | `game-gate.py --gameid tentacle` |
 | The Secret of Monkey Island (Ultimate Talkie) on the same build | [game-results-monkey.json](game-results-monkey.json) | `game-gate.py --gameid monkey` |
 | Monkey Island 2 (Ultimate Talkie) on the same build | [game-results-monkey2.json](game-results-monkey2.json) | `game-gate.py --gameid monkey2 --click` |
@@ -35,10 +35,10 @@ records the 2026-09-22 assessment: shorter control blocks, native-rate
 synthesis with resampling, more accurate rhythm noise, and a separate
 eighteen-channel experiment. The first is done and measured there: the
 kernel renders 48-frame blocks instead of 64, measured against 64 and 32.
-The others are proposals, not benchmark results. The Tentacle, Monkey
-Island and Cruise for a Corpse game records were made with 64-frame blocks
-and have not been rerun; Atlantis's game record has, and so have the Cruise
-windows of the practical, bench and stream gates.
+The others are proposals, not benchmark results. The Tentacle and Monkey
+Island game records were made with 64-frame blocks and have not been rerun;
+Atlantis's and Cruise for a Corpse's game records have, and so have the
+Cruise windows of the practical, bench and stream gates.
 
 ## How the capture works
 
@@ -701,9 +701,9 @@ and the records carry it as `min_slack_*`. With this host, which submits as
 fast as the kernel takes periods, that is the tightest period's spare time:
 3.29 ms of the 15.62 in the Atlantis stream, 2.17 ms both under the
 stress load and in the rhythm case (4.08, 2.95 and 3.03 ms with 64-frame
-blocks), and 5.12 ms in the Cruise stream. The game's transport answers READY only on its next 1 kHz tick,
-so up to a millisecond of it is the game's; the slack inside a game is not
-measured.
+blocks), and 5.12 ms in the Cruise stream. The game's transport answers
+READY only on its next 1 kHz tick, so up to a millisecond of it is the
+game's; the slack inside a game is not measured.
 
 "None late" means more than it once did. The kernel used to judge a period
 only when it finished rendering one, and a host that stops sending renders
@@ -771,8 +771,9 @@ The ScummVM build wires it in without touching the AdLib driver:
 [game-gate.py](game-gate.py) runs Atlantis on the emulated Falcon with that
 build, records Hatari's DAC output and reads the transport's counters from
 the log. [game-results.json](game-results.json) is the 48-frame kernel's
-run, made on Windows with the gate's AVI recording; the other game records
-below were made with 64-frame blocks. The kernel boots, the game starts,
+run, made on Windows with the gate's AVI recording; Cruise for a Corpse's
+below is a 48-frame run too, made on a Mac, and the other three game
+records were made with 64-frame blocks. The kernel boots, the game starts,
 5,823 periods stream through 91 s of its opening with no protocol error
 and no late period, and no tick found the queue empty once the stream was
 running. The loop stalled for 1,528 periods of PCM (23.9 s, nearly all of
@@ -816,10 +817,11 @@ Cruise for a Corpse ([game-results-cruise.json](game-results-cruise.json),
 `--gameid cruise --engine cruise --extra "" --seconds 1200`) is there for
 rhythm mode, on the build that takes in the SCI, Sky and Cruise engines.
 The 16 MHz machine spends the first four minutes on the Delphine logo and
-the load behind it, so a 200 s run records silence; over 1,200 s the music
-starts at 252 s and 519 of the seconds are loud, peaking at -15.9 dBFS,
-with 77,150 periods submitted, none late, no protocol error and 15
-extension periods. The recording was checked for presence and level like
+the load behind it, so a 200 s run records silence; over 1,200 s with
+48-frame blocks the music starts at 248 s and 521 of the seconds are loud,
+peaking at -15.6 dBFS, with 77,069 periods submitted, none late, no
+protocol error and 15 extension periods (252 s, 519, -15.9 dBFS and 77,150
+periods with 64-frame blocks). The recording was checked for presence and level like
 the others; that its drums are in it rests on the host and DSP gates above,
 which render the same driver's captured writes, not on anything measured in
 the recording.

@@ -443,7 +443,7 @@ each with a gate and a committed result file:
 | DSP cost at 49.17 kHz, Atlantis first 4 s | 189.7 cycles per frame, 58% of budget, word exact (175.7 with 64-frame blocks) |
 | DSP cost at 49.17 kHz, nine feedback FM channels with LFO held | 248.4 cycles per frame, 76% of budget, word exact (232.9 with 64-frame blocks) |
 | Stream mode through the SSI | Atlantis 20 s: 1,280 periods; nine-channel stress fixture 10 s: 640 periods; none late, checksums equal; the tightest period left 3.29 ms (Atlantis) and 2.17 ms (stress) of its 15.62 ms |
-| Atlantis, Tentacle, Monkey Island 1 and 2, Cruise on the emulated Falcon | opening music present, no late periods or protocol errors; Atlantis with 48-frame blocks, the others with 64; per-game counters and limitations in the [integration notes](../tools/foa-opl3/README.md#in-the-game) |
+| Atlantis, Tentacle, Monkey Island 1 and 2, Cruise on the emulated Falcon | opening music present, no late periods or protocol errors; Atlantis and Cruise with 48-frame blocks, the others with 64; per-game counters and limitations in the [integration notes](../tools/foa-opl3/README.md#in-the-game) |
 
 The practical kernel and integration pass their bounded emulation gates;
 listening, wider gameplay coverage, the worst-period margin inside a game
@@ -527,9 +527,10 @@ before the boundary-pass rewrite, at 88% of the budget in the stress case.
 
 In the game, Atlantis's opening streams 5,823 periods with 48-frame blocks,
 twice with the same counters: no late period, no protocol error, 14
-extension periods. The Tentacle, Monkey Island and Cruise for a Corpse runs
-in the integration notes were made with 64-frame blocks, and the tightest
-in-game deadline is not measured at all.
+extension periods. Cruise for a Corpse's 1,200 s run, redone with them, has
+none late either. The Tentacle and Monkey Island runs in the integration
+notes were made with 64-frame blocks, and the tightest in-game deadline is
+not measured at all.
 
 Event-aligned splits are a later alternative: carry sample offsets, render
 up to a write, apply it, then render the remainder in order. This requires
