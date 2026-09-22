@@ -1,8 +1,8 @@
 {
   "date": "2026-09-22",
   "gate": "practical block-rate OPL kernel against the exact kernel, perceptual metrics",
-  "scummvm_commit": "2ec6a8a27e2e2d18b9aa1e4f325c0258b567b022",
-  "scummvm_worktree_dirty": true,
+  "scummvm_commit": "353f6b45482cf7eb1172ac16eb9f4611178c3818",
+  "scummvm_worktree_dirty": false,
   "source_sha256": {
     "opl-practical.h": "17007352639c09e5abd73fb0962f1af12066709697e5647b0731940e0f9644c2",
     "practical-test.cpp": "8ec1e42df0656f15e7320c69dfd71a5be8f28bf1dd530e92540df888fcf2e424",
@@ -11,8 +11,8 @@
     "opl-kernel.h": "ed357038f58b51451715d558867bf8bf756d11139a596a5a7042aaf63d71fe08"
   },
   "trace_sha256": "883bae533b8338fb9ca9714216412705853f52248b75ff970f8f4ddc666a893f",
-  "rhythm_trace_sha256": null,
-  "rhythm_trace_from_s": null,
+  "rhythm_trace_sha256": "5726e28e3b0d0143077769ddc116bb75b0e43a96f61a2d5a3940fdd4137a14ed",
+  "rhythm_trace_from_s": 105.0,
   "block_frames": 48,
   "thresholds": {
     "envelope_correlation_min": 0.985,
@@ -2328,6 +2328,45 @@
       "write_lead_ms_max": 0.976,
       "key_on_lead_ms_mean": 0.5291,
       "key_on_lead_ms_max": 0.9756,
+      "failures": []
+    },
+    {
+      "name": "cruise",
+      "seconds": 60.0,
+      "envelope_windows": 3000,
+      "envelope_correlation": 0.9968,
+      "envelope_db_mean_abs": 0.106,
+      "envelope_db_max_abs": 3.214,
+      "envelope_db_mean_abs_unaligned": 0.449,
+      "onsets_paired": 0,
+      "onset_skew_ms_mean": 0.0,
+      "onset_skew_ms_max": 0.0,
+      "rms_ratio": 1.014,
+      "mix_band_windows": 120,
+      "mix_band_db_mean": [
+        0.148,
+        1.529,
+        2.369
+      ],
+      "mix_band_db_mean_abs": [
+        0.228,
+        1.639,
+        2.411
+      ],
+      "spectral_windows": [
+        {
+          "at_s": 0.3,
+          "hf_db_exact": -48.07,
+          "hf_db_practical": -45.44
+        }
+      ],
+      "hf_excess_db_max": 0.0,
+      "register_writes": 3011,
+      "key_ons": 348,
+      "write_lead_ms_mean": 0.4603,
+      "write_lead_ms_max": 0.9743,
+      "key_on_lead_ms_mean": 0.4713,
+      "key_on_lead_ms_max": 0.9273,
       "failures": []
     }
   ],

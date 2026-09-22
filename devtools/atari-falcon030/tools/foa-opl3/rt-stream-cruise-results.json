@@ -1,11 +1,11 @@
 {
-  "date": "2026-09-21",
+  "date": "2026-09-22",
   "gate": "practical OPL kernel stream mode on the emulated Falcon: transport, timing, exactness",
   "source_sha256": {
-    "dsp/oplrt.asm": "93cccff7b81a20bcdfe39ce1d48990176d67986d1a9e647660cc9a26a9ef24d9",
-    "m68k/oplplay.s": "c411e279a1ec485b3a8f47b4cf5d57d9f2ea5f0284da24eec846816e1345acd4",
-    "rt-fixture.cpp": "d9149d676d5fd6e091afd09e0dc4440a344797e6af4b0f9b1c4ba9cddff7c71c",
-    "opl-practical.h": "e2f96ac47e27fb2a8d0448aaad9cfc6a494afe102b6487026c1a6d4c41362847"
+    "dsp/oplrt.asm": "cb3145f617ede0f66e149873dfaed7a839a2c31c68fe5ce4f38d0c674ad291bd",
+    "m68k/oplplay.s": "cc70bb0cc91a13cacf9ec7c9ddc41863ce8dfcac5931f083d78926fed2517d22",
+    "rt-fixture.cpp": "3ac2efbe8e5b586d614be5c03ef15739804ab72bc833f3fc0e490fbd6de8c6b2",
+    "opl-practical.h": "17007352639c09e5abd73fb0962f1af12066709697e5647b0731940e0f9644c2"
   },
   "scenario": "trace",
   "trace_sha256": "5726e28e3b0d0143077769ddc116bb75b0e43a96f61a2d5a3940fdd4137a14ed",
@@ -16,10 +16,14 @@
   "late_periods": 0,
   "register_writes": 1573,
   "parameter_events": 2492,
-  "checksum_expected": 4668180,
-  "checksum_dsp": 4668180,
+  "checksum_expected": 13179832,
+  "checksum_dsp": 13179832,
   "word_exact": true,
   "on_time": true,
+  "block_frames": 48,
+  "min_slack_frames": 251,
+  "min_slack_ms": 5.115,
+  "min_slack_percent_of_period": 32.7,
   "starvation": null,
   "not_established": [
     "No audio captured or auditioned from the emulator; the checksum proves the rendered words",

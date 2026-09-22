@@ -235,9 +235,8 @@ accurate rhythm noise. Approximate eighteen-channel OPL3 needs a
 separate benchmark and missing features: the current practical path has
 four waveforms, a mono mix and no four-operator pairing. Simply doubling
 its active synthesis stages exceeds the 49.17 kHz budget. The quoted
-Atlantis/Cruise correlations (0.9862/0.9972, the Cruise one with 64-frame
-blocks) measure aligned loudness envelopes, not waveform fidelity or a
-percentage of accuracy.
+Atlantis/Cruise correlations (0.9862/0.9968) measure aligned loudness
+envelopes, not waveform fidelity or a percentage of accuracy.
 
 **Speech needs an uncompressed `monster.sou`.** The build defines no codec -
 the DSP is busy with the OPL kernel and the 68030 has nothing spare beside

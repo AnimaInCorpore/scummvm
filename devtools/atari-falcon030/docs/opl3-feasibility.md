@@ -438,7 +438,7 @@ each with a gate and a committed result file:
 | Aligned envelope correlation, Atlantis 60 s | 0.9862, mean level error 0.607 dB, measured onset skew at most 2.77 ms (0.9825, 0.681 dB and 2.83 ms with 64-frame blocks) |
 | Write timing, Atlantis 60 s | key-ons take effect a mean 0.53 ms and at most 0.98 ms early (0.63 and 1.30 ms with 64-frame blocks) |
 | Band levels against the exact kernel, Atlantis 60 s, a window every 0.5 s | mean absolute error 0.61 dB below 3 kHz, 0.65 dB at 3-8 kHz, 1.07 dB at 8-15 kHz (0.69, 0.81, 1.09 dB with 64-frame blocks) |
-| Aligned envelope correlation, Cruise 60 s with rhythm mode | 0.9972, mean level error 0.099 dB, with 64-frame blocks; not rerun |
+| Aligned envelope correlation, Cruise 60 s with rhythm mode | 0.9968, mean level error 0.106 dB (0.9972 and 0.099 dB with 64-frame blocks) |
 | Aliasing: energy above 3 kHz against the exact kernel, Atlantis 60 s | +0.9 dB at 49.17 kHz (+2.7 dB at 32.78 kHz, heard as blurred instruments), with 64-frame blocks |
 | DSP cost at 49.17 kHz, Atlantis first 4 s | 189.7 cycles per frame, 58% of budget, word exact (175.7 with 64-frame blocks) |
 | DSP cost at 49.17 kHz, nine feedback FM channels with LFO held | 248.4 cycles per frame, 76% of budget, word exact (232.9 with 64-frame blocks) |

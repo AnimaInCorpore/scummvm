@@ -1,8 +1,8 @@
 {
   "date": "2026-09-22",
   "gate": "practical OPL kernel on the emulated Falcon DSP56001: exactness and cycle cost",
-  "scummvm_commit": "2ec6a8a27e2e2d18b9aa1e4f325c0258b567b022",
-  "scummvm_worktree_dirty": true,
+  "scummvm_commit": "353f6b45482cf7eb1172ac16eb9f4611178c3818",
+  "scummvm_worktree_dirty": false,
   "source_sha256": {
     "dsp/oplrt.asm": "cb3145f617ede0f66e149873dfaed7a839a2c31c68fe5ce4f38d0c674ad291bd",
     "m68k/oplrt.s": "9905ca7b528c622a8ad90d46cf805171c0ec3dab823548c81700951cf8678f20",
@@ -12,8 +12,8 @@
     "generate-tables.py": "6e62ce3c14e6ce1f99f471425fb90935e2e782e5f118004e6fa0759e335069b0"
   },
   "trace_sha256": "883bae533b8338fb9ca9714216412705853f52248b75ff970f8f4ddc666a893f",
-  "rhythm_trace_sha256": null,
-  "rhythm_trace_from_s": null,
+  "rhythm_trace_sha256": "5726e28e3b0d0143077769ddc116bb75b0e43a96f61a2d5a3940fdd4137a14ed",
+  "rhythm_trace_from_s": 153.0,
   "dsp_program_words": 1608,
   "reference": "opl-practical.h, scored against the exact kernel by practical-gate.py",
   "cases": [
@@ -208,6 +208,54 @@
       },
       "budget_cycles_per_frame": 326.27,
       "budget_use_percent": 58.1
+    },
+    {
+      "scenario": "cruise",
+      "block_frames": 48,
+      "seconds": 4.0,
+      "frames": 196656,
+      "blocks": 4097,
+      "chunks": 49,
+      "register_writes": 377,
+      "parameter_events": 871,
+      "peak_events_per_chunk": 562,
+      "paths_exercised": {
+        "blocks_decaying_past_sustain_level": 0,
+        "blocks_entering_sustain_above_level": 0,
+        "blocks_with_negative_increment": 0,
+        "blocks_with_vibrato": 2743,
+        "blocks_paused": 0,
+        "blocks_holding_attack_zero": 4096,
+        "blocks_holding_attack_max": 0,
+        "blocks_with_drums": 982,
+        "blocks_with_silent_drums": 3115,
+        "blocks_with_tom": 0,
+        "blocks_with_bass_carrier_alone": 0,
+        "blocks_with_bass_feedback_fm": 1602,
+        "blocks_with_bass_plain_fm": 0,
+        "blocks_with_drum_vibrato": 0,
+        "blocks_melodic_after_rhythm": 0
+      },
+      "frame_words_compared": 196656,
+      "mismatches_against_host_kernel": 0,
+      "first_mismatch_frame": null,
+      "bit_exact": true,
+      "instruction_cycles_per_frame": 152.0,
+      "instruction_cycles_per_frame_by_range": {
+        "stages": 96.11,
+        "op_boundary": 18.87,
+        "stream_emit": 0.0,
+        "trigger_attack": 0.01,
+        "render_driver": 6.65,
+        "loaders_and_modes": 5.27,
+        "clear_mix": 1.12,
+        "emit": 5.19,
+        "block_and_channel_boundary": 17.92,
+        "render_block": 0.54,
+        "apply_events": 0.32
+      },
+      "budget_cycles_per_frame": 326.27,
+      "budget_use_percent": 46.6
     }
   ],
   "budget_basis": {

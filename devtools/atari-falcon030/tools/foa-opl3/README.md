@@ -17,7 +17,7 @@ and its own committed result file.
 | Practical kernel's register semantics, word for word | [practical-unit-results.json](practical-unit-results.json) | `opl-practical-unit-test` |
 | Practical DSP kernel at 49.17 kHz in 48-frame blocks: word exact against its practical reference, rhythm included, 58-76% of budget before production transport/SSI | [rt-bench-results.json](rt-bench-results.json) | `rt-bench-gate.py` |
 | Stream mode through the SSI: word exact, no late period, also under the worst-case load, whose tightest period leaves 2.17 ms | [rt-stream-results.json](rt-stream-results.json), [rt-stream-stress-results.json](rt-stream-stress-results.json) | `rt-stream-gate.py` |
-| The same with rhythm mode: every shape of it, and Cruise for a Corpse's drums (that record with 64-frame blocks) | [rt-stream-rhythm-results.json](rt-stream-rhythm-results.json), [rt-stream-cruise-results.json](rt-stream-cruise-results.json) | `rt-stream-gate.py --scenario rhythm`, `--trace <cruise> --from 153` |
+| The same with rhythm mode: every shape of it, and Cruise for a Corpse's drums | [rt-stream-rhythm-results.json](rt-stream-rhythm-results.json), [rt-stream-cruise-results.json](rt-stream-cruise-results.json) | `rt-stream-gate.py --scenario rhythm`, `--trace <cruise> --from 153` |
 | A host stall is counted: a 0.995 s silence reads 62 late periods, not 0 | [rt-stream-starved-results.json](rt-stream-starved-results.json) | `rt-stream-gate.py --starve 50` |
 | Atlantis on the emulated Falcon with the DSP build, 48-frame blocks; the four below with 64 | [game-results.json](game-results.json) | `game-gate.py` |
 | Day of the Tentacle on the same build | [game-results-tentacle.json](game-results-tentacle.json) | `game-gate.py --gameid tentacle` |
@@ -36,9 +36,9 @@ synthesis with resampling, more accurate rhythm noise, and a separate
 eighteen-channel experiment. The first is done and measured there: the
 kernel renders 48-frame blocks instead of 64, measured against 64 and 32.
 The others are proposals, not benchmark results. The Tentacle, Monkey
-Island and Cruise for a Corpse game records, the Cruise window of the
-practical and bench gates and its stream record were made with 64-frame
-blocks and have not been rerun; Atlantis's game record has.
+Island and Cruise for a Corpse game records were made with 64-frame blocks
+and have not been rerun; Atlantis's game record has, and so have the Cruise
+windows of the practical, bench and stream gates.
 
 ## How the capture works
 
@@ -484,9 +484,9 @@ are held to a level instead (the strongest below -30 dB, or no more than
 | nine-channel polyphony | | 0.9962 | 0.06 / 0.64 dB | | | | |
 | rhythm mode: twelve held drums, then a pattern | | 0.9935 | 0.04 / 1.44 dB | | 0.70 dB | | each drum's level within 0.07 dB; bands are the worst drum's (the hi-hat), over six windows of the noise |
 | Atlantis, 60 s | | 0.9862 | 0.61 / 7.26 dB | | | | mix of coincident partials; broad bands within 0.61, 0.65 and 1.07 dB on average, below 3 kHz, at 3-8 and 8-15 kHz |
-| Cruise for a Corpse, 60 s from 105 s | | 0.9972 | 0.10 / 3.17 dB | | | | tom-tom, snare and bass drum through rhythm mode; 64-frame blocks, not rerun |
+| Cruise for a Corpse, 60 s from 105 s | | 0.9968 | 0.11 / 3.21 dB | | | | tom-tom, snare and bass drum through rhythm mode; broad bands within 0.23, 1.64 and 2.41 dB on average (0.9972 and 0.10 / 3.17 dB with 64-frame blocks) |
 
-All but the Cruise row are 48-frame blocks; the
+All rows are 48-frame blocks; the
 [control-timing comparison](../../docs/opl3-feasibility.md#control-timing-48-frame-blocks)
 sets them beside 64 and 32 frames. For a mix, the gate compares the level
 of three broad bands in a window every half second (`mix_band_db_*`), where
@@ -495,7 +495,7 @@ still read 1.35 dB more 8-15 kHz share than the chip's, from 0.55 dB with
 64-frame blocks, because the band below 3 kHz fell a decibel in one of the
 two windows, while every band is closer to the chip over the minute.
 
-The 0.9862 and 0.9972 figures are correlations of **aligned 20 ms RMS
+The 0.9862 and 0.9968 figures are correlations of **aligned 20 ms RMS
 loudness envelopes**, not correlations of the audio waveforms and not a
 percentage of emulation accuracy. The sustained-tone fixture's result is
 not a universal one-dB/one-cent bound: the table includes larger errors in
@@ -588,8 +588,8 @@ The blocks are 48 frames; the last row is the same gate on the 64-frame
 kernel. The gate's event range used to take in the host-port waits of the
 bench's own uploads between chunks, 0.4 cycles a frame of the 233.25 the
 stress case read before; it now ends where the stream code starts. The
-Cruise window, 4 s from 153 s, cost 139.4 cycles a frame (43%) with
-64-frame blocks and was not rerun.
+Cruise window, 4 s from 153 s, costs 152.0 cycles a frame (47%), word exact
+(139.4, 43%, with 64-frame blocks).
 
 These costs exclude production host transport, PCM mixing and SSI output.
 The separate stream gates below exercise delivery and deadlines; a 76%
@@ -692,17 +692,16 @@ own: [rt-stream-rhythm-results.json](rt-stream-rhythm-results.json),
 at its most expensive is held for three of them, and
 [rt-stream-cruise-results.json](rt-stream-cruise-results.json), 20 s of the
 Cruise for a Corpse stream from 153 s, where its snare and bass drum are
-densest; 640 and 1,280 periods, none late, checksums equal. The Cruise
-record was made with 64-frame blocks.
+densest; 640 and 1,280 periods, none late, checksums equal.
 
 "None late" says nothing about how close a period came. Whenever a render
 finishes on time, the kernel now notes how much of the other half the
 transmitter still has to play, and keeps the least; `CMD_MARGIN` reads it,
 and the records carry it as `min_slack_*`. With this host, which submits as
 fast as the kernel takes periods, that is the tightest period's spare time:
-3.29 ms of the 15.62 in the Atlantis stream, and 2.17 ms both under the
+3.29 ms of the 15.62 in the Atlantis stream, 2.17 ms both under the
 stress load and in the rhythm case (4.08, 2.95 and 3.03 ms with 64-frame
-blocks). The game's transport answers READY only on its next 1 kHz tick,
+blocks), and 5.12 ms in the Cruise stream. The game's transport answers READY only on its next 1 kHz tick,
 so up to a millisecond of it is the game's; the slack inside a game is not
 measured.
 
@@ -969,10 +968,8 @@ builds the SCUMM engine only; the same configure line with
 target names `engineid=cruise`, `gameid=cruise`, give
 `scummvm-opl-capture` for it (`foa_capture_ms=300000`; the music starts at
 50 s and the drums at 108 s of the virtual clock). `--rhythm-trace` is
-optional on the three gates that take it. The kernel record was made with
-it; the practical and bench records of the 48-frame kernel were not, the
-Cruise data not being at hand, so their Cruise figures quoted above are the
-64-frame records'.
+optional on the three gates that take it. The kernel, practical and bench
+records were made with it.
 
 The practical kernel's gates, in the same tree:
 
