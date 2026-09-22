@@ -1,19 +1,20 @@
 {
-  "date": "2026-09-20",
+  "date": "2026-09-21",
   "gate": "DSP-shaped OPL kernel against Nuked-OPL3, sample for sample",
-  "scummvm_commit": "f6d1711e03a242259559146c7b7b1a897041371e",
-  "scummvm_worktree_dirty": false,
+  "scummvm_commit": "a583ff5056b685830c197d84dc16508f914ef822",
+  "scummvm_worktree_dirty": true,
   "source_sha256": {
-    "opl-kernel.h": "b22fac5d5ecff8db925b5660823b6ba592afecdc590c0f3c87d567e012bdfcc1",
-    "kernel-test.cpp": "89ac18c2c57cdcf1762fa4f5dbd546a4799c5fe7c9adca20f50ab742bd213fa6",
+    "opl-kernel.h": "ed357038f58b51451715d558867bf8bf756d11139a596a5a7042aaf63d71fe08",
+    "kernel-test.cpp": "70bb1b1ad873ed8e71418a7115d7052a8773243b5b46e3191083822026fb41be",
     "generate-tables.py": "5061aa05b59a3b0b10532317d3a5a54546861858be11d2695769572b2d26eef7",
     "kernel.mk": "11e5f1a4e30227b2fbe48db8e26350bceaf373432bb2915559bf9a244b54fafd",
-    "kernel-gate.py": "e77672ed081c4a831886989e05e0d32c4f9f844266a969dd309286474da33d43"
+    "kernel-gate.py": "551317f60d3f658cce97049ba3fe4c062296ad19e9877d1428e8117aae87134a"
   },
   "trace_sha256": "883bae533b8338fb9ca9714216412705853f52248b75ff970f8f4ddc666a893f",
+  "rhythm_trace_sha256": "5726e28e3b0d0143077769ddc116bb75b0e43a96f61a2d5a3940fdd4137a14ed",
   "reference": "Nuked-OPL3 (ScummVM tree)",
-  "samples_compared": 4189988,
-  "register_writes": 47846,
+  "samples_compared": 19303934,
+  "register_writes": 58823,
   "mismatches": 0,
   "bit_exact": true,
   "cases": [
@@ -24,7 +25,10 @@
     "timbre: all waveforms, both connections, every feedback depth, OPL2 and OPL3",
     "modulation: tremolo and vibrato, shallow and deep, over a full LFO period",
     "polyphony: 9 and 18 channels with key cycling and mid-note patch reloads",
-    "the captured Atlantis register stream replayed at its recorded times"
+    "rhythm: the bass drum in both connections and the four single-operator drums in every key combination, waveform and level; drum keys under and over the channels' own; the mode left and entered under sounding notes; the low bank of an 18-channel chip; the noise generator past its period",
+    "waveform select enable: an OPL2's gate, against the oracle given what it lets through",
+    "the captured Atlantis register stream replayed at its recorded times",
+    "the captured Cruise for a Corpse register stream, which plays its percussion through rhythm mode, replayed at its recorded times"
   ],
   "rom_words": {
     "log_sine": 256,
@@ -34,7 +38,8 @@
   "scope": {
     "two_operator_melodic_channels": true,
     "four_operator_mode": false,
-    "rhythm_mode": false
+    "rhythm_mode": true,
+    "opl2_waveform_select_enable": true
   },
   "not_established": [
     "No DSP assembly was measured; this is the host reference the kernel is written from",

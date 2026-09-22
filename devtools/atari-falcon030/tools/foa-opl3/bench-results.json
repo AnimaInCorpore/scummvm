@@ -1,13 +1,13 @@
 {
   "date": "2026-09-16",
   "gate": "OPL synthesis on the emulated Falcon DSP56001: exactness and cycle cost",
-  "scummvm_commit": "4b73ae3393592cef284070df1fd831aa1e07463a",
+  "scummvm_commit": "a583ff5056b685830c197d84dc16508f914ef822",
   "scummvm_worktree_dirty": true,
   "source_sha256": {
     "dsp/opl.asm": "a18d04b4306cd3dbc3ba02fbc50168234c24fec332c69b1c5c1898aac17e2227",
     "m68k/oplbench.s": "52d09371c48c11e0d549bc315894ab871a9ad621855098cf16878f83adaa60d3",
     "dsp-fixture.cpp": "e1623f1434b8e363c6a6bc3ae6f4652e52d6340087a1252c4d4aee8ff3493fc7",
-    "opl-kernel.h": "ccfb0a922d71981e728be957240b789a99ce1abb28ef1053ec701e8d5cf5759d",
+    "opl-kernel.h": "ed357038f58b51451715d558867bf8bf756d11139a596a5a7042aaf63d71fe08",
     "bench-gate.py": "435256831bfbbcc0bad387594dc6a69eb3529b25da272a1c7460e991fc535a54"
   },
   "dsp_program_words": 495,

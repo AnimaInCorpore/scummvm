@@ -1,20 +1,21 @@
 {
-  "date": "2026-09-18",
+  "date": "2026-09-21",
   "gate": "practical OPL kernel stream mode on the emulated Falcon: transport, timing, exactness",
   "source_sha256": {
-    "dsp/oplrt.asm": "13d67edc03fdd0836a74883ebfe88ba87b7c94cdc9d96cae28501b45da09982c",
+    "dsp/oplrt.asm": "93cccff7b81a20bcdfe39ce1d48990176d67986d1a9e647660cc9a26a9ef24d9",
     "m68k/oplplay.s": "c411e279a1ec485b3a8f47b4cf5d57d9f2ea5f0284da24eec846816e1345acd4",
-    "rt-fixture.cpp": "1a4cd0a9af68af2848ae9c5cbc9d4fbdd9b9d67951a438e3b8b500e4348b7bf0",
-    "opl-practical.h": "4fdc84b42cce266400cc37e765137f54ebee83c2e44063d533859c7f97ff0257"
+    "rt-fixture.cpp": "d9149d676d5fd6e091afd09e0dc4440a344797e6af4b0f9b1c4ba9cddff7c71c",
+    "opl-practical.h": "e2f96ac47e27fb2a8d0448aaad9cfc6a494afe102b6487026c1a6d4c41362847"
   },
   "scenario": "stress",
   "trace_sha256": null,
+  "trace_from_s": null,
   "seconds": 10.0,
   "periods_submitted": 640,
   "periods_rendered": 640,
   "late_periods": 0,
   "register_writes": 146,
-  "parameter_events": 636,
+  "parameter_events": 637,
   "checksum_expected": 1782904,
   "checksum_dsp": 1782904,
   "word_exact": true,
