@@ -6,8 +6,10 @@
 // the benchmark hooks and breaks at the renderer marker (phase 3, just before
 // conversion). The hooks only run in room 28, so in other rooms it breaks at
 // the entry of AtariSteSceneRenderer::convert instead and traces
-// ScummEngine::startScene for the room. The directory is the --capture input
-// of monkey-flicker-compare.mjs. From the repository root, after building the
+// ScummEngine::startScene for the room and ClassicCostumeLoader::loadCostume
+// for the costumes drawn there, which scumm-scene-colours.mjs takes with
+// --capture. The directory is the --capture input of
+// monkey-flicker-compare.mjs. From the repository root, after building the
 // STE executable:
 //
 //   node devtools/atari-ste/tools/scumm-ste-frame-capture.mjs [--out DIR] [--vbls 12000,12400,...]
@@ -99,6 +101,9 @@ const state = addr('atari_ste_bench_state'), marker = addr('atari_ste_bench_mark
 const source = addr('atari_ste_last_source'), palette = addr('atari_ste_last_palette');
 const convert = addrOfPrefix('_ZN21AtariSteSceneRenderer7convertE');
 const startScene = addrOfPrefix('_ZN5Scumm11ScummEngine10startSceneE');
+// The V5 costume renderer loads the costume of every actor it draws, so this
+// fires for whoever is on screen, not only when a script changes a costume.
+const loadCostume = addr('_ZN5Scumm20ClassicCostumeLoader11loadCostumeEi');
 const write = (name, lines) => writeFileSync(`${out}/${name}.ini`, lines.join('\n') + '\n');
 // Phase 3 of the benchmark marker is the start of a conversion. Elsewhere the
 // entry of AtariSteSceneRenderer::convert is the same point: the capture HD has
@@ -112,13 +117,21 @@ write('boot', [`b GemdosOpcode = 0x4b && OsCallParam = 0 :once :trace :file ${ou
 write('loaded', [`b pc = TEXT :once :trace :file ${out}/start.ini`]);
 write('start', [
 	`symbols ${out}/code-symbols.txt TEXT`,
-	...(benchmark ? [] : [`b pc = '${startScene}' :trace :file ${out}/room.ini`]),
+	...(benchmark ? [] : [
+		`b pc = '${startScene}' :trace :file ${out}/room.ini`,
+		`b pc = '${loadCostume}' :trace :file ${out}/costume.ini`,
+	]),
 	`${atConversion(vbls[0])} :file ${out}/capture-0.ini`,
 	`b VBL = ${vbls.at(-1) + 5000} :once :trace :file ${out}/timeout.ini`,
 ]);
 // At the entry of startScene(int room, Actor *, int), a7 points at the return
-// address, then this, then the room.
-if (!benchmark) write('room', ['echo STE_ROOM', 'evaluate (a7+8)', 'evaluate VBL']);
+// address, then this, then the room. ClassicCostumeLoader::loadCostume(int)
+// has the same layout, so its costume is (a7+8) as well: together they say
+// which costumes were drawn while each room was on screen.
+if (!benchmark) {
+	write('room', ['echo STE_ROOM', 'evaluate (a7+8)', 'evaluate VBL']);
+	write('costume', ['echo STE_COSTUME', 'evaluate (a7+8)', 'evaluate VBL']);
+}
 vbls.forEach((vbl, k) => write(`capture-${k}`, [
 	'echo STE_CAPTURE',
 	'evaluate VBL',
@@ -144,6 +157,17 @@ writeFileSync(`${out}/hatari.cfg`, '');
 writeFileSync(`${out}/hatari.log`, '');
 const child = spawn(hatari, args, { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, SDL_VIDEODRIVER: 'dummy', SDL_AUDIODRIVER: 'dummy', SDL_RENDER_DRIVER: 'software' } });
 for (const stream of [child.stdout, child.stderr]) stream.on('data', data => appendFileSync(`${out}/hatari.log`, data));
+// The costumes drawn while each room was on screen, in id order.
+const costumesByRoom = entries => {
+	const byRoom = new Map();
+	for (const { costume, room: at } of entries) {
+		if (at === null) continue;
+		if (!byRoom.has(at)) byRoom.set(at, new Set());
+		byRoom.get(at).add(costume);
+	}
+	return [...byRoom].map(([at, ids]) => ({ room: at, costumes: [...ids].sort((a, b) => a - b) }));
+};
+
 child.on('close', (code, signal) => {
 	const log = readFileSync(`${out}/hatari.log`, 'utf8');
 	if (code || signal || !log.includes('STE_CAPTURE_DONE>')) {
@@ -153,10 +177,10 @@ child.on('close', (code, signal) => {
 	}
 	// echo adds no newline, so a marker shares its line with the next command;
 	// evaluate prints its result as "= ... #N (dec) ...".
-	const rooms = [], atCapture = [];
+	const rooms = [], costumes = [], atCapture = [];
 	let label = null, values = [];
 	for (const line of log.split(/\r?\n/)) {
-		if (line.startsWith('STE_ROOM>') || line.startsWith('STE_CAPTURE>')) {
+		if (line.startsWith('STE_ROOM>') || line.startsWith('STE_COSTUME>') || line.startsWith('STE_CAPTURE>')) {
 			label = line.slice(0, line.indexOf('>'));
 			values = [];
 		}
@@ -167,7 +191,10 @@ child.on('close', (code, signal) => {
 			atCapture.push({ vbl: values[0], room: rooms.at(-1)?.room ?? null });
 			label = null;
 		} else if (values.length === 2) {
-			rooms.push({ room: values[0], vbl: values[1] });
+			if (label === 'STE_ROOM')
+				rooms.push({ room: values[0], vbl: values[1] });
+			else
+				costumes.push({ costume: values[0], vbl: values[1], room: rooms.at(-1)?.room ?? null });
 			label = null;
 		}
 	}
@@ -195,10 +222,12 @@ child.on('close', (code, signal) => {
 		prgSha256: createHash('sha256').update(readFileSync(prg)).digest('hex'),
 		source: `atari_ste_last_source (320x200 chunky) and atari_ste_last_palette (_RGB[256]) ${benchmark ? 'at benchmark phase 3' : 'at the entry of AtariSteSceneRenderer::convert'}`,
 		palettesIdentical: palettes.every(p => p.equals(palettes[0])),
-		...(benchmark ? {} : { rooms }),
+		...(benchmark ? {} : { rooms, costumesByRoom: costumesByRoom(costumes) }),
 		captures,
 	};
 	writeFileSync(`${out}/capture.json`, JSON.stringify(manifest, null, 2) + '\n');
+	const traced = manifest.costumesByRoom?.find(entry => entry.room === Number(room));
+	if (traced) console.log(`Costumes drawn in room ${room}: ${traced.costumes.join(',')}`);
 	console.log(JSON.stringify({ palettesIdentical: manifest.palettesIdentical, captures: captures.map(c => [c.afterVbl, c.vbl, c.room, c.roomFrame]) }));
 	if (!benchmark) console.log(`Rooms entered: ${rooms.map(r => `${r.room} at VBL ${r.vbl}`).join(', ') || 'none traced'}`);
 	if (room !== null && captures.some(c => c.room !== Number(room))) {

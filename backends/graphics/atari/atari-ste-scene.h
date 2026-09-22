@@ -65,6 +65,9 @@ public:
 	bool mixEnabled() const { return _mixEnabled; }
 	bool mixSplit() const { return _mixSplit; }
 	bool mixDual() const { return _mixDual; }
+	// Tables can be exchanged while the game runs (one per room); the caller
+	// then has to redraw every buffer in full.
+	//
 	// Same dirty-rectangle and schedule contract as convert(). The schedule
 	// receives 64 words: field 0's room and verb-bar palettes, then field 1's.
 	void convertMix(const Graphics::Surface &source, AtariSurface &field0, AtariSurface &field1,
@@ -127,6 +130,8 @@ private:
 	// Source palette the field tables were built from.
 	byte _mixPalette[256 * 3] = {};
 	bool _mixTablesValid = false;
+	// Counts loaded tables, so a buffer knows its palette words are stale.
+	uint32 _mixGeneration = 0;
 };
 
 #endif

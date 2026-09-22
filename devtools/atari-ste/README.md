@@ -11,7 +11,12 @@ without npm dependencies; run them from the repository root.
 - `tools/`: room-28 extraction and costume decoding, palette-strategy
   comparisons, the native viewer build, frame capture and per-phase profiling
   of the running port, and `monkey-flicker-compare.mjs`, which writes the
-  `ste_mix_lut` colour-mixing tables.
+  `ste_mix_lut` colour-mixing tables. `scumm-scene-colours.mjs` lists every
+  colour a room's background, objects and costumes can show, which the
+  evaluator fits the palettes to with `--union`, and
+  `scumm-mix-table-check.mjs` scores a finished table against that list.
+  `scumm-ste-room-tables.mjs` runs both over every room of a game and installs
+  the per-room tables the port loads when a room opens.
 - `raster-test/`: a standalone program for the Timer B palette raster;
   `tools/timerb-test.mjs` builds, runs and verifies it.
 - `raster.s`: the Spectrum 512 raster loop from Spectrum512Painter, included by
@@ -20,7 +25,8 @@ without npm dependencies; run them from the repository root.
   unmodified scene renderer, driven by `tools/scumm-ste-rect-test.mjs`.
 - `docs/`: design notes and measurements. `STE_MONKEY_TEMPORAL_MIXING.md`
   describes the current display path; `STE_MONKEY_ROOM28_MEASUREMENT.md` the
-  CPU budget.
+  CPU budget; `STE_ATLANTIS_DUAL20.md` how Fate of Atlantis is built, installed
+  and run with the two-palette table.
 - `monkey-bar/`: generated output. Only its README, `monkey-viewer.s` and
   `hardware-test/README.md` are tracked; extracted fixtures, captures and
   tables derive from the game and stay out of git.
@@ -46,7 +52,9 @@ Game data is never committed; keep it in the untracked `assets/` directory.
 ```sh
 node devtools/atari-ste/tools/scumm-ste-frame-capture.mjs --out devtools/atari-ste/monkey-bar/room28-capture
 node devtools/atari-ste/tools/scumm-ste-frame-capture.mjs --game atlantis --boot-param 9554 --room 64 --vbls 44000,44400,44800,45200,45600,46000,46400,46800 --out devtools/atari-ste/monkey-bar/atlantis-room64-capture
+node devtools/atari-ste/tools/scumm-scene-colours.mjs --game atlantis --room 64 --capture devtools/atari-ste/monkey-bar/atlantis-room64-capture --out devtools/atari-ste/monkey-bar/atlantis-room64-capture/colours.json
 node devtools/atari-ste/tools/monkey-flicker-compare.mjs --capture devtools/atari-ste/monkey-bar/room28-capture --split 144 --dl 0.1,0.15,0.2,0.25,0.3 --sheet-dl 0.2 --out devtools/atari-ste/monkey-bar/room28-capture/flicker-compare-split
+node devtools/atari-ste/tools/scumm-mix-table-check.mjs devtools/atari-ste/monkey-bar/atlantis-room64-capture/flicker-compare-union/lut-dual16-dl0.20.bin devtools/atari-ste/monkey-bar/atlantis-room64-capture/colours.json
 node devtools/atari-ste/tools/scumm-ste-room-profile.mjs --first 8 --last 40 --out devtools/atari-ste/monkey-bar/room-profile/walk-rerun
 node devtools/atari-ste/tools/timerb-test.mjs /tmp/timerb
 node devtools/atari-ste/tools/scumm-ste-rect-test.mjs

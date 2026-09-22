@@ -99,6 +99,17 @@ struct Cursor {
 	void saveBackground();
 	void draw();
 
+	// The STE converts the engine's finished 8-bit frame, so the cursor is
+	// composed into that frame around the conversion instead of being blitted
+	// into the four-plane screen: its colours are then mixed like every other
+	// pixel. steUpdate() returns the rectangle the cursor covers in the frame,
+	// empty when it is not shown, and consumes the change flags like draw()
+	// does on the other paths. steDraw() keeps what it covers, steRestore()
+	// puts it back, so the engine's frame is unchanged outside the conversion.
+	Common::Rect steUpdate(bool &changed);
+	void steDraw(Graphics::Surface &frame);
+	void steRestore(Graphics::Surface &frame);
+
 private:
 	static void convertSurfaceTo(const Graphics::PixelFormat &format);
 	void restoreBackground();
@@ -120,6 +131,10 @@ private:
 	Graphics::Surface _savedBackground;
 	Common::Rect _savedRect;
 	Common::Rect _alignedDstRect;
+
+	// What steDraw() covered in the engine's frame, for steRestore().
+	Graphics::Surface _steBackground;
+	Common::Rect _steRect;
 
 	// related to 'surface'
 	static bool _globalSurfaceChanged;

@@ -392,10 +392,6 @@ void AtariSteSceneRenderer::convert(const Graphics::Surface &source,
 
 namespace {
 
-// The schedule generation convertMix() hands out; any non-zero value marks
-// the buffer's palette words as live for presentation.
-static const uint32 kMixScheduleGeneration = 1;
-
 static const uint16 kMixSquares[31] = {
 	0, 1, 4, 9, 16, 25, 36, 49, 64, 81, 100, 121, 144, 169, 196, 225,
 	256, 289, 324, 361, 400, 441, 484, 529, 576, 625, 676, 729, 784, 841, 900
@@ -497,6 +493,9 @@ bool AtariSteSceneRenderer::loadMix(const Common::Path &path, MixPattern pattern
 	_mixPattern = _mixDual ? kMixAlternate : pattern;
 	_mixTablesValid = false;
 	_mixEnabled = true;
+	// Every buffer's packed palette words are stale after a new table; any
+	// non-zero generation marks them as live for presentation again.
+	++_mixGeneration;
 
 	debug("STE mix: %s, %s, %s%s", name.c_str(), _mixDual ? "two palettes" : "one palette",
 		_mixPattern == kMixChecker ? "checkerboard" : _mixPattern == kMixAlternate ? "alternating" : "static checkerboard",
@@ -650,9 +649,9 @@ void AtariSteSceneRenderer::convertMix(const Graphics::Surface &source, AtariSur
 		fullRedraw = true;
 	}
 
-	if (scheduleGeneration != kMixScheduleGeneration) {
+	if (scheduleGeneration != _mixGeneration) {
 		memcpy(schedule, _mixWords, sizeof(_mixWords));
-		scheduleGeneration = kMixScheduleGeneration;
+		scheduleGeneration = _mixGeneration;
 	}
 
 	if (!fullRedraw) {

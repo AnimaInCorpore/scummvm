@@ -81,6 +81,8 @@ static bool s_shrinkVidelVisibleArea;
 static bool s_setScreenOffsets;
 static AtariSurface *s_screenSurf;
 static Screen *s_steScreens[3] = {};
+// The manager that has a mixing table loaded, for atari_ste_scene_room().
+static AtariGraphicsManager *s_steGraphicsManager;
 
 static Screen *findSteScreen(AtariSurface *surface) {
 	for (Screen *screen : s_steScreens) {
@@ -1184,6 +1186,13 @@ void AtariGraphicsManager::allocateSurfaces() {
 					warning("STE mix: two palettes can only alternate per field");
 				atari_ste_raster_enable = 0;
 				atari_ste_mix_split = _steSceneRenderer->mixSplit() ? 1 : 0;
+				// A table holds one room's colours, so the engine's room
+				// number picks a better one when the game has it; see
+				// steSetRoom().
+				_steMixPattern = mixPattern;
+				_steMixDefault = mixLut;
+				_steMixLoaded = mixLut;
+				s_steGraphicsManager = this;
 			} else {
 				warning("STE mix: keeping the per-line raster");
 			}
@@ -1203,6 +1212,45 @@ void AtariGraphicsManager::allocateSurfaces() {
 	_overlaySurface.create(getOverlayWidth(), getOverlayHeight(), getOverlayFormat());
 }
 
+#ifdef ATARI_STE_GAME_ONLY
+// Called by the engine (scumm/room.cpp) once a room is set up.
+void atari_ste_scene_room(int room) {
+	if (s_steGraphicsManager)
+		s_steGraphicsManager->steSetRoom(room);
+}
+#endif
+
+void AtariGraphicsManager::steSetRoom(int room) {
+	if (!_ste || !_steSceneRenderer || !_steSceneRenderer->mixEnabled() || _steMixDefault.empty())
+		return;
+
+	// One table per room, next to the default one, named after the room. A
+	// room without its own table falls back to the default table rather than
+	// to the table of the room before it.
+	Common::Path path = _steMixDefault.getParent().appendComponent(Common::String::format("R%03d.BIN", room));
+	if (!Common::FSNode(path).exists())
+		path = _steMixDefault;
+	if (path == _steMixLoaded)
+		return;
+
+	if (!_steSceneRenderer->loadMix(path, _steMixPattern)) {
+		// loadMix() leaves mixing off when it fails, so put the table that
+		// was displaying back; the raster is not available at this point.
+		if (!_steSceneRenderer->loadMix(_steMixLoaded, _steMixPattern))
+			error("STE mix: lost the mixing table of room %d", room);
+		return;
+	}
+
+	_steMixLoaded = path;
+	atari_ste_mix_split = _steSceneRenderer->mixSplit() ? 1 : 0;
+	// The pairs of every converted pixel are stale.
+	for (int i : { kFrontBuffer, kBackBuffer1, kBackBuffer2 }) {
+		if (_screen[i])
+			_screen[i]->fullRedraw = true;
+	}
+	debug("STE mix: room %d uses %s", room, path.toString(Common::Path::kNativeSeparator).c_str());
+}
+
 void AtariGraphicsManager::freeSurfaces() {
 	for (int i : { kFrontBuffer, kBackBuffer1, kBackBuffer2, kOverlayBuffer }) {
 		delete _screen[i];
@@ -1212,6 +1260,8 @@ void AtariGraphicsManager::freeSurfaces() {
 	_chunkySurfaceOffsetted.init(0, 0, 0, nullptr, Graphics::PixelFormat());
 	_chunkySurface.free();
 	_overlaySurface.free();
+	if (s_steGraphicsManager == this)
+		s_steGraphicsManager = nullptr;
 	delete _steSceneRenderer;
 	_steSceneRenderer = nullptr;
 	for (Screen *&screen : s_steScreens)
@@ -1239,6 +1289,29 @@ bool AtariGraphicsManager::updateScreenInternal(Screen *dstScreen, const Graphic
 	LockSuperBlitter();
 
 	if (_ste && _overlayState == kOverlayHidden && srcSurface) {
+		// The STE converts the engine's finished frame, so the mouse cursor is
+		// drawn into it around the conversion instead of being blitted into the
+		// four-plane screen. Each buffer remembers the rectangle its last
+		// conversion covered, so a cursor that moved is repainted in all of
+		// them, whichever frame each one last saw.
+		bool cursorChanged = false;
+		const Common::Rect cursorRect = cursor.steUpdate(cursorChanged);
+		const int cursorOffset = (dstSurface.w - _chunkySurfaceOffsetted.w) / 2;
+		const Common::Rect alignedCursorRect = cursorRect.isEmpty()
+			? Common::Rect()
+			: AtariSurface::alignRect(
+				cursorRect.left + cursorOffset, cursorRect.top,
+				cursorRect.right + cursorOffset, cursorRect.bottom);
+
+		if (!dstScreen->fullRedraw && (cursorChanged || alignedCursorRect != dstScreen->steCursorRect)) {
+			if (!dstScreen->steCursorRect.isEmpty())
+				dstScreen->dirtyRects.insert(dstScreen->steCursorRect);
+			if (!alignedCursorRect.isEmpty())
+				dstScreen->dirtyRects.insert(alignedCursorRect);
+		}
+
+		dstScreen->steCursorRect = alignedCursorRect;
+
 		// Keep both extents of this buffer's accumulated dirty rectangles.
 		// Collapsing them to dirty rows makes a narrow actor repaint all 320
 		// pixels of every affected line. Full redraws still convert everything.
@@ -1256,6 +1329,8 @@ bool AtariGraphicsManager::updateScreenInternal(Screen *dstScreen, const Graphic
 			atari_ste_bench_mark(3);
 		}
 #endif
+		// The cursor is part of the frame only while it is converted.
+		cursor.steDraw(_chunkySurfaceOffsetted);
 		if (dstScreen->mixSurf())
 			_steSceneRenderer->convertMix(*srcSurface, *dstScreen->offsettedSurf, *dstScreen->mixSurf(),
 				_palette.falcon, dstScreen->stePalettes(), dstScreen->stePaletteGeneration,
@@ -1264,6 +1339,7 @@ bool AtariGraphicsManager::updateScreenInternal(Screen *dstScreen, const Graphic
 			_steSceneRenderer->convert(*srcSurface, *dstScreen->offsettedSurf,
 				_palette.falcon, dstScreen->stePalettes(), dstScreen->stePaletteGeneration,
 				dstScreen->fullRedraw ? nullptr : &dirtyRects);
+		cursor.steRestore(_chunkySurfaceOffsetted);
 #ifdef ATARI_STE_GAME_ONLY
 		if (atari_ste_bench_state.enabled) {
 			atari_ste_bench_state.rendererActive = 0;

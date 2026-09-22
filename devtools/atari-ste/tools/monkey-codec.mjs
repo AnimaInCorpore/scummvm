@@ -1,8 +1,19 @@
-const CODEC_NAMES = new Map([
-	[18, 'zigzag-vertical-v8'],
-	[28, 'zigzag-horizontal-h8'],
-	[68, 'major-minor-horizontal-h8'],
-]);
+// SCUMM V5 strip codecs come in families of five, one per palette bit count
+// (code % 10, 4..8). 14..18 walk the strip in columns, 24..28 in rows, 64..68
+// use the major-minor stream; 34..48 and 84..88 are the same streams for
+// images drawn over a background, where the transparent index is not written.
+const CODEC_FAMILIES = [
+	{ first: 14, kind: 'zigzag', vertical: true, transparent: false },
+	{ first: 24, kind: 'zigzag', vertical: false, transparent: false },
+	{ first: 34, kind: 'zigzag', vertical: true, transparent: true },
+	{ first: 44, kind: 'zigzag', vertical: false, transparent: true },
+	{ first: 64, kind: 'major-minor', vertical: false, transparent: false },
+	{ first: 84, kind: 'major-minor', vertical: false, transparent: true },
+];
+
+function codecFamily(code) {
+	return CODEC_FAMILIES.find(family => code >= family.first && code <= family.first + 4) ?? null;
+}
 
 class DecodeError extends Error {
 
@@ -91,8 +102,7 @@ function updateColor(color, reader, shift, state) {
 function decodeZigzag(bytes, height, vertical) {
 
 	if (bytes.length < 3) throw new DecodeError('Missing zigzag strip header');
-	const code = bytes[0];
-	const shift = code % 10;
+	const shift = bytes[0] % 10;
 	const reader = new LsbBitReader(bytes, 3, bytes[2], 8);
 	const pixels = new Uint8Array(8 * height);
 	const state = { increment: -1 };
@@ -124,6 +134,7 @@ function decodeZigzag(bytes, height, vertical) {
 function decodeMajorMinor(bytes, height) {
 
 	if (bytes.length < 4) throw new DecodeError('Missing major-minor strip header');
+	const shift = bytes[0] % 10;
 	const reader = new LsbBitReader(bytes, 4, bytes[2] | (bytes[3] << 8), 16);
 	let color = bytes[1];
 	let repeatCount = 0;
@@ -137,7 +148,7 @@ function decodeMajorMinor(bytes, height) {
 			}
 			if (!reader.readLegacy(1)) continue;
 			if (!reader.readLegacy(1)) {
-				color = reader.readLegacy(8);
+				color = reader.readLegacy(shift);
 				continue;
 			}
 			const delta = reader.readLegacy(3) - 4;
@@ -150,24 +161,26 @@ function decodeMajorMinor(bytes, height) {
 
 export function codecName(code) {
 
-	return CODEC_NAMES.get(code) ?? `unsupported-${code}`;
+	const family = codecFamily(code);
+	if (!family) return `unsupported-${code}`;
+	return `${family.kind}-${family.vertical ? 'vertical' : 'horizontal'}-${code % 10}bit${family.transparent ? '-transparent' : ''}`;
 }
 
 export function decodeStrip(bytes, height, transparency = null) {
 
 	if (bytes.length < 1) throw new DecodeError('Empty strip');
 	const code = bytes[0];
-	let result;
-	if (code === 18) result = decodeZigzag(bytes, height, true);
-	else if (code === 28) result = decodeZigzag(bytes, height, false);
-	else if (code === 68) result = decodeMajorMinor(bytes, height);
-	else throw new DecodeError(`Unsupported SCUMM V5 strip codec ${code}`, 0);
-	if (transparency !== null) {
-		for (let i = 0; i < result.pixels.length; i++) {
-			if (result.pixels[i] === transparency) result.pixels[i] = transparency;
-		}
-	}
-	return { ...result, code, codec: codecName(code) };
+	const family = codecFamily(code);
+	if (!family) throw new DecodeError(`Unsupported SCUMM V5 strip codec ${code}`, 0);
+	const result = family.kind === 'zigzag'
+		? decodeZigzag(bytes, height, family.vertical)
+		: decodeMajorMinor(bytes, height);
+	// The transparent index is decoded like any other colour; whether it is
+	// drawn is the caller's business.
+	const transparent = family.transparent && transparency !== null
+		? result.pixels.reduce((count, pixel) => count + (pixel === transparency), 0)
+		: 0;
+	return { ...result, code, codec: codecName(code), transparentPixels: transparent };
 }
 
 export function decodeSmap(bytes, smap, width, height, transparency = null) {

@@ -33,6 +33,10 @@
 #include "scumm/sound.h"
 #include "scumm/util.h"
 
+#ifdef ATARI_STE_GAME_ONLY
+#include "backends/platform/atari/ste-benchmark.h"
+#endif
+
 namespace Scumm {
 
 /**
@@ -269,6 +273,12 @@ void ScummEngine::startScene(int room, Actor *a, int objectNr) {
 	}
 
 	_doEffect = true;
+
+#ifdef ATARI_STE_GAME_ONLY
+	// The STE shows the frame through a colour-mixing table fitted to one
+	// room; the room is set up and its palette is in place by now.
+	atari_ste_scene_room(_currentRoom);
+#endif
 
 	// Hint the backend about the virtual keyboard during copy protection screens
 	if (_game.id == GID_MONKEY2) {

@@ -17,6 +17,10 @@ extern const void *atari_ste_last_source;
 extern const void *atari_ste_last_palette;
 void atari_ste_bench_marker();
 void atari_ste_bench_mark(uint32 phase);
+// The room the engine is showing. The STE graphics manager installs that
+// room's colour-mixing table if one is next to the default table; the call is
+// ignored on every other display path.
+void atari_ste_scene_room(int room);
 }
 #endif
 #endif
