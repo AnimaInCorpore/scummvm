@@ -194,15 +194,18 @@ void Screen::addDirtyRect(const Graphics::Surface &srcSurface, int x, int y, int
 		// so both dirty rects and cursor must be drawn in screen coordinates
 		const int xOffset = (_offsettedSurf->w - srcSurface.w) / 2;
 
-		const Common::Rect alignedRect = AtariSurface::alignRect(x + xOffset, y, x + xOffset + w, y + h);
+		const Common::Rect rect(x + xOffset, y, x + xOffset + w, y + h);
+		const Common::Rect alignedRect = AtariSurface::alignRect(rect);
 
 		dirtyRects.insert(alignedRect);
 
 		// Check whether the cursor background intersects the dirty rect. Has to be done here,
 		// before the actual drawing (especially in case of direct rendering). There's one more
 		// check in AtariGraphicsManager::updateScreenInternal for the case when there are no
-		// dirty rectangles but the cursor itself has changed.
-		const Common::Rect cursorBackgroundRect = cursor.flushBackground(alignedRect, directRendering);
+		// dirty rectangles but the cursor itself has changed. Direct rendering writes only
+		// the requested pixels, the other paths copy whole aligned rects.
+		const Common::Rect cursorBackgroundRect = cursor.flushBackground(
+			alignedRect, directRendering ? rect : alignedRect, directRendering);
 		if (!cursorBackgroundRect.isEmpty()) {
 			dirtyRects.insert(cursorBackgroundRect);
 		}

@@ -55,7 +55,7 @@ Cursor::~Cursor() {
 void Cursor::update() {
 	if (!_buf) {
 		_outOfScreen = true;
-		_savedRect = _alignedDstRect = Common::Rect();
+		_savedRect = _offsettedDstRect = _alignedDstRect = Common::Rect();
 		return;
 	}
 
@@ -86,13 +86,14 @@ void Cursor::update() {
 			_dstRect.right * dstBitsPerPixel / 8,	// fake 4bpp by 8bpp's width/2
 			_dstRect.bottom);
 
-		// this is used only in flushBackground() for comparison with rects
-		// passed by Screen::addDirtyRect (aligned and shifted by the same offset)
-		_alignedDstRect = AtariSurface::alignRect(
+		// these are used only in flushBackground() for comparison with rects
+		// passed by Screen::addDirtyRect (shifted by the same offset)
+		_offsettedDstRect = Common::Rect(
 			_dstRect.left + xOffset,
 			_dstRect.top,
 			_dstRect.right + xOffset,
 			_dstRect.bottom);
+		_alignedDstRect = AtariSurface::alignRect(_offsettedDstRect);
 	}
 }
 
@@ -224,11 +225,15 @@ void Cursor::updatePosition(int deltaX, int deltaY) {
 	}
 }
 
-Common::Rect Cursor::flushBackground(const Common::Rect &alignedRect, bool directRendering) {
+Common::Rect Cursor::flushBackground(const Common::Rect &alignedRect, const Common::Rect &writtenRect,
+									 bool directRendering) {
 	if (_savedRect.isEmpty())
 		return _savedRect;
 
-	if (!alignedRect.isEmpty() && alignedRect.contains(_alignedDstRect)) {
+	// Only the pixels actually written replace the cursor. Direct rendering
+	// merges partial 16-pixel blocks, so the aligned rect may cover cursor
+	// pixels that stay on screen.
+	if (!writtenRect.isEmpty() && writtenRect.contains(_offsettedDstRect)) {
 		// better would be _visibilityChanged but update() ignores it
 		_positionChanged = true;
 

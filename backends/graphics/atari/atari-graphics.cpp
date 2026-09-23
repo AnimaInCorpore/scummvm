@@ -39,6 +39,7 @@
 
 #include "atari-surface.h"
 #include "atari-blitter.h"
+#include "atari-c2p-asm.h"
 #include "atari-ste-raster.h"
 #include "atari-ste-scene.h"
 #include "backends/platform/atari/ste-benchmark.h"
@@ -840,7 +841,7 @@ void AtariGraphicsManager::showOverlay(bool inGUI) {
 	}
 
 	if (_currentState.mode == kDirectRendering) {
-		_screen[kFrontBuffer]->cursor.flushBackground(Common::Rect(), true);
+		_screen[kFrontBuffer]->cursor.flushBackground(Common::Rect(), Common::Rect(), true);
 	}
 
 	_pendingScreenChanges.setScreenSurface(_screen[kOverlayBuffer]->surf.get());
@@ -1389,7 +1390,7 @@ bool AtariGraphicsManager::updateScreenInternal(Screen *dstScreen, const Graphic
 	}
 
 	if (cursor.isChanged()) {
-		const Common::Rect cursorBackgroundRect = cursor.flushBackground(Common::Rect(), srcSurface == nullptr);
+		const Common::Rect cursorBackgroundRect = cursor.flushBackground(Common::Rect(), Common::Rect(), srcSurface == nullptr);
 		if (!cursorBackgroundRect.isEmpty()) {
 			dstSurface.copyRectToSurface(*srcSurface, cursorBackgroundRect.left, cursorBackgroundRect.top, cursorBackgroundRect);
 			updated |= true;
@@ -1432,12 +1433,65 @@ bool AtariGraphicsManager::updateScreenInternal(Screen *dstScreen, const Graphic
 	return updated;
 }
 
+// Merge columns [left, right) of the 16-pixel block at blockX into a bitplane
+// surface. The block's other pixels keep their current screen contents.
+static void copyPartialBlockToAtariSurface(AtariSurface &dstSurface,
+										   const byte *buf, int pitch, int x, int y, int h,
+										   int blockX, int left, int right) {
+	constexpr int kRowsPerChunk = 32;
+	byte chunky[kRowsPerChunk * 16];
+	uint16 planar[kRowsPerChunk * 8];
+
+	const int planes = dstSurface.getBitsPerPixel();
+	const uint16 writeMask = (0xffff >> left) & ~(0xffff >> right);
+
+	for (int row = 0; row < h; row += kRowsPerChunk) {
+		const int rows = MIN(kRowsPerChunk, h - row);
+
+		memset(chunky, 0, rows * 16);
+		for (int r = 0; r < rows; ++r)
+			memcpy(chunky + r * 16 + left, buf + (row + r) * pitch + blockX + left - x, right - left);
+
+		if (planes == 8)
+			asm_c2p1x1_8(chunky, chunky + rows * 16, (byte *)planar);
+		else
+			asm_c2p1x1_4(chunky, chunky + rows * 16, (byte *)planar);
+
+		const uint16 *src = planar;
+		for (int r = 0; r < rows; ++r) {
+			uint16 *dst = (uint16 *)((byte *)dstSurface.getBasePtr(0, y + row + r) + blockX * planes / 8);
+			for (int p = 0; p < planes; ++p)
+				dst[p] = (dst[p] & ~writeMask) | (*src++ & writeMask);
+		}
+	}
+}
+
 void AtariGraphicsManager::copyRectToAtariSurface(AtariSurface &dstSurface,
 												  const byte *buf, int pitch, int x, int y, int w, int h) {
 	const Common::Rect rect = AtariSurface::alignRect(x, y, x + w, y + h);
 
-	// TODO: mask the unaligned parts and copy the rest
-	buf -= (x - rect.left);	// HACK: this assumes pointer to a complete buffer
+	if (rect.left == x && rect.right == x + w) {
+		dstSurface.copyRectToSurface(buf, pitch, x, y, w, h);
+		return;
+	}
 
-	dstSurface.copyRectToSurface(buf, pitch, rect.left, rect.top, rect.width(), rect.height());
+	// The source buffer may hold only the requested rectangle (SCUMM passes
+	// 8-pixel strips from its composite buffer), so pixels outside [x, x + w)
+	// must neither be read nor overwritten.
+	const int alignedLeft  = (x + 15) & (-16);
+	const int alignedRight = (x + w) & (-16);
+
+	if (alignedLeft < alignedRight) {
+		dstSurface.copyRectToSurface(buf + alignedLeft - x, pitch,
+			alignedLeft, y, alignedRight - alignedLeft, h);
+	}
+
+	for (int blockX = rect.left; blockX < rect.right; blockX += 16) {
+		if (blockX >= alignedLeft && blockX + 16 <= alignedRight)
+			continue;
+
+		const int left  = MAX(x, blockX) - blockX;
+		const int right = MIN(x + w, blockX + 16) - blockX;
+		copyPartialBlockToAtariSurface(dstSurface, buf, pitch, x, y, h, blockX, left, right);
+	}
 }

@@ -43,7 +43,7 @@ struct Cursor {
 		_surfaceChanged = true;
 		_visibilityChanged = false;
 
-		_savedRect = _alignedDstRect = Common::Rect();
+		_savedRect = _offsettedDstRect = _alignedDstRect = Common::Rect();
 	}
 
 	// updates outOfScreen OR srcRect/dstRect (only if visible/needed)
@@ -95,7 +95,10 @@ struct Cursor {
 		return _positionChanged || _surfaceChanged || _visibilityChanged;
 	}
 
-	Common::Rect flushBackground(const Common::Rect &alignedRect, bool directRendering);
+	// alignedRect is the dirty rect, writtenRect the pixels which will replace
+	// the screen contents (the same as alignedRect unless rendering directly)
+	Common::Rect flushBackground(const Common::Rect &alignedRect, const Common::Rect &writtenRect,
+								 bool directRendering);
 	void saveBackground();
 	void draw();
 
@@ -130,6 +133,7 @@ private:
 
 	Graphics::Surface _savedBackground;
 	Common::Rect _savedRect;
+	Common::Rect _offsettedDstRect;
 	Common::Rect _alignedDstRect;
 
 	// What steDraw() covered in the engine's frame, for steRestore().
