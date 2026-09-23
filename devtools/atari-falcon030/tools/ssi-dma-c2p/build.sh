@@ -66,3 +66,19 @@ for name in ssiecho ssic2p; do
     "$vlink" build/m68k/$name.o -b ataritos -s -e start -o build/$upper.TOS
     echo "built build/$upper.TOS with $(grep -i "${name}_BOOT_WORDS" build/dsp/${name}_boot.i | awk '{print $NF}') DSP program words"
 done
+
+# The 68030 c2p the backend uses, timed for comparison (cpu/cpuc2p.c). It
+# needs the m68k-atari-mintelf cross compiler: $CROSS is its prefix. The c2p
+# is assembled for the 68030 as the backend's is; the harness links the
+# 68000 mintlib, whose 68020-60 variant would demand an FPU the stock
+# Falcon lacks.
+cross=${CROSS:-m68k-atari-mintelf-}
+if command -v "${cross}gcc" >/dev/null 2>&1; then
+    repo=$(CDPATH= cd -- "$task_dir/../../../.." && pwd)
+    "${cross}gcc" -m68030 -c -o build/m68k/atari-c2p-asm.o "$repo/backends/graphics/atari/atari-c2p-asm.S"
+    "${cross}gcc" -O2 -fomit-frame-pointer -Wall -o build/CPUC2P.TOS \
+        cpu/cpuc2p.c build/m68k/atari-c2p-asm.o
+    echo "built build/CPUC2P.TOS"
+else
+    echo "skipped build/CPUC2P.TOS: no ${cross}gcc (set CROSS)"
+fi

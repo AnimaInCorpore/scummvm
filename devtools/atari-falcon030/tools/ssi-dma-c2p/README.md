@@ -20,11 +20,12 @@ The Falcon specification keeps the 32 MHz clock from the codec only, and
 this route does not use the codec. Whether the DMA-to-DSP link runs at it
 is one of the questions a real Falcon has to answer.
 
-There are two programs:
+There are three programs:
 
 - `SSIECHO.TOS`: the route with a DSP that echoes every word, for the
   route's rate and integrity.
 - `SSIC2P.TOS`: the conversion itself.
+- `CPUC2P.TOS`: the backend's 68030 c2p on the same screen, for comparison.
 
 ## The pass-through: SSIECHO.TOS
 
@@ -76,16 +77,42 @@ c2p. Each clock gets two passes, and each pass reports:
 The record buffer of each pass is written as `C2P<clock><pass>.BIN`, and
 `c2p-slips.py` maps where a bad one lost step.
 
+## The comparison: CPUC2P.TOS
+
+`cpu/cpuc2p.c` times the 68030 c2p the ScummVM backend uses (Mikael Kalms'
+routines in `backends/graphics/atari/atari-c2p-asm.S`, linked unchanged) on
+the same screen, after checking it against a direct c2p. It times the whole
+screen, the dirty-rectangle variant at a few sizes, and a plain screen copy
+as the floor. All buffers are in ST-RAM, and the system's interrupts run as
+they do under ScummVM. `cpu-bench.py` runs it under Hatari. On 2026-09-23
+Hatari's timing gave:
+
+| case | 68030 time | per pixel |
+|---|---|---|
+| c2p, full 320x200 | 50.9 ms | 795 ns |
+| c2p rect 160x100 | 13.0 ms | 811 ns |
+| c2p rect 64x64 | 3.5 ms | 843 ns |
+| c2p rect 32x32 | 0.96 ms | 941 ns |
+| copy, 64,000 bytes | 17.5 ms | 274 ns |
+
+Hatari's 68030 is not cycle-exact, so a real Falcon's `CPUC2P.TXT` is the
+figure that counts. Against this, the DSP route takes 81.4 ms (25.175 MHz)
+or 64.0 ms (32 MHz) of wall time per full screen. The 68030 is left free for
+that time, apart from the sound DMA's share of the ST-RAM bus.
+
 ## Build and gates
 
 ```sh
 DOSBOX=/path/to/dosbox ./build.sh
 python3 gate.py --output build/echo
 python3 c2p-gate.py --output build/c2p
+python3 cpu-bench.py --output build/cpu
 ```
 
-All three use the sibling F030MXDRV and F030Arcade checkouts, as `foa-opl3`
-does. From a worktree, point `MXDRV` and `F030ARCADE` at them.
+All of them use the sibling F030MXDRV and F030Arcade checkouts, as
+`foa-opl3` does. From a worktree, point `MXDRV` and `F030ARCADE` at them.
+`CPUC2P.TOS` also needs the `m68k-atari-mintelf` cross compiler, which
+`$CROSS` names as a prefix; without it, the build skips that program.
 
 Hatari runs the DSP only between 68030 instructions. An instruction that
 takes longer than one SSI slot can therefore hand the DSP two words with no
@@ -106,10 +133,11 @@ reads cost more. The two gates deal with this differently:
 
 ## On a real Falcon
 
-Copy `build/SSIECHO.TOS` and `build/SSIC2P.TOS` to the Falcon. Run them from
-the desktop with no DSP program or sound player resident. Each takes about
-10 s, writes its report beside itself (`SSIECHO.TXT`, `SSIC2P.TXT`) and
-waits for a key. The last line is `RESULT: PASS` or
+Copy `build/SSIECHO.TOS`, `build/SSIC2P.TOS` and `build/CPUC2P.TOS` to the
+Falcon. Run them from the desktop with no DSP program or sound player
+resident. Each takes about 10-15 s and writes its report beside itself
+(`SSIECHO.TXT`, `SSIC2P.TXT`, `CPUC2P.TXT`); the first two then wait for a
+key. The last line is `RESULT: PASS` or
 `RESULT: FAIL (n checks failed)`. Any failing line points to what broke:
 
 - **frame rate 0** or a **timed-out pass**: the route carries no data at
