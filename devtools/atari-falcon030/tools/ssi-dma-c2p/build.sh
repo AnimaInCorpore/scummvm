@@ -6,6 +6,8 @@
 #                generated and checked by gen-c2p.py)
 #   SSIMIX.TOS   the slot sharing test (dsp/ssimix.asm): the DAC on one
 #                slot pair of the frame
+#   HSC2P.TOS    the c2p in handshake mode (dsp/hsc2p.asm), the kernel the
+#                backend's screen driver uses
 # and, with the cross compiler, CPUC2P.TOS (see below). Everything
 # generated lands in build/.
 #
@@ -38,6 +40,7 @@ for file in ASM56000.EXE CLDLOD.EXE DOS4GW.EXE ioequ.inc; do cp "$tools/$file" "
 cp "$task_dir/dsp/ssiecho.asm" "$dsp/SSIECHO.ASM"
 cp "$task_dir/dsp/ssic2p.asm" "$dsp/SSIC2P.ASM"
 cp "$task_dir/dsp/ssimix.asm" "$dsp/SSIMIX.ASM"
+cp "$task_dir/dsp/hsc2p.asm" "$dsp/HSC2P.ASM"
 python3 "$task_dir/gen-c2p.py" --output "$dsp/C2PCORE.INC"
 cat > "$dsp/BUILD.BAT" <<'BATCH'
 @ECHO OFF
@@ -52,11 +55,15 @@ IF ERRORLEVEL 1 EXIT 1
 ASM56000.EXE -q -a -bSSIMIX.CLD -z -lSSIMIX.LST SSIMIX.ASM
 IF ERRORLEVEL 1 EXIT 1
 CLDLOD.EXE SSIMIX.CLD > SSIMIX.LOD
+IF ERRORLEVEL 1 EXIT 1
+ASM56000.EXE -q -a -bHSC2P.CLD -z -lHSC2P.LST HSC2P.ASM
+IF ERRORLEVEL 1 EXIT 1
+CLDLOD.EXE HSC2P.CLD > HSC2P.LOD
 EXIT
 BATCH
-for name in SSIECHO SSIC2P SSIMIX; do rm -f "$dsp/$name.CLD" "$dsp/$name.LOD" "$dsp/$name.LST"; done
+for name in SSIECHO SSIC2P SSIMIX HSC2P; do rm -f "$dsp/$name.CLD" "$dsp/$name.LOD" "$dsp/$name.LST"; done
 "$dosbox" --noprimaryconf --set output=texture "$dsp/BUILD.BAT" >/dev/null 2>&1 || true
-for name in SSIECHO SSIC2P SSIMIX; do
+for name in SSIECHO SSIC2P SSIMIX HSC2P; do
     [ -f "$dsp/$name.LST" ] || { echo "error: $name.ASM did not assemble; see build/dsp/" >&2; exit 1; }
     grep -qE '^0 +Errors' "$dsp/$name.LST" || { echo "error: $name.ASM failed; see build/dsp/$name.LST" >&2; exit 1; }
     grep -qE '^0 +Warnings' "$dsp/$name.LST" || { echo "error: $name.ASM warned; see build/dsp/$name.LST" >&2; exit 1; }
@@ -67,9 +74,13 @@ python3 "$mxdrv/tools/generate_dsp_stage2.py" --standalone "$dsp/SSIC2P.LOD" --p
     > "$dsp/ssic2p_boot.i"
 python3 "$mxdrv/tools/generate_dsp_stage2.py" --standalone "$dsp/SSIMIX.LOD" --prefix ssimix \
     > "$dsp/ssimix_boot.i"
+python3 "$mxdrv/tools/generate_dsp_stage2.py" --standalone "$dsp/HSC2P.LOD" --prefix hsc2p \
+    > "$dsp/hsc2p_boot.i"
+# The backend boots the same image (ATARI_DSP_C2P builds).
+python3 "$task_dir/gen-image-header.py"
 
 cd "$task_dir"
-for name in ssiecho ssic2p ssimix; do
+for name in ssiecho ssic2p ssimix hsc2p; do
     "$vasm" m68k/$name.s -quiet -Felf -m68030 -I "$mxdrv/src/m68k" -I m68k -I build/dsp \
         -o build/m68k/$name.o -L build/m68k/$name.lst
     upper=$(echo "$name" | tr a-z A-Z)
