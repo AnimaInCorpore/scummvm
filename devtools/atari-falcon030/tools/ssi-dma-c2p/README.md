@@ -174,6 +174,44 @@ figure that counts. Against this, the DSP route takes 81.4 ms (25.175 MHz)
 or 64.0 ms (32 MHz) of wall time per full screen. The 68030 is left free for
 that time, apart from the sound DMA's share of the ST-RAM bus.
 
+## Handshake mode and the backend: HSC2P.TOS
+
+`dsp/hsc2p.asm` is the kernel the backend uses. It runs the same conversion
+in handshake mode: the DSP asks DMA playback for each word (SC1) and lets
+DMA record take each word it offers (SC2). No word can be lost, however
+busy the 68030 is, so the 68030 no longer has to STOP during a screen.
+`hs-gate.py` runs `HSC2P.TOS` for three passes (quiet, busy, quiet) and
+requires every recorded word to be exact. Record writes the backend's planar
+lines directly: 8 zero words, the line's 160 plane words, 8 zero words.
+
+The DSP runs at 25.175 MHz / prescale 1, which comes to about 786 KB/s. At
+32 MHz, Hatari's handshake shifts the data by 2 bits, and the repair would
+cost what the higher clock gains. Under Hatari a screen takes 120 ms with
+the 68030 quiet and 170-175 ms with it busy.
+
+The ScummVM Falcon build `backends/platform/atari/build-falcon030-dspc2p.sh`
+(`ATARI_DSP_C2P`) boots this kernel, from `dsp-c2p-image.h`, which
+`gen-image-header.py` writes during `build.sh`. In triple-buffer graphics
+mode, when the DSP is available, `updateScreenDsp()` points DMA record at the
+currently displayed planar surface:
+
+- The DSP writes each converted group into that surface while video scanout
+  reads it. The screen can show a partially converted frame.
+- `updateScreen()` returns while conversion continues, so the 68030 runs the
+  game at the same time. After DMA stops, the backend clears the data cache
+  and redraws the cursor; no buffer flip is needed.
+- With the DSP, `gfx_mode=direct` takes the same path: the engine draws
+  into the chunky surface, and the DSP converts it into the front buffer.
+- The overlay, and a cursor moving over an unchanged frame, stay on the
+  68030. If DSP startup fails, ordinary triple buffering remains in use.
+
+The DSP and the sound DMA then belong to the screen, so this build plays no
+sound. Its mixer still mixes, into nothing, at 11025 Hz in real time.
+Engines that time speech and music by what the mixer consumed, such as The
+Dig's iMUSE digital, then run as they would with sound. Being silent, the
+build is not tied to the AdLib games: it also enables `scumm-7-8` for The
+Dig.
+
 ## Build and gates
 
 ```sh

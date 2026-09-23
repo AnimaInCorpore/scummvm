@@ -21,12 +21,21 @@
 
 #define FORCE_TEXT_CONSOLE
 
+// The STE build keeps no sound at all; the Falcon DSP c2p build gives the
+// DSP and the sound DMA to the screen. Neither touches the sound hardware.
+// The DSP c2p build still mixes, into nothing, at the output rate: engines
+// that time speech and music by what the mixer consumed (iMUSE digital)
+// then run as they would with sound.
+#if defined(ATARI_STE_GAME_ONLY) || defined(ATARI_DSP_C2P)
+#define ATARI_SILENT_MIXER
+#endif
+
 #include "backends/mixer/atari/atari-mixer.h"
 
 #include <mint/falcon.h>
 #include <mint/osbind.h>
 #include <mint/ostruct.h>
-#ifndef ATARI_STE_GAME_ONLY
+#ifndef ATARI_SILENT_MIXER
 // https://github.com/mikrosk/usound
 // This build image ships usound.h >= 2, against which usound_compat.h #errors
 // by design. The shim stays in the tree for images still on uSound v1.
@@ -76,7 +85,7 @@ private:
 } // End of anonymous namespace
 #endif
 
-#ifdef ATARI_STE_GAME_ONLY
+#ifdef ATARI_SILENT_MIXER
 #include "audio/audiostream.h"
 #endif
 
@@ -149,7 +158,12 @@ private:
 } // namespace
 #endif
 
-#ifndef ATARI_STE_GAME_ONLY
+#ifdef ATARI_DSP_C2P
+void AtariAudioShutdown() {
+}
+#endif
+
+#ifndef ATARI_SILENT_MIXER
 static USoundContext usoundContext;
 static bool s_usoundActive = false;
 
@@ -247,7 +261,7 @@ static void __attribute__((interrupt)) timerA(void) {
 AtariMixerManager::AtariMixerManager() : MixerManager() {
 	debug("AtariMixerManager()");
 
-#ifndef ATARI_STE_GAME_ONLY
+#ifndef ATARI_SILENT_MIXER
 	suspendAudio();
 
 	ConfMan.registerDefault("output_rate", DEFAULT_OUTPUT_RATE);
@@ -272,7 +286,7 @@ AtariMixerManager::AtariMixerManager() : MixerManager() {
 AtariMixerManager::~AtariMixerManager() {
 	debug("~AtariMixerManager()");
 
-#ifndef ATARI_STE_GAME_ONLY
+#ifndef ATARI_SILENT_MIXER
 	g_system->getEventManager()->getEventDispatcher()->unregisterObserver(this);
 
 	AtariAudioShutdown();
@@ -446,7 +460,20 @@ bool AtariMixerManager::produceDspPeriod(void *context, bool runCallbacks) {
 #endif
 
 void AtariMixerManager::init() {
-#ifdef ATARI_STE_GAME_ONLY
+#ifdef ATARI_DSP_C2P
+	// A mixer with no device: update() consumes its output in real time.
+	_outputRate = DEFAULT_OUTPUT_RATE;
+	_outputChannels = 1;
+	_samples = DEFAULT_SAMPLES;
+	_sampleBufferSize = _samples * 2;
+	_sampleBuffer = new uint8[_sampleBufferSize];
+	_mixer = new Audio::MixerImpl(_outputRate, false, _samples, 2);
+	_mixer->setReady(true);
+	_audioSuspended = false;
+	_nullMixStart = g_system->getMillis();
+	_nullMixFrames = 0;
+	debug("mixing %d Hz mono into nothing: the DSP converts the screen", _outputRate);
+#elif defined(ATARI_SILENT_MIXER)
 	// Keep the mixer contract while compiling out all sound playback and
 	// resampling. This leaves the STE scene renderer as the only active output.
 	_mixer = new AtariSilentMixer();
@@ -547,7 +574,7 @@ void AtariMixerManager::init() {
 }
 
 void AtariMixerManager::suspendAudio() {
-#ifdef ATARI_STE_GAME_ONLY
+#ifdef ATARI_SILENT_MIXER
 	_audioSuspended = true;
 #else
 	debug("suspendAudio");
@@ -565,8 +592,13 @@ void AtariMixerManager::suspendAudio() {
 }
 
 int AtariMixerManager::resumeAudio() {
-#ifdef ATARI_STE_GAME_ONLY
+#ifdef ATARI_SILENT_MIXER
 	_audioSuspended = false;
+#ifdef ATARI_DSP_C2P
+	// What was not consumed while suspended is not due afterwards.
+	_nullMixStart = g_system->getMillis();
+	_nullMixFrames = 0;
+#endif
 	return 0;
 #else
 	debug("resumeAudio");
@@ -578,7 +610,7 @@ int AtariMixerManager::resumeAudio() {
 }
 
 bool AtariMixerManager::notifyEvent(const Common::Event &event) {
-#ifdef ATARI_STE_GAME_ONLY
+#ifdef ATARI_SILENT_MIXER
 	(void)event;
 	return false;
 #else
@@ -599,7 +631,28 @@ bool AtariMixerManager::notifyEvent(const Common::Event &event) {
 }
 
 void AtariMixerManager::update() {
-#ifdef ATARI_STE_GAME_ONLY
+#ifdef ATARI_DSP_C2P
+	if (_audioSuspended || !_mixer)
+		return;
+	// Consume the frames due since the clock started, but never more than
+	// half a second at once: a longer stall drops the rest, as an underrun
+	// would.
+	const uint32 elapsed = g_system->getMillis() - _nullMixStart;
+	const uint32 due = (uint32)((uint64)elapsed * _outputRate / 1000);
+	if (due - _nullMixFrames > (uint32)_outputRate / 2)
+		_nullMixFrames = due - _outputRate / 2;
+	while (_nullMixFrames < due) {
+		const uint32 frames = MIN<uint32>(_samples, due - _nullMixFrames);
+		_mixer->mixCallback(_sampleBuffer, frames * 2);
+		_nullMixFrames += frames;
+	}
+	// Restart the clock now and then so that the frame count cannot wrap.
+	if (elapsed > 60 * 1000) {
+		_nullMixStart += elapsed;
+		_nullMixFrames -= due;
+	}
+	return;
+#elif defined(ATARI_SILENT_MIXER)
 	return;
 #else
 	if (_audioSuspended) {

@@ -489,6 +489,12 @@ Common::Error ScummMetaEngine::createInstance(OSystem *syst, Engine **engine,
 		*engine = new ScummEngine_v5(syst, res);
 	else if (res.game.version == 6 && strcmp(res.game.gameid, "tentacle") == 0)
 		*engine = new ScummEngine_v6(syst, res);
+#if defined(ATARI_DSP_C2P) && defined(ENABLE_SCUMM_7_8)
+	// The DSP c2p build is silent, so it is not bound to the AdLib games:
+	// it adds The Dig (v7), whose frequent full-screen redraws gain most.
+	else if (res.game.version == 7 && strcmp(res.game.gameid, "dig") == 0)
+		*engine = new ScummEngine_v7(syst, res);
+#endif
 	else
 		return Common::Error(Common::kUnsupportedGameidError);
 #elif defined(ATARI_STE_GAME_ONLY)

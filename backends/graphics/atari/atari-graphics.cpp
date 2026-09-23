@@ -41,6 +41,9 @@
 #include "atari-ste-raster.h"
 #include "atari-ste-scene.h"
 #include "backends/platform/atari/ste-benchmark.h"
+#ifdef ATARI_DSP_C2P
+#include "backends/platform/atari/atari-dsp-c2p.h"
+#endif
 
 #define SCREEN_ACTIVE
 
@@ -188,6 +191,10 @@ static void *s_oldPhysbase = nullptr;
 static Palette s_oldPalette;
 
 void AtariGraphicsShutdown() {
+#ifdef ATARI_DSP_C2P
+	// The DMA must not write the screens once they are gone.
+	AtariDspC2p::shutdown();
+#endif
 	if (s_ste)
 		Supexec(atari_ste_raster_uninstall);
 	Supexec(UninstallVblHandler);
@@ -333,6 +340,11 @@ AtariGraphicsManager::AtariGraphicsManager(OSystem_Atari *system)
 
 	if (_ste)
 		Supexec(atari_ste_raster_install);
+
+#ifdef ATARI_DSP_C2P
+	if (!_tt && !_ste && !g_hasSuperVidel)
+		_dspDirect = AtariDspC2p::init();
+#endif
 
 	g_system->getEventManager()->getEventDispatcher()->registerObserver(this, 10, false);
 }
@@ -502,6 +514,9 @@ OSystem::TransactionError AtariGraphicsManager::endGFXTransaction() {
 	}
 
 	if ((hasPendingGraphicsMode || hasPendingSize) && _currentState.isValid()) {
+#ifdef ATARI_DSP_C2P
+		waitDspScreen();
+#endif
 		int c2pWidth = _currentState.width;
 
 		if (!g_hasSuperVidel) {
@@ -621,7 +636,12 @@ void AtariGraphicsManager::copyRectToScreen(const void *buf, int pitch, int x, i
 
 	Graphics::Surface &dstSurface = *lockScreen();
 
-	const bool directRendering = _currentState.mode == kDirectRendering;
+	bool directRendering = _currentState.mode == kDirectRendering;
+#ifdef ATARI_DSP_C2P
+	// The DSP mode keeps a chunky source surface and converts it into the
+	// displayed Atari surface asynchronously.
+	directRendering &= !_dspDirect;
+#endif
 
 	addDirtyRectToScreens(
 		dstSurface,
@@ -640,6 +660,10 @@ void AtariGraphicsManager::copyRectToScreen(const void *buf, int pitch, int x, i
 Graphics::Surface *AtariGraphicsManager::lockScreen() {
 	//debug("lockScreen");
 
+#ifdef ATARI_DSP_C2P
+	if (_dspDirect && _currentState.mode == kDirectRendering)
+		return &_chunkySurfaceOffsetted;
+#endif
 	return !_ste && _currentState.mode == kDirectRendering
 		? _screen[kFrontBuffer]->offsettedSurf->surfacePtr()
 		: &_chunkySurfaceOffsetted;
@@ -650,21 +674,29 @@ void AtariGraphicsManager::unlockScreen() {
 
 	//debug("unlockScreen: %d x %d", dstSurface.w, dstSurface.h);
 
+	bool directRendering = _currentState.mode == kDirectRendering;
+#ifdef ATARI_DSP_C2P
+	directRendering &= !_dspDirect;
+#endif
 	addDirtyRectToScreens(
 		dstSurface,
 		0, 0, dstSurface.w, dstSurface.h,
-		_currentState.mode == kDirectRendering);
+		directRendering);
 }
 
 void AtariGraphicsManager::fillScreen(uint32 col) {
 	//debug("fillScreen: %d", col);
 
 	Graphics::Surface &dstSurface = *lockScreen();
+	bool directRendering = _currentState.mode == kDirectRendering;
+#ifdef ATARI_DSP_C2P
+	directRendering &= !_dspDirect;
+#endif
 
 	addDirtyRectToScreens(
 		dstSurface,
 		0, 0, dstSurface.w, dstSurface.h,
-		_currentState.mode == kDirectRendering);
+		directRendering);
 
 	dstSurface.fillRect(Common::Rect(dstSurface.w, dstSurface.h), col);
 }
@@ -673,11 +705,15 @@ void AtariGraphicsManager::fillScreen(const Common::Rect &r, uint32 col) {
 	//debug("fillScreen: %dx%d %d", r.width(), r.height(), col);
 
 	Graphics::Surface &dstSurface = *lockScreen();
+	bool directRendering = _currentState.mode == kDirectRendering;
+#ifdef ATARI_DSP_C2P
+	directRendering &= !_dspDirect;
+#endif
 
 	addDirtyRectToScreens(
 		dstSurface,
 		r.left, r.top, r.width(), r.height(),
-		_currentState.mode == kDirectRendering);
+		directRendering);
 
 	dstSurface.fillRect(r, col);
 }
@@ -699,13 +735,24 @@ void AtariGraphicsManager::updateScreen() {
 		switch (_currentState.mode) {
 		case kDirectRendering:
 			workScreen = _screen[kFrontBuffer];
+#ifdef ATARI_DSP_C2P
+			// Keep the engine's single-buffer rendering model, but use the
+			// chunky surface as DSP input before it writes to the front page.
+			if (_dspDirect)
+				srcSurface = _chunkySurface.surfacePtr();
+#endif
 			break;
 		case kSingleBuffering:
 			workScreen = _screen[kFrontBuffer];
 			srcSurface = _chunkySurface.surfacePtr();
 			break;
 		case kTripleBuffering:
+#ifdef ATARI_DSP_C2P
+			// The DSP build writes into the displayed surface as it converts.
+			workScreen = _dspDirect ? _screen[kFrontBuffer] : _screen[kBackBuffer1];
+#else
 			workScreen = _screen[kBackBuffer1];
+#endif
 			srcSurface = _chunkySurface.surfacePtr();
 			break;
 		default:
@@ -721,7 +768,11 @@ void AtariGraphicsManager::updateScreen() {
 
 	assert(workScreen);
 
-	bool screenUpdated = updateScreenInternal(workScreen, srcSurface);
+	bool screenUpdated;
+#ifdef ATARI_DSP_C2P
+	if (!updateScreenDsp(workScreen, srcSurface, screenUpdated))
+#endif
+		screenUpdated = updateScreenInternal(workScreen, srcSurface);
 
 #ifdef SCREEN_ACTIVE
 	// this assume that the screen surface is not going to be used yet
@@ -730,8 +781,14 @@ void AtariGraphicsManager::updateScreen() {
 
 	set_sysvar_to_short(vblsem, 0);  // lock vbl
 
+#ifdef ATARI_DSP_C2P
+	const bool tripleBufferFlip = !_dspDirect;
+#else
+	const bool tripleBufferFlip = true;
+#endif
 	if (screenUpdated
 		&& _overlayState == kOverlayHidden
+		&& tripleBufferFlip
 		&& _currentState.mode == kTripleBuffering) {
 		// Triple buffer:
 		// - alternate BACK_BUFFER1 and BACK_BUFFER2
@@ -815,6 +872,10 @@ void AtariGraphicsManager::showOverlay(bool inGUI) {
 		return;
 	}
 
+#ifdef ATARI_DSP_C2P
+	waitDspScreen();
+#endif
+
 	if (_currentState.mode == kDirectRendering) {
 		_screen[kFrontBuffer]->cursor.flushBackground(Common::Rect(), true);
 	}
@@ -847,10 +908,14 @@ void AtariGraphicsManager::hideOverlay() {
 		return;
 	}
 
-	// BACK_BUFFER2 is intentional: regardless of the state before calling showOverlay(),
-	// this always contains the next desired frame buffer to show
-	_pendingScreenChanges.setScreenSurface(
-		_screen[_currentState.mode == kTripleBuffering ? kBackBuffer2 : kFrontBuffer]->surf.get());
+	// In triple buffering, BACK_BUFFER2 contains the next desired frame. The
+	// DSP direct-screen path stays on the displayed front buffer instead.
+	int screenToShow = _currentState.mode == kTripleBuffering ? kBackBuffer2 : kFrontBuffer;
+#ifdef ATARI_DSP_C2P
+	if (_dspDirect)
+		screenToShow = kFrontBuffer;
+#endif
+	_pendingScreenChanges.setScreenSurface(_screen[screenToShow]->surf.get());
 
 	// reset cursor as its srcSurface has been just changed so wait for cursor surface to be updated
 	Cursor::setSurface(nullptr, 0, 0, 0, 0, 0);
@@ -1252,6 +1317,9 @@ void AtariGraphicsManager::steSetRoom(int room) {
 }
 
 void AtariGraphicsManager::freeSurfaces() {
+#ifdef ATARI_DSP_C2P
+	waitDspScreen();
+#endif
 	for (int i : { kFrontBuffer, kBackBuffer1, kBackBuffer2, kOverlayBuffer }) {
 		delete _screen[i];
 		_screen[i] = nullptr;
@@ -1276,6 +1344,90 @@ void AtariGraphicsManager::addDirtyRectToScreens(const Graphics::Surface &dstSur
 		_screen[kBackBuffer2]->addDirtyRect(dstSurface, x, y, w, h, directRendering);
 	}
 }
+
+#ifdef ATARI_DSP_C2P
+bool AtariGraphicsManager::updateScreenDsp(Screen *dstScreen, const Graphics::Surface *srcSurface, bool &updated) {
+	if (_dspScreen && _dspScreen != dstScreen)
+		waitDspScreen();
+
+	if (_dspScreen) {
+		// The DMA record writes into the displayed surface while the game runs.
+		// Scanout can therefore see a partially converted frame.
+		if (AtariDspC2p::busy()) {
+			_dspFrameWanted = true;
+			updated = false;
+			return true;
+		}
+		_dspScreen = nullptr;
+		if (AtariDspC2p::finish()) {
+			// The conversion covered the cursor: draw it again.
+			LockSuperBlitter();
+			Cursor &cursor = dstScreen->cursor;
+			cursor.update();
+			if (cursor.isVisible())
+				cursor.draw();
+			UnlockSuperBlitter();
+			// The surface was already displayed while the DSP wrote it.
+			updated = false;
+			return true;
+		}
+		// The driver gave up: the 68030 converts everything again.
+		dstScreen->addDirtyRect(_chunkySurfaceOffsetted, 0, 0, _chunkySurfaceOffsetted.w, _chunkySurfaceOffsetted.h, false);
+		return false;
+	}
+
+	_dspFrameWanted = false;
+	if (!AtariDspC2p::available()
+		|| _overlayState != kOverlayHidden
+		|| (_currentState.mode != kTripleBuffering && !(_dspDirect && _currentState.mode == kDirectRendering))
+		|| srcSurface != _chunkySurface.surfacePtr())
+		return false;
+	// A cursor that moved over an unchanged frame is cheaper on the 68030.
+	if (dstScreen->dirtyRects.empty() && !dstScreen->fullRedraw)
+		return false;
+
+	// Whole lines only: the planar lines are the chunky surface's, with
+	// equal margins either side, in 8 bitplanes.
+	const AtariSurface &surf = *dstScreen->surf;
+	const AtariSurface &dst = *dstScreen->offsettedSurf;
+	const int marginBytes = (surf.pitch - srcSurface->w) / 2;
+	const byte *view = (const byte *)dst.getPixels();
+	if (dst.getBitsPerPixel() != 8
+		|| dst.w != srcSurface->w
+		|| srcSurface->pitch != srcSurface->w
+		|| srcSurface->w % 16 != 0
+		|| marginBytes < 0 || marginBytes % 2 != 0 || marginBytes / 2 > 15
+		|| surf.pitch != srcSurface->w + 2 * marginBytes
+		|| (view - (const byte *)surf.getPixels()) % surf.pitch != marginBytes)
+		return false;
+
+	// Whatever the game draws from now on is dirty again, for the next one.
+	dstScreen->clearDirtyRects();
+	if (!AtariDspC2p::start((const byte *)srcSurface->getPixels(), srcSurface->h, srcSurface->w / 16,
+			marginBytes / 2, const_cast<byte *>(view) - marginBytes)) {
+		dstScreen->addDirtyRect(_chunkySurfaceOffsetted, 0, 0, _chunkySurfaceOffsetted.w, _chunkySurfaceOffsetted.h, false);
+		return false;
+	}
+	_dspScreen = dstScreen;
+	updated = false;
+	return true;
+}
+
+void AtariGraphicsManager::pollDspScreen() {
+	if (_dspScreen ? AtariDspC2p::busy() : !_dspFrameWanted)
+		return;
+	updateScreen();
+}
+
+void AtariGraphicsManager::waitDspScreen() {
+	if (!_dspScreen)
+		return;
+	AtariDspC2p::wait();
+	// Keep this surface eligible for a fresh conversion after the forced wait.
+	_dspScreen->addDirtyRect(_chunkySurfaceOffsetted, 0, 0, _chunkySurfaceOffsetted.w, _chunkySurfaceOffsetted.h, false);
+	_dspScreen = nullptr;
+}
+#endif
 
 bool AtariGraphicsManager::updateScreenInternal(Screen *dstScreen, const Graphics::Surface *srcSurface) {
 	//debug("updateScreenInternal");

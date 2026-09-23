@@ -362,6 +362,14 @@ void OSystem_Atari::initBackend() {
 	if (!ConfMan.hasKey("music_driver")) {
 		ConfMan.set("music_driver", "adlib");
 	}
+#elif defined(ATARI_DSP_C2P)
+	// The DSP converts the screen, so the build plays no sound.
+	if (!ConfMan.hasKey("opl_driver")) {
+		ConfMan.set("opl_driver", "null");
+	}
+	if (!ConfMan.hasKey("music_driver")) {
+		ConfMan.set("music_driver", "null");
+	}
 #else
 	// On the lite build force "None" as the opl driver, i.e. do not attempt
 	// to emulate anything by default.
@@ -604,6 +612,15 @@ void OSystem_Atari::update() {
 			activeDomain->getValOrDefault("engineid").c_str(),
 			activeDomain->getValOrDefault("gameid").c_str());
 	}
+
+#ifdef ATARI_DSP_C2P
+	static bool inPoll = false;
+	if (_graphicsManager && !inPoll) {
+		inPoll = true;
+		((AtariGraphicsManager *)_graphicsManager)->pollDspScreen();
+		inPoll = false;
+	}
+#endif
 
 	updateAudio();
 }

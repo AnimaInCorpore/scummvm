@@ -82,6 +82,12 @@ public:
 	void fillScreen(uint32 col) override;
 	void fillScreen(const Common::Rect &r, uint32 col) override;
 	void updateScreen() override;
+#ifdef ATARI_DSP_C2P
+	// Called from OSystem_Atari::update(): retires a completed DSP transfer
+	// and starts a frame the game requested while the previous one ran. SCI,
+	// for one, calls updateScreen() only when it draws.
+	void pollDspScreen();
+#endif
 	void setShakePos(int shakeXOffset, int shakeYOffset) override;
 	void setFocusRectangle(const Common::Rect& rect) override {}
 	void clearFocusRectangle() override {}
@@ -146,6 +152,19 @@ private:
 	void addDirtyRectToScreens(const Graphics::Surface &dstSurface,
 							   int x, int y, int w, int h, bool directRendering);
 	bool updateScreenInternal(Screen *dstScreen, const Graphics::Surface *srcSurface);
+#ifdef ATARI_DSP_C2P
+	// The game screen converts on the DSP in the background (see
+	// backends/platform/atari/atari-dsp-c2p.h). True if it handled the
+	// update; updated says whether a buffer needs to be queued for display.
+	bool updateScreenDsp(Screen *dstScreen, const Graphics::Surface *srcSurface, bool &updated);
+	// Lets the screen in flight finish before its target is changed or freed.
+	void waitDspScreen();
+	Screen *_dspScreen = nullptr;
+	// This build writes to the displayed buffer when the DSP is available.
+	bool _dspDirect = false;
+	// The game asked for a frame while the DSP was busy.
+	bool _dspFrameWanted = false;
+#endif
 	void copyRectToAtariSurface(AtariSurface &dstSurface,
 								const byte *buf, int pitch, int x, int y, int w, int h);
 

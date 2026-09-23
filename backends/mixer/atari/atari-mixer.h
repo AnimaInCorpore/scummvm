@@ -61,6 +61,11 @@ private:
 #ifdef ATARI_FALCON_GAME_ONLY
 	byte *_queuedDmaBuffer = nullptr;
 #endif
+#ifdef ATARI_DSP_C2P
+	// The no-device mixer's clock: when it started, and the frames consumed.
+	uint32 _nullMixStart = 0;
+	uint32 _nullMixFrames = 0;
+#endif
 #ifdef ATARI_DSP_OPL
 	// The DSP owns the codec and synthesizes the AdLib voices; its
 	// interrupt produces the periods (backends/platform/atari/atari-dsp.h).

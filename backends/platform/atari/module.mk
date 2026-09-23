@@ -4,6 +4,7 @@ MODULE_OBJS := \
 	osystem_atari.o \
 	atari_ikbd.o \
 	atari-dsp.o \
+	atari-dsp-c2p.o \
 	dsp-opl.o \
 	native_features.o \
 	dlmalloc.o
