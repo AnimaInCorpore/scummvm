@@ -20,11 +20,13 @@ The Falcon specification keeps the 32 MHz clock from the codec only, and
 this route does not use the codec. Whether the DMA-to-DSP link runs at it
 is one of the questions a real Falcon has to answer.
 
-There are three programs:
+There are four programs:
 
 - `SSIECHO.TOS`: the route with a DSP that echoes every word, for the
   route's rate and integrity.
 - `SSIC2P.TOS`: the conversion itself.
+- `SSIMIX.TOS`: whether sound can share the stream, the DAC playing one slot
+  pair.
 - `CPUC2P.TOS`: the backend's 68030 c2p on the same screen, for comparison.
 
 ## The pass-through: SSIECHO.TOS
@@ -77,6 +79,78 @@ c2p. Each clock gets two passes, and each pass reports:
 The record buffer of each pass is written as `C2P<clock><pass>.BIN`, and
 `c2p-slips.py` maps where a bad one lost step.
 
+## Sound beside the stream: SSIMIX.TOS
+
+Converting on the DSP takes the DSP and the sound DMA away from the DSP OPL,
+and from all other sound. The idea tested here is slot sharing: sound in one
+slot pair of the crossbar frame, data in the other three, and the DAC
+listening to that pair alone. `Setmontracks` selects the pair.
+
+The DAC cannot use the 32 MHz clock, so any route with sound runs at
+25.175 MHz. With one pair given to sound, 6 of the 8 slots are left for
+pixels: 590 KB/s instead of 786 KB/s.
+
+The DSP (`dsp/ssimix.asm`) sends a test tone in the pair the host names:
+1,024 Hz left and 2,049 Hz right, from a 48-entry sine. Every other slot
+carries a tag, `$s0a5` for slot s. The 68030 program runs five cases:
+
+| case | route | tone | DAC track | record |
+|---|---|---|---|---|
+| 1 | DSP transmit to record and DAC | pair 0 | 0 | 4 tracks |
+| 2 | DSP transmit to record and DAC | pair 1 | 1 | 4 tracks |
+| 3 | DSP transmit to record and DAC | pair 0 | 1 (control) | 4 tracks |
+| 4 | DMA playback to the DSP and the DAC | pair 0 of the play buffer | 0 | 4 tracks |
+| 5 | DSP transmit to record and DAC | pair 3 | 3 | 3 tracks |
+
+Case 5 is the layout a DSP c2p with sound would use. Record would take
+planar words from slots 0-5, and the DAC alone would play the sound in slots
+6-7.
+
+For each case the program:
+
+- takes a record snapshot and maps which slot every word landed in, by its
+  tag;
+- checks that the tone pair holds the tone and every other slot its tag.
+
+`mix-gate.py` records Hatari's sound and finds the cases by the silences
+between them. It then measures how much of each channel's energy is the
+expected tone.
+
+On 2026-09-23, under Hatari:
+
+- **Cases 1, 2 and 4:** the DAC played both tones at 0.998-0.999 (left) and
+  0.994-0.995 (right) of the channel's energy, at the tone's exact level.
+  The record snapshots put every word in its slot.
+- **Case 3 (control):** the DAC played no tone.
+
+So Hatari lets the DAC take one pair out of a four-track stream, from the
+DSP or from DMA playback, while the other slots carry other data. Two
+limits of Hatari's crossbar leave case 5 to a real Falcon:
+
+- It records every slot, whatever the record track count.
+- It decodes only DAC tracks 0 and 1, because its mask for the monitor bits
+  is `30` where `0x30` is meant.
+
+Case 5 is therefore reported apart ("hardware only") and left out of the
+result. Under Hatari it fails exactly as those two limits predict.
+
+The program works around two more things in Hatari:
+
+- **Waiting:** while a case plays, the 68030 sleeps in `STOP`, woken only by
+  playback's end interrupt. Busy waits and TOS's own interrupts cost the DSP
+  slots there.
+- **Playback slot position:** each case plays one whole 2.2 s buffer and
+  waits for its end. Hatari counts playback's slot position from power-on
+  and never resets it when playback starts, so an aborted playback would
+  move pair 0.
+
+On a real Falcon, what to check:
+
+- whether case 5's record snapshot holds six slots a frame, all tags;
+- whether its tone is audible, with the DAC on track 3;
+- where the DSP's words land after a frame sync, which the snapshots show
+  (Hatari: the next slot).
+
 ## The comparison: CPUC2P.TOS
 
 `cpu/cpuc2p.c` times the 68030 c2p the ScummVM backend uses (Mikael Kalms'
@@ -106,6 +180,7 @@ that time, apart from the sound DMA's share of the ST-RAM bus.
 DOSBOX=/path/to/dosbox ./build.sh
 python3 gate.py --output build/echo
 python3 c2p-gate.py --output build/c2p
+python3 mix-gate.py --output build/mix
 python3 cpu-bench.py --output build/cpu
 ```
 
@@ -133,11 +208,13 @@ reads cost more. The two gates deal with this differently:
 
 ## On a real Falcon
 
-Copy `build/SSIECHO.TOS`, `build/SSIC2P.TOS` and `build/CPUC2P.TOS` to the
-Falcon. Run them from the desktop with no DSP program or sound player
-resident. Each takes about 10-15 s and writes its report beside itself
-(`SSIECHO.TXT`, `SSIC2P.TXT`, `CPUC2P.TXT`); the first two then wait for a
-key. The last line is `RESULT: PASS` or
+Copy `build/SSIECHO.TOS`, `build/SSIC2P.TOS`, `build/SSIMIX.TOS` and
+`build/CPUC2P.TOS` to the Falcon. Run them from the desktop with no DSP
+program or sound player resident. Each takes about 10-15 s and writes its
+report beside itself (`SSIECHO.TXT`, `SSIC2P.TXT`, `SSIMIX.TXT`,
+`CPUC2P.TXT`); the first two then wait for a key. `SSIMIX.TOS` is also a
+listening test: cases 1, 2, 4 and 5 should each sound as two clean tones,
+and case 3 should be silent. The last line is `RESULT: PASS` or
 `RESULT: FAIL (n checks failed)`. Any failing line points to what broke:
 
 - **frame rate 0** or a **timed-out pass**: the route carries no data at
