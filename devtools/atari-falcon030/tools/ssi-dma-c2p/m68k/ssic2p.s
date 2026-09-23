@@ -6,7 +6,7 @@
 ; checks what record wrote against the planar screen a 68030 reference c2p
 ; makes of the same pixels.
 ;
-; The playback buffer is the DSP's marker (four words), the 64,000 chunky
+; The playback buffer is the DSP's marker (one frame, eight words), the 64,000 chunky
 ; bytes and 128 words of padding, which clock the last groups out of the
 ; DSP's 32-word ring. Record starts with playback, so its buffer holds some
 ; words from before the marker's groups came round, then the planar screen:
@@ -42,7 +42,7 @@ CMD_BACKLOG     equ     $040000
 CMD_OVERRUNS    equ     $050000
 CMD_STATE       equ     $060000
 CMD_ARM         equ     $070000
-CMD_PROBE       equ     $080000
+CMD_SHIFTS      equ     $080000
 REPLY_PING      equ     $433250
 
 DSP_ABILITY     equ     3
@@ -51,7 +51,7 @@ SLOTS           equ     8
 SCREEN_BYTES    equ     320*200
 SCREEN_WORDS    equ     SCREEN_BYTES/2
 SCREEN_GROUPS   equ     SCREEN_BYTES/16
-MARK_WORDS      equ     4
+MARK_WORDS      equ     8                 ; one frame: the screen starts at slot 0
 PAD_WORDS       equ     128
 PLAY_WORDS      equ     MARK_WORDS+SCREEN_WORDS+PAD_WORDS
 PLAY_BYTES      equ     PLAY_WORDS*2
@@ -62,7 +62,9 @@ ANCHOR          equ     4*8               ; the planar word the search looks for
 MATCH_WORDS     equ     8                 ; and how many from it must match
 SEARCH_WORDS    equ     1024              ; record positions tried
 BACKLOG_LIMIT   equ     24                ; words; the ring holds 32
-PASSES          equ     2
+PASSES          equ     3                 ; the last one busy (see super_pass)
+BUSY_PASS       equ     3
+BUSY_DAMAGE     equ     16                ; words a resync may cost
 
 ; After the STOP, record's last word is polled about every 0.4-1.3 ms, up to
 ; PASS_POLLS times.
@@ -231,6 +233,9 @@ run_pass:
         move.l  #CMD_OVERRUNS,d0
         bsr     dsp_exchange
         move.l  d0,dsp_overruns
+        move.l  #CMD_SHIFTS,d0
+        bsr     dsp_exchange
+        move.l  d0,dsp_shifts
 
         lea     line_buffer,a0
         FSTR    txt_pass
@@ -252,6 +257,9 @@ run_pass:
         moveq   #0,d0
         move.w  record_end_seen,d0
         bsr     fmt_u32
+        FSTR    txt_shifts
+        move.l  dsp_shifts,d0
+        bsr     fmt_u32
         ; the DSP found the marker, converted the screen, kept up, lost nothing
         cmpi.l  #1,dsp_state
         bne     .dsp_fail
@@ -267,23 +275,6 @@ run_pass:
         addq.w  #1,fail_count
         FSTR    txt_fail
 .dsp_lined:
-        bsr     line_done
-        bsr     emit_line
-
-        ; the DSP's receive pointer, SSI status, status register and group
-        ; pointer as the pass left them
-        lea     line_buffer,a0
-        FSTR    txt_probe
-        moveq   #0,d6
-.probe:
-        move.l  #CMD_PROBE,d0
-        or.l    d6,d0
-        bsr     dsp_exchange
-        move.b  #' ',(a0)+
-        bsr     fmt_hex16
-        addq.l  #1,d6
-        cmpi.l  #4,d6
-        bcs     .probe
         bsr     line_done
         bsr     emit_line
 
@@ -421,6 +412,24 @@ check_planar:
         FSTR    txt_last
         move.l  d7,d0
         bsr     fmt_u32
+        ; the busy pass may lose words under Hatari: each must cost no more
+        ; than BUSY_DAMAGE words, or the resync did not hold
+        cmpi.l  #BUSY_PASS,pass_number
+        bne     .damaged
+        move.l  dsp_shifts,d0
+        addq.l  #1,d0
+        mulu.l  #BUSY_DAMAGE,d0
+        FSTR    txt_busy_allowed
+        bsr     fmt_u32
+        FSTR    txt_busy_allowed2
+        cmp.l   d5,d0
+        bcs     .damaged
+        FSTR    txt_pass_ok
+        bsr     line_done
+        bsr     emit_line
+        moveq   #0,d0
+        rts
+.damaged:
         addq.w  #1,fail_count
         FSTR    txt_fail
         bsr     line_done
@@ -509,8 +518,12 @@ show_mismatches:
 ; top bytes, and zero padding.
 fill_play:
         lea     play_buffer,a0
-        move.l  #$a55a5aa5,(a0)+
-        move.l  #$c33c3cc3,(a0)+
+        move.w  #$a5f0,d0                 ; $a5f0 + i
+        moveq   #MARK_WORDS-1,d1
+.mark:
+        move.w  d0,(a0)+
+        addq.w  #1,d0
+        dbf     d1,.mark
         move.l  #SCREEN_BYTES-1,d1
         move.l  #$12345678,d0
 .pixel:
@@ -603,7 +616,10 @@ super_pass:
         bset    #1,SND_INTERRUPTS.w
         clr.w   record_end_seen
         move.b  #$11,SND_CONTROL.w        ; play and record, once each
+        cmpi.l  #BUSY_PASS,pass_number
+        beq     .busy
         stop    #$2500
+.woken:
         ori.w   #$0700,sr
         lea     mfp_saved,a0
         move.b  (a0)+,MFP_AER.w
@@ -629,6 +645,26 @@ super_pass:
         move.w  (sp)+,sr
         moveq   #0,d0
         rts
+
+; The busy pass: instead of STOPping, the 68030 works the way a game does,
+; long instructions among short ones, until record's last word changes.
+; Under Hatari that costs the DSP received words, which the resync must
+; confine to the groups they fell in.
+.busy:
+        move.l  #2000000,d5               ; timeout, in iterations
+.busy_loop:
+        movem.l d0-d7/a0-a2,-(sp)
+        movem.l (sp)+,d0-d7/a0-a2
+        move.l  d5,d0
+        moveq   #0,d1
+        divu.l  #7,d1:d0
+        mulu.l  #13,d0
+        bsr     clear_data_cache
+        cmpi.w  #SENTINEL,(a3)
+        bne     .woken
+        subq.l  #1,d5
+        bne     .busy_loop
+        bra     .woken
 
 ; GPIP7: record has ended. The in-service bit is cleared by writing 0 to it.
 record_end_handler:
@@ -656,7 +692,9 @@ txt_backlog:    dc.b '  backlog ',0
 txt_overruns:   dc.b ' words  overruns ',0
 txt_state:      dc.b '  state ',0
 txt_irq:        dc.b '  irq ',0
-txt_probe:      dc.b '    dsp r7/ssisr/sr/r0:',0
+txt_shifts:     dc.b '  resyncs ',0
+txt_busy_allowed: dc.b ' (busy pass: up to ',0
+txt_busy_allowed2: dc.b ' allowed)',0
 txt_offset:     dc.b '    planar at word ',0
 txt_phase:      dc.b ' (slot phase ',0
 txt_mismatches: dc.b '), mismatched words ',0
@@ -706,6 +744,7 @@ dsp_state:      ds.l 1
 dsp_groups:     ds.l 1
 dsp_backlog:    ds.l 1
 dsp_overruns:   ds.l 1
+dsp_shifts:     ds.l 1
 dma_pointers:   ds.l 4
 vector_saved:   ds.l 1
 cfg_clock:      ds.w 1

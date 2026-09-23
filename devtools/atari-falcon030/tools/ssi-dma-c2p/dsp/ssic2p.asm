@@ -16,12 +16,27 @@
 ; On average it must keep up with one group per eight slots. r7, m7 and r6
 ; (the receive overrun count) belong to the interrupts.
 ;
-; Framing. The host starts each screen with a marker, four words
-; ($a55a, $5aa5, $c33c, $3cc3), and the word after it starts group 0. After
-; CMD_SYNC the main loop scans for the marker; once found it converts every
-; following group, whatever the host sends, until the next CMD_SYNC. The
-; host pads the screen with at least 32 words after it, so the last groups'
-; output is clocked out.
+; Framing. The host starts each screen with a marker, one frame of eight
+; words $a5f0 + i (i = 0-7), and the word after it starts group 0. After
+; CMD_SYNC the main loop scans for marker words: each one it sees, i, says
+; the data starts 8 - i words after it, and the first other word after one
+; starts the conversion there. Any one marker word is enough, so a word lost
+; in the marker costs nothing. It then converts every following group,
+; whatever the host sends, until the next CMD_SYNC.
+; The host pads the screen with at least 32 words after it, so the last
+; groups' output is clocked out, and keeps the whole stream to whole frames,
+; so that each screen's first word is slot 0's.
+;
+; Resync. A group is one frame, slots 0-7, and the word of slot 0 comes with
+; the receive frame sync (RFS). The main loop waits for nine words, the group
+; and the next group's first, and meanwhile watches RFS: where slot 0's word
+; lands tells where the next group starts. That position agrees with the
+; group base unless a word went missing, which Hatari does whenever two
+; slots pass with no DSP instruction between them (its DSP runs between
+; 68030 instructions, and a long one outlasts a slot). Then the base moves
+; to it, SHIFTS counts the event, and the loss costs the one group it fell
+; in. Transmit shares the ring pointer, so the output stays in step as well:
+; each output word still leaves 32 slots after its input word arrived.
 ;
 ; Timing. Hatari counts 190 instruction cycles for a group, the conversion
 ; (C2PCORE.INC, from gen-c2p.py) and the loop around it, and 4 for each
@@ -44,14 +59,13 @@ CMD_BACKLOG     equ     $040000         ; reply: deepest backlog, in words
 CMD_OVERRUNS    equ     $050000         ; reply: receive overruns
 CMD_STATE       equ     $060000         ; reply: 0 scanning, 1 converting
 CMD_ARM         equ     $070000         ; low byte: slots per frame - 1
-CMD_PROBE       equ     $080000         ; low byte 0: r7, 1: SSI SR, 2: SR, 3: r0
+CMD_SHIFTS      equ     $080000         ; reply: group base moves since sync
 REPLY_PING      equ     $433250         ; "C2P"
 REPLY_ERROR     equ     $ffffff
 
-MARK0           equ     $a55a00
-MARK1           equ     $5aa500
-MARK2           equ     $c33c00
-MARK3           equ     $3cc300
+MARK_MASK       equ     $fff800         ; a marker word: $a5f0 + i
+MARK_BASE       equ     $a5f000
+MARK_INDEX      equ     $000700
 
 ; Internal X. Equates only: a ds block would emit an empty X section that the
 ; boot-image converter rejects.
@@ -59,7 +73,8 @@ GROUPS          equ     $0000
 BACKLOG         equ     $0001
 STATE           equ     $0002
 SR_COPY         equ     $0003
-MARKS           equ     $0030           ; the four marker words
+SHIFTS          equ     $0004
+MATCHED         equ     $0005           ; a marker word seen since sync
 RING            equ     $0040           ; 32 words, X in and Y out
 
 ; Words waiting at r0, (r7 - r0) mod 32, into a1, with Z set when none.
@@ -89,14 +104,6 @@ c2p_start:
         movep   #$1f8,x:m_pcc           ; port C pins to the SSI: they reset to
                                         ; GPIO, which leaves the SSI clockless
         movep   #$3000,x:m_ipr          ; SSI interrupts at level 2
-        move    #>MARK0,x0
-        move    x0,x:MARKS
-        move    #>MARK1,x0
-        move    x0,x:MARKS+1
-        move    #>MARK2,x0
-        move    x0,x:MARKS+2
-        move    #>MARK3,x0
-        move    x0,x:MARKS+3
         move    #0,r6
         move    #>7,a
         jsr     c2p_arm
@@ -104,11 +111,13 @@ c2p_start:
         jmp     c2p_scan
 
 ; ---------------------------------------------------------------------------
-; Scanning: follow the ring with r0 and match the marker, r3 walking it.
+; Scanning: follow the ring with r0 for marker words; r3 keeps where the
+; latest one says the data starts.
 ; ---------------------------------------------------------------------------
 c2p_scan:
         clr     a
         move    a1,x:STATE
+        move    a1,x:MATCHED
 c2p_scan_loop:
         jclr    #0,x:m_hsr,c2p_scan_quiet
         jsr     c2p_host
@@ -117,31 +126,41 @@ c2p_scan_loop:
 c2p_scan_quiet:
         AVAILABLE
         jeq     c2p_scan_loop
-        move    x:(r0)+,a
-        move    x:(r3)+,x0
+        move    x:(r0)+,b
+        tfr     b,a
+        move    #>MARK_MASK,x0
+        and     x0,a
+        move    #>MARK_BASE,x0
         cmp     x0,a
-        jne     c2p_scan_miss
-        move    r3,b                    ; all four matched?
-        move    #>MARKS+4,x0
-        cmp     x0,b
-        jne     c2p_scan_loop
-        jmp     c2p_convert
-c2p_scan_miss:
-        move    #MARKS,r3               ; a miss may be the marker's start
-        nop
-        move    x:(r3)+,x0
-        cmp     x0,a
-        jeq     c2p_scan_loop
-        move    #MARKS,r3
+        jne     c2p_scan_other
+        move    #>MARK_INDEX,x0         ; marker word i: the data starts
+        and     x0,b                    ; 7 - i words after the next one
+        rep     #8
+        lsr     b
+        neg     b
+        move    #>7,x0
+        add     x0,b
+        move    b1,n3
+        move    r0,r3
+        move    #>1,x0
+        move    x0,x:MATCHED
+        move    (r3)+n3
         jmp     c2p_scan_loop
+c2p_scan_other:
+        move    x:MATCHED,a             ; data after a marker: convert
+        tst     a
+        jeq     c2p_scan_loop
+        move    r3,r0
 
 ; ---------------------------------------------------------------------------
-; Converting: one group each time eight words wait at r0.
+; Converting: one group each time nine words wait at r0, the group and the
+; next one's first (see Resync).
 ; ---------------------------------------------------------------------------
 c2p_convert:
         clr     a
         move    a1,x:GROUPS
         move    a1,x:BACKLOG
+        move    a1,x:SHIFTS
         move    #>1,a
         move    a1,x:STATE
 c2p_wait:
@@ -150,9 +169,42 @@ c2p_wait:
         tst     b
         jne     c2p_scan
 c2p_wait_quiet:
+        ; RFS describes the latest word: once the interrupt has taken it
+        ; (RDF clear) it sits at r7 - 1, before then it will go to r7. The
+        ; two reads of r7 tell whether a word arrived between them.
+        move    r7,x1
+        movep   x:m_sr,y0
+        move    r7,b
+        cmp     x1,b
+        jne     c2p_wait
+        jclr    #3,y0,c2p_wait_count
+        jset    #7,y0,c2p_rfs_at
+        move    #>1,x0
+        sub     x0,b
+c2p_rfs_at:
+        move    r0,x0                   ; its offset from the group base,
+        sub     x0,b                    ; mod 8: 0 when in step
+        move    #>7,x0
+        and     x0,b
+        jeq     c2p_wait_count
+        move    b1,b                    ; move the base by -4..3 to it
+        move    #>4,x0
+        cmp     x0,b
+        jlt     c2p_shift
+        move    #>8,x0
+        sub     x0,b
+c2p_shift:
+        move    b1,n0                   ; r0's modulo wraps the move
+        move    x:SHIFTS,b
+        move    #>1,x0
+        add     x0,b
+        move    b1,x:SHIFTS
+        move    (r0)+n0
+        move    #8,n0                   ; the group step again
+c2p_wait_count:
         AVAILABLE
         move    a1,a
-        move    #>8,x0
+        move    #>9,x0
         cmp     x0,a
         jlt     c2p_wait
         move    x:BACKLOG,x0            ; the deepest backlog so far
@@ -210,9 +262,9 @@ c2p_host:
         move    #>CMD_ARM,x0
         cmp     x0,b
         jeq     c2p_cmd_arm
-        move    #>CMD_PROBE,x0
+        move    #>CMD_SHIFTS,x0
         cmp     x0,b
-        jeq     c2p_cmd_probe
+        jeq     c2p_cmd_shifts
         movep   #REPLY_ERROR,x:m_htx
         jmp     c2p_host_quiet
 c2p_cmd_ping:
@@ -231,24 +283,8 @@ c2p_cmd_overruns:
         move    r6,x0
         movep   x0,x:m_htx
         jmp     c2p_host_quiet
-c2p_cmd_probe:
-        move    y1,a
-        move    #>$ff,x0
-        and     x0,a
-        move    r7,x0
-        tst     a
-        jeq     c2p_probe_reply
-        movep   x:m_sr,x0
-        move    #>1,y0
-        cmp     y0,a
-        jeq     c2p_probe_reply
-        move    sr,x0
-        move    #>2,y0
-        cmp     y0,a
-        jeq     c2p_probe_reply
-        move    r0,x0
-c2p_probe_reply:
-        movep   x0,x:m_htx
+c2p_cmd_shifts:
+        movep   x:SHIFTS,x:m_htx
         jmp     c2p_host_quiet
 c2p_cmd_arm:
         move    y1,a
@@ -257,7 +293,6 @@ c2p_cmd_arm:
         jsr     c2p_arm
 c2p_cmd_sync:
         move    r7,r0                   ; skip what arrived before
-        move    #MARKS,r3
         movep   #0,x:m_htx
         move    #>1,b                   ; restart scanning
         rts
@@ -291,6 +326,7 @@ c2p_arm_cleared:
         move    #31,m0
         move    #31,m1
         move    #31,m2
+        move    #31,m3
         move    #31,m4
         move    #31,m5
         move    #>3,n1                  ; the constant offsets of the group loop
@@ -299,7 +335,6 @@ c2p_arm_cleared:
         move    #>2,n5
         move    #>8,n0
         move    #RING,r0
-        move    #MARKS,r3
         movep   #0,x:m_tx
         movep   #$ba00,x:m_crb          ; RIE, RE, TE, network, synchronous
         andi    #$fc,mr
