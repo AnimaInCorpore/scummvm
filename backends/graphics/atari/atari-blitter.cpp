@@ -77,6 +77,18 @@ static long waitForIdleSuper() {
 
 static long executeBlitSuper() {
 	waitForIdle();
+#if defined(__mc68030__)
+	uint32 cacr = 0;
+	asm volatile("movec %%cacr,%0" : "=d"(cacr) : : "memory");
+	const bool dataCacheEnabled = (cacr & 0x100) != 0;
+	if (dataCacheEnabled) {
+		// Falcon DMA devices do not snoop the 68030 data cache. Keep it off
+		// while the Blitter writes the screen so later CPU reads cannot see
+		// stale pixels.
+		const uint32 disabledCacr = cacr & ~0x100;
+		asm volatile("movec %0,%%cacr" : : "d"(disabledCacr) : "memory");
+	}
+#endif
 	blitter.sourceXIncrement = 2;
 	blitter.sourceYIncrement = s_request.sourceYIncrement;
 	blitter.sourceAddress = s_request.sourceAddress;
@@ -93,6 +105,14 @@ static long executeBlitSuper() {
 	blitter.skew = 0;
 	blitter.control = kBlitterBusy;
 	waitForIdle();
+#if defined(__mc68030__)
+	if (dataCacheEnabled) {
+		// Invalidate cached lines modified by the Blitter before restoring the
+		// cache. CACR bit 11 is the 68030 clear-data-cache command bit.
+		const uint32 clearAndRestoreCacr = cacr | 0x800;
+		asm volatile("movec %0,%%cacr" : : "d"(clearAndRestoreCacr) : "memory");
+	}
+#endif
 	return 1;
 }
 
