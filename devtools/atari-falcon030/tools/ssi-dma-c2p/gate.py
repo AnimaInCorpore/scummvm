@@ -10,9 +10,11 @@ Hatari cannot meet that verdict, and this gate does not ask it to. Hatari
 runs the DSP only between 68030 instructions, so an instruction that takes
 longer than one SSI slot (2.0 us at 62,500 Hz frames, 2.5 us at 49,170 Hz)
 delivers two words with no DSP cycles between them, and the echo loses the
-first: the record then holds the word before it twice. Reads of the MFP,
-the sound registers and bus-contended ST-RAM do that now and then; on a
-Falcon the DSP runs beside the 68030 and never sees them. So the gate checks
+first: the record then holds the word before it twice. The program's
+polling loops do that now and then: a DBF costs Hatari up to 42 cycles, and
+reads of the MFP, the sound registers and bus-contended ST-RAM more; on a
+Falcon the DSP runs beside the 68030 and never sees them. (SSIC2P.TOS, which
+cannot afford a lost word, STOPs the 68030 instead.) So the gate checks
 the mechanics instead: the route carries data at the modelled frame rate,
 the pattern is found at one offset, and every damaged word is that single
 repeat, few enough to be the emulator's.

@@ -1,7 +1,10 @@
 #!/bin/sh
-# Build SSIECHO.TOS, the SSI DMA pass-through test, with the sibling
-# F030MXDRV checkout's toolchain: Motorola's asm56000 under DOSBox, and
-# vasm/vlink. Everything generated lands in build/.
+# Build the SSI DMA tests with the sibling F030MXDRV checkout's toolchain:
+# Motorola's asm56000 under DOSBox, and vasm/vlink. Two programs are built:
+#   SSIECHO.TOS  the pass-through test (dsp/ssiecho.asm)
+#   SSIC2P.TOS   the c2p test (dsp/ssic2p.asm, its group conversion
+#                generated and checked by gen-c2p.py)
+# Everything generated lands in build/.
 #
 # The checkout is found as foa-opl3/gate_env.py finds it: $MXDRV, else under
 # ~/Work, else beside this repository. DOSBox is $DOSBOX, else
@@ -30,23 +33,36 @@ dsp="$task_dir/build/dsp"
 mkdir -p "$dsp" "$task_dir/build/m68k"
 for file in ASM56000.EXE CLDLOD.EXE DOS4GW.EXE ioequ.inc; do cp "$tools/$file" "$dsp/"; done
 cp "$task_dir/dsp/ssiecho.asm" "$dsp/SSIECHO.ASM"
+cp "$task_dir/dsp/ssic2p.asm" "$dsp/SSIC2P.ASM"
+python3 "$task_dir/gen-c2p.py" --output "$dsp/C2PCORE.INC"
 cat > "$dsp/BUILD.BAT" <<'BATCH'
 @ECHO OFF
 ASM56000.EXE -q -a -bSSIECHO.CLD -z -lSSIECHO.LST SSIECHO.ASM
 IF ERRORLEVEL 1 EXIT 1
 CLDLOD.EXE SSIECHO.CLD > SSIECHO.LOD
+IF ERRORLEVEL 1 EXIT 1
+ASM56000.EXE -q -a -bSSIC2P.CLD -z -lSSIC2P.LST SSIC2P.ASM
+IF ERRORLEVEL 1 EXIT 1
+CLDLOD.EXE SSIC2P.CLD > SSIC2P.LOD
 EXIT
 BATCH
-rm -f "$dsp/SSIECHO.CLD" "$dsp/SSIECHO.LOD" "$dsp/SSIECHO.LST"
+for name in SSIECHO SSIC2P; do rm -f "$dsp/$name.CLD" "$dsp/$name.LOD" "$dsp/$name.LST"; done
 "$dosbox" --noprimaryconf --set output=texture "$dsp/BUILD.BAT" >/dev/null 2>&1 || true
-[ -f "$dsp/SSIECHO.LST" ] || { echo "error: SSIECHO.ASM did not assemble; see build/dsp/" >&2; exit 1; }
-grep -qE '^0 +Errors' "$dsp/SSIECHO.LST" || { echo "error: SSIECHO.ASM failed; see build/dsp/SSIECHO.LST" >&2; exit 1; }
-grep -qE '^0 +Warnings' "$dsp/SSIECHO.LST" || { echo "error: SSIECHO.ASM warned; see build/dsp/SSIECHO.LST" >&2; exit 1; }
+for name in SSIECHO SSIC2P; do
+    [ -f "$dsp/$name.LST" ] || { echo "error: $name.ASM did not assemble; see build/dsp/" >&2; exit 1; }
+    grep -qE '^0 +Errors' "$dsp/$name.LST" || { echo "error: $name.ASM failed; see build/dsp/$name.LST" >&2; exit 1; }
+    grep -qE '^0 +Warnings' "$dsp/$name.LST" || { echo "error: $name.ASM warned; see build/dsp/$name.LST" >&2; exit 1; }
+done
 python3 "$mxdrv/tools/generate_dsp_stage2.py" --standalone "$dsp/SSIECHO.LOD" --prefix ssiecho \
     > "$dsp/ssiecho_boot.i"
+python3 "$mxdrv/tools/generate_dsp_stage2.py" --standalone "$dsp/SSIC2P.LOD" --prefix ssic2p \
+    > "$dsp/ssic2p_boot.i"
 
 cd "$task_dir"
-"$vasm" m68k/ssiecho.s -quiet -Felf -m68030 -I "$mxdrv/src/m68k" -I build/dsp \
-    -o build/m68k/ssiecho.o -L build/m68k/ssiecho.lst
-"$vlink" build/m68k/ssiecho.o -b ataritos -s -e start -o build/SSIECHO.TOS
-echo "built build/SSIECHO.TOS with $(grep SSIECHO_BOOT_WORDS build/dsp/ssiecho_boot.i | awk '{print $NF}') DSP program words"
+for name in ssiecho ssic2p; do
+    "$vasm" m68k/$name.s -quiet -Felf -m68030 -I "$mxdrv/src/m68k" -I m68k -I build/dsp \
+        -o build/m68k/$name.o -L build/m68k/$name.lst
+    upper=$(echo "$name" | tr a-z A-Z)
+    "$vlink" build/m68k/$name.o -b ataritos -s -e start -o build/$upper.TOS
+    echo "built build/$upper.TOS with $(grep -i "${name}_BOOT_WORDS" build/dsp/${name}_boot.i | awk '{print $NF}') DSP program words"
+done
