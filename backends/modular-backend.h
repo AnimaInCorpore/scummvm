@@ -99,6 +99,8 @@ public:
 	int16 getWidth() override final;
 	PaletteManager *getPaletteManager() override final;
 	void copyRectToScreen(const void *buf, int pitch, int x, int y, int w, int h) override final;
+	bool supportsIndexedSprites() const override final;
+	bool drawIndexedSprite(const Graphics::IndexedSprite &sprite) override final;
 	Graphics::Surface *lockScreen() override final;
 	void unlockScreen() override final;
 	void fillScreen(uint32 col) override final;

@@ -38,6 +38,7 @@
 #include "gui/ThemeEngine.h"
 
 #include "atari-surface.h"
+#include "atari-blitter.h"
 #include "atari-ste-raster.h"
 #include "atari-ste-scene.h"
 #include "backends/platform/atari/ste-benchmark.h"
@@ -244,6 +245,7 @@ AtariGraphicsManager::AtariGraphicsManager(OSystem_Atari *system)
 
 	_tt = (vdo == VDO_TT);
 	_ste = (vdo == VDO_STE);
+	_falcon = (vdo == VDO_FALCON);
 	s_tt = _tt;
 	s_ste = _ste;
 
@@ -252,6 +254,8 @@ AtariGraphicsManager::AtariGraphicsManager(OSystem_Atari *system)
 
 	// no BDF scaling please
 	ConfMan.registerDefault("gui_disable_fixed_font_scaling", true);
+	ConfMan.registerDefault("atari_sprite_cache_kb", 512);
+	_spriteCache.setBudget(CLIP<int>(ConfMan.getInt("atari_sprite_cache_kb"), 0, 1024) * 1024);
 
 #ifndef ATARI_STE_GAME_ONLY
 	// make the standard GUI renderer default (!DISABLE_FANCY_THEMES implies anti-aliased rendering in ThemeEngine.cpp)
@@ -324,6 +328,8 @@ AtariGraphicsManager::AtariGraphicsManager(OSystem_Atari *system)
 	s_oldPhysbase = Physbase();
 
 	AtariSurfaceInit();
+	if (_falcon && !g_hasSuperVidel)
+		AtariBlitter::init();
 
 	allocateSurfaces();
 
@@ -348,6 +354,8 @@ AtariGraphicsManager::~AtariGraphicsManager() {
 		Supexec(atari_ste_raster_uninstall);
 	Supexec(UninstallVblHandler);
 
+	_spriteCache.clear();
+	AtariBlitter::deinit();
 	freeSurfaces();
 
 	AtariGraphicsShutdown();
@@ -635,6 +643,22 @@ void AtariGraphicsManager::copyRectToScreen(const void *buf, int pitch, int x, i
 	} else {
 		dstSurface.copyRectToSurface(buf, pitch, x, y, w, h);
 	}
+}
+
+bool AtariGraphicsManager::supportsIndexedSprites() const {
+	return _falcon && !g_hasSuperVidel && _overlayState == kOverlayHidden
+		&& _currentState.isValid() && _currentState.mode == kDirectRendering
+		&& _currentState.format == PIXELFORMAT_CLUT8;
+}
+
+bool AtariGraphicsManager::drawIndexedSprite(const Graphics::IndexedSprite &sprite) {
+	if (!supportsIndexedSprites())
+		return false;
+
+	_system->updateAudio();
+	AtariSurface &destination = *_screen[kFrontBuffer]->offsettedSurf;
+	addDirtyRectToScreens(destination, sprite.destX, sprite.destY, sprite.width, sprite.height, true);
+	return _spriteCache.draw(sprite, destination);
 }
 
 Graphics::Surface *AtariGraphicsManager::lockScreen() {
@@ -1252,6 +1276,10 @@ void AtariGraphicsManager::steSetRoom(int room) {
 }
 
 void AtariGraphicsManager::freeSurfaces() {
+	// Cached cels use the same ST-RAM pool as the screen buffers. Release them
+	// before a resolution or buffering-mode change reallocates those buffers.
+	_spriteCache.clear();
+
 	for (int i : { kFrontBuffer, kBackBuffer1, kBackBuffer2, kOverlayBuffer }) {
 		delete _screen[i];
 		_screen[i] = nullptr;

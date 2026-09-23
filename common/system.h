@@ -43,6 +43,35 @@ class Mixer;
 namespace Graphics {
 class CursorManager;
 struct Surface;
+
+/**
+ * An indexed sprite that a backend may draw in its native representation.
+ *
+ * The source is an 8-bit indexed bitmap. The packed mask has one bit per
+ * source pixel: a set bit keeps the destination pixel and a clear bit draws
+ * the source pixel. A null mask denotes an opaque source. sourcePitch is
+ * zero when sourceWidth is the row pitch. sourceHash optionally identifies
+ * mutable source contents for a backend cache. Backends which do not
+ * implement this optional fast path return false from
+ * OSystem::drawIndexedSprite().
+ */
+struct IndexedSprite {
+	const byte *pixels = nullptr;
+	const byte *mask = nullptr;
+	uint64 cacheKey = 0;
+	uint64 sourceHash = 0;
+	int sourceWidth = 0;
+	int sourceHeight = 0;
+	int sourcePitch = 0;
+	int sourceX = 0;
+	int sourceY = 0;
+	int width = 0;
+	int height = 0;
+	int maskPitch = 0;
+	int destX = 0;
+	int destY = 0;
+	byte clearKey = 0;
+};
 }
 
 namespace GUI {
@@ -1267,6 +1296,20 @@ public:
 	 * @see getScreenFormat
 	 */
 	virtual void copyRectToScreen(const void *buf, int pitch, int x, int y, int w, int h) = 0;
+
+	/**
+	 * Whether the backend can present an indexed sprite without first copying
+	 * it through the ordinary chunky screen buffer.
+	 */
+	virtual bool supportsIndexedSprites() const { return false; }
+
+	/**
+	 * Draw an indexed sprite directly to the game layer.
+	 *
+	 * This is an optional fast path. Returning false asks the caller to use
+	 * copyRectToScreen() as usual.
+	 */
+	virtual bool drawIndexedSprite(const Graphics::IndexedSprite &sprite) { return false; }
 
 	/**
 	 * Lock the active screen framebuffer and return a Graphics::Surface

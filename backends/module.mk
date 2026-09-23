@@ -435,11 +435,13 @@ MODULE_OBJS += \
 	fs/atari/atari-fs.o \
 	fs/atari/atari-fs-factory.o \
 	graphics/atari/atari-c2p-asm.o \
+	graphics/atari/atari-blitter.o \
 	graphics/atari/atari-cursor.o \
 	graphics/atari/atari-graphics.o \
 	graphics/atari/atari-graphics-asm.o \
 	graphics/atari/atari-pendingscreenchanges.o \
 	graphics/atari/atari-screen.o \
+	graphics/atari/atari-sprite-cache.o \
 	graphics/atari/atari-ste-raster.o \
 	graphics/atari/atari-ste-scene.o \
 	graphics/atari/atari-supervidel.o \

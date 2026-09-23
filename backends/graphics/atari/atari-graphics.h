@@ -32,6 +32,7 @@
 #include "atari-cursor.h"
 #include "atari-pendingscreenchanges.h"
 #include "atari-screen.h"
+#include "atari-sprite-cache.h"
 #include "atari-ste-scene.h"
 #include "atari-supervidel.h"
 
@@ -77,6 +78,8 @@ public:
 	void setPalette(const byte *colors, uint start, uint num) override;
 	void grabPalette(byte *colors, uint start, uint num) const override;
 	void copyRectToScreen(const void *buf, int pitch, int x, int y, int w, int h) override;
+	bool supportsIndexedSprites() const override;
+	bool drawIndexedSprite(const Graphics::IndexedSprite &sprite) override;
 	Graphics::Surface *lockScreen() override;
 	void unlockScreen() override;
 	void fillScreen(uint32 col) override;
@@ -166,6 +169,7 @@ private:
 	Graphics::Surface *lockOverlay();
 
 	bool _vgaMonitor = true;
+	bool _falcon = false;
 	bool _tt = false;
 	bool _ste = false;
 
@@ -207,6 +211,7 @@ private:
 
 	AtariSurface _chunkySurface;
 	Graphics::Surface _chunkySurfaceOffsetted;
+	AtariSpriteCache _spriteCache;
 
 	enum {
 		kOverlayVisible,

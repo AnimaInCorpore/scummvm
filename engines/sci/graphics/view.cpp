@@ -21,6 +21,7 @@
 
 #include "sci/sci.h"
 #include "sci/engine/state.h"
+#include "common/system.h"
 #include "sci/graphics/drivers/gfxdriver.h"
 #include "sci/graphics/screen.h"
 #include "sci/graphics/palette16.h"
@@ -792,7 +793,7 @@ byte GfxView::getMappedColor(byte color, uint16 scaleSignal, const Palette *pale
 }
 
 void GfxView::draw(const Common::Rect &rect, const Common::Rect &clipRect, const Common::Rect &clipRectTranslated,
-			int16 loopNo, int16 celNo, byte priority, uint16 EGAmappingNr, bool upscaledHires, uint16 scaleSignal) {
+			int16 loopNo, int16 celNo, byte priority, uint16 EGAmappingNr, bool upscaledHires, uint16 scaleSignal, bool stageIndexedSprite) {
 	const Palette *palette = _embeddedPal ? &_viewPalette : &_palette->_sysPalette;
 	const CelInfo *celInfo = getCelInfo(loopNo, celNo);
 	const SciSpan<const byte> &bitmap = getBitmap(loopNo, celNo);
@@ -818,6 +819,28 @@ void GfxView::draw(const Common::Rect &rect, const Common::Rect &clipRect, const
 	byte oldpalvalue = _screen->getCurPaletteMapValue();
 	doCustomViewPalette(_screen, _resourceId, loopNo, celNo);
 
+	bool useIndexedSprite = stageIndexedSprite
+		&& !upscaledHires && !_EGAmapping && !scaleSignal && !g_sci->_gfxRemap16
+		&& oldpalvalue == 0 && _screen->getCurPaletteMapValue() == 0
+		&& g_system->supportsIndexedSprites();
+	if (useIndexedSprite) {
+		for (int i = 0; i < 256; ++i) {
+			if (palette->mapping[i] != i) {
+				useIndexedSprite = false;
+				break;
+			}
+		}
+	}
+
+	const int paddedCelWidth = (celWidth + 15) & -16;
+	const int maskPitch = paddedCelWidth / 8;
+	Common::Array<byte> visibilityMask;
+	bool hasVisiblePixel = false;
+	if (useIndexedSprite) {
+		visibilityMask.resize(maskPitch * celHeight);
+		memset(visibilityMask.data(), 0xff, visibilityMask.size());
+	}
+
 	if (_EGAmapping) {
 		const SciSpan<const byte> EGAmapping = _EGAmapping.subspan(EGAmappingNr * SCI_VIEW_EGAMAPPING_SIZE, SCI_VIEW_EGAMAPPING_SIZE);
 		for (int y = 0; y < height; y++, bitmapData += celWidth) {
@@ -840,6 +863,12 @@ void GfxView::draw(const Common::Rect &rect, const Common::Rect &clipRect, const
 					const int x2 = clipRectTranslated.left + x;
 					const int y2 = clipRectTranslated.top + y;
 					if (priority >= _screen->getPriority(x2, y2)) {
+						if (useIndexedSprite) {
+							const int sourceX = clipRect.left - rect.left + x;
+							const int sourceY = clipRect.top - rect.top + y;
+							visibilityMask[sourceY * maskPitch + sourceX / 8] &= ~(0x80 >> (sourceX & 7));
+							hasVisiblePixel = true;
+						}
 						_screen->putPixel(x2, y2, drawMask, getMappedColor(color, scaleSignal, palette, x2, y2), priority, 0);
 					}
 				}
@@ -849,6 +878,26 @@ void GfxView::draw(const Common::Rect &rect, const Common::Rect &clipRect, const
 
 	// Reset custom per-view palette mod
 	_screen->setCurPaletteMapValue(oldpalvalue);
+
+	if (useIndexedSprite && hasVisiblePixel) {
+		const int16 actualLoop = CLIP<int16>(loopNo, 0, _loop.size() - 1);
+		const int16 actualCel = CLIP<int16>(celNo, 0, _loop[actualLoop].cel.size() - 1);
+		Graphics::IndexedSprite sprite;
+		sprite.pixels = bitmap.getUnsafeDataAt(0, celWidth * celHeight);
+		sprite.mask = visibilityMask.data();
+		sprite.cacheKey = (uint64)(uint32)_resourceId << 32 | (uint64)(uint16)actualLoop << 16 | (uint16)actualCel;
+		sprite.sourceWidth = celWidth;
+		sprite.sourceHeight = celHeight;
+		sprite.sourceX = clipRect.left - rect.left;
+		sprite.sourceY = clipRect.top - rect.top;
+		sprite.width = width;
+		sprite.height = height;
+		sprite.maskPitch = maskPitch;
+		sprite.destX = clipRectTranslated.left;
+		sprite.destY = clipRectTranslated.top;
+		sprite.clearKey = clearKey;
+		_screen->gfxDriver()->stageIndexedSprite(sprite);
+	}
 }
 
 void GfxView::drawScaled(const Common::Rect &rect, const Common::Rect &clipRect, const Common::Rect &clipRectTranslated,

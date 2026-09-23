@@ -119,16 +119,13 @@ void GfxPaint16::drawCelAndShow(GuiResourceId viewId, int16 loopNo, int16 celNo,
 		celRect.right = celRect.left + view->getWidth(loopNo, celNo);
 		celRect.bottom = celRect.top + view->getHeight(loopNo, celNo);
 
-		drawCel(view, loopNo, celNo, celRect, priority, paletteNo, scaleX, scaleY, scaleSignal);
+		const bool showCel = getSciVersion() >= SCI_VERSION_1_1
+			? !_screen->_picNotValidSci11
+			: !_screen->_picNotValid;
+		drawCelInternal(view, loopNo, celNo, celRect, priority, paletteNo, scaleX, scaleY, scaleSignal, showCel);
 
-		if (getSciVersion() >= SCI_VERSION_1_1) {
-			if (!_screen->_picNotValidSci11) {
-				bitsShow(celRect);
-			}
-		} else {
-			if (!_screen->_picNotValid)
-				bitsShow(celRect);
-		}
+		if (showCel)
+			bitsShow(celRect);
 	}
 }
 
@@ -139,6 +136,10 @@ void GfxPaint16::drawCel(GuiResourceId viewId, int16 loopNo, int16 celNo, const 
 
 // This version of drawCel is not supposed to call bitsShow()!
 void GfxPaint16::drawCel(GfxView *view, int16 loopNo, int16 celNo, const Common::Rect &celRect, byte priority, uint16 paletteNo, uint16 scaleX, uint16 scaleY, uint16 scaleSignal) {
+	drawCelInternal(view, loopNo, celNo, celRect, priority, paletteNo, scaleX, scaleY, scaleSignal, false);
+}
+
+void GfxPaint16::drawCelInternal(GfxView *view, int16 loopNo, int16 celNo, const Common::Rect &celRect, byte priority, uint16 paletteNo, uint16 scaleX, uint16 scaleY, uint16 scaleSignal, bool stageIndexedSprite) {
 	Common::Rect clipRect = celRect;
 	clipRect.clip(_ports->_curPort->rect);
 	if (clipRect.isEmpty()) // nothing to draw
@@ -147,7 +148,7 @@ void GfxPaint16::drawCel(GfxView *view, int16 loopNo, int16 celNo, const Common:
 	Common::Rect clipRectTranslated = clipRect;
 	_ports->offsetRect(clipRectTranslated);
 	if (scaleX == 128 && scaleY == 128)
-		view->draw(celRect, clipRect, clipRectTranslated, loopNo, celNo, priority, paletteNo, false, scaleSignal);
+		view->draw(celRect, clipRect, clipRectTranslated, loopNo, celNo, priority, paletteNo, false, scaleSignal, stageIndexedSprite);
 	else
 		view->drawScaled(celRect, clipRect, clipRectTranslated, loopNo, celNo, priority, scaleX, scaleY, scaleSignal);
 }

@@ -106,6 +106,7 @@ private:
 	void removeHiresDrawObject(reg_t handle);
 	bool hasHiresDrawObjectAt(uint16 x, uint16 y) const;
 	Common::Rect makeHiresRect(Common::Rect &rect) const;
+	void drawCelInternal(GfxView *view, int16 loopNo, int16 celNo, const Common::Rect &celRect, byte priority, uint16 paletteNo, uint16 scaleX, uint16 scaleY, uint16 scaleSignal, bool stageIndexedSprite);
 
 	HiresDrawData *_hiresDrawObjs;
 	bool _hiresPortraitWorkaroundFlag;

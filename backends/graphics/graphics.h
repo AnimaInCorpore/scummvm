@@ -86,6 +86,8 @@ public:
 	void setPalette(const byte *colors, uint start, uint num) override = 0;
 	void grabPalette(byte *colors, uint start, uint num) const override = 0;
 	virtual void copyRectToScreen(const void *buf, int pitch, int x, int y, int w, int h) = 0;
+	virtual bool supportsIndexedSprites() const { return false; }
+	virtual bool drawIndexedSprite(const Graphics::IndexedSprite &sprite) { return false; }
 	virtual Graphics::Surface *lockScreen() = 0;
 	virtual void unlockScreen() = 0;
 	virtual void fillScreen(uint32 col) = 0;

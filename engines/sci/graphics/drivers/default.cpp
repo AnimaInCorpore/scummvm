@@ -202,7 +202,39 @@ void GfxDefaultDriver::copyRectToScreen(const byte *src, int srcX, int srcY, int
 		pitch = w * _pixelSize;
 	}
 
+	bool drawnIndexedSprite = false;
+	if (_hasPendingIndexedSprite) {
+		const Graphics::IndexedSprite &sprite = _pendingIndexedSprite;
+		const bool contained = sprite.destX >= destX && sprite.destY >= destY
+			&& sprite.destX + sprite.width <= destX + w
+			&& sprite.destY + sprite.height <= destY + h;
+		if (contained && _pixelSize == 1 && _srcPixelSize == 1)
+			drawnIndexedSprite = g_system->drawIndexedSprite(sprite);
+
+		_hasPendingIndexedSprite = false;
+		_pendingIndexedSpriteMask.clear();
+	}
+
+	if (drawnIndexedSprite)
+		return;
+
 	g_system->copyRectToScreen(src, pitch, destX, destY, w, h);
+}
+
+bool GfxDefaultDriver::stageIndexedSprite(const Graphics::IndexedSprite &sprite) {
+	if (!g_system->supportsIndexedSprites() || !sprite.pixels || !sprite.mask
+		|| sprite.sourceWidth <= 0 || sprite.sourceHeight <= 0
+		|| sprite.width <= 0 || sprite.height <= 0 || sprite.maskPitch <= 0)
+		return false;
+
+	const uint maskSize = sprite.maskPitch * sprite.sourceHeight;
+	_pendingIndexedSpriteMask.resize(maskSize);
+	memcpy(_pendingIndexedSpriteMask.data(), sprite.mask, maskSize);
+
+	_pendingIndexedSprite = sprite;
+	_pendingIndexedSprite.mask = _pendingIndexedSpriteMask.data();
+	_hasPendingIndexedSprite = true;
+	return true;
 }
 
 void GfxDefaultDriver::replaceCursor(const void *cursor, uint w, uint h, int hotspotX, int hotspotY, uint32 keycolor) {

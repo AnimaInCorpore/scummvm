@@ -60,6 +60,18 @@ static void copy8Col(byte *dst, int dstPitch, const byte *src, int height, uint8
 #endif
 static void clear8Col(byte *dst, int dstPitch, int height, uint8 bitDepth);
 
+static uint64 hashIndexedPixels(const byte *pixels, int pitch, int width, int height) {
+	uint64 hash = 1469598103934665603ULL;
+	for (int y = 0; y < height; ++y) {
+		for (int x = 0; x < width; ++x) {
+			hash ^= pixels[x];
+			hash *= 1099511628211ULL;
+		}
+		pixels += pitch;
+	}
+	return hash;
+}
+
 struct StripTable {
 	int offsets[160];
 	int run[160];
@@ -816,6 +828,22 @@ void ScummEngine::drawStripToScreen(VirtScreen *vs, int x, int width, int top, i
 		mac_drawBufferToScreen((const byte *)src, pitch, x, y, width, height);
 	} else {
 		// Finally blit the whole thing to the screen
+		if (_outputPixelFormat.bytesPerPixel == 1 && _system->supportsIndexedSprites()
+			&& !(x & 15) && !(width & 15)) {
+			Graphics::IndexedSprite sprite;
+			sprite.pixels = static_cast<const byte *>(src);
+			sprite.sourceWidth = width;
+			sprite.sourceHeight = height;
+			sprite.sourcePitch = pitch;
+			sprite.width = width;
+			sprite.height = height;
+			sprite.destX = x;
+			sprite.destY = y;
+			sprite.sourceHash = hashIndexedPixels(sprite.pixels, pitch, width, height);
+			sprite.cacheKey = sprite.sourceHash;
+			if (_system->drawIndexedSprite(sprite))
+				return;
+		}
 		_system->copyRectToScreen(src, pitch, x, y, width, height);
 	}
 }

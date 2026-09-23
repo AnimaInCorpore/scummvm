@@ -172,6 +172,14 @@ void ModularGraphicsBackend::copyRectToScreen(const void *buf, int pitch, int x,
 	_graphicsManager->copyRectToScreen(buf, pitch, x, y, w, h);
 }
 
+bool ModularGraphicsBackend::supportsIndexedSprites() const {
+	return _graphicsManager->supportsIndexedSprites();
+}
+
+bool ModularGraphicsBackend::drawIndexedSprite(const Graphics::IndexedSprite &sprite) {
+	return _graphicsManager->drawIndexedSprite(sprite);
+}
+
 Graphics::Surface *ModularGraphicsBackend::lockScreen() {
 	return _graphicsManager->lockScreen();
 }
@@ -327,4 +335,3 @@ Audio::Mixer *ModularMixerBackend::getMixer() {
 	assert(_mixerManager);
 	return getMixerManager()->getMixer();
 }
-

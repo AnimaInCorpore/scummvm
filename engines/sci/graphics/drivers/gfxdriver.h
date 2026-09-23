@@ -30,6 +30,7 @@
 
 namespace Graphics {
 	class Cursor;
+	struct IndexedSprite;
 }
 
 namespace Sci {
@@ -57,6 +58,7 @@ public:
 	virtual void copyCurrentBitmap(byte *dest, uint32 size) const = 0;
 	virtual void copyCurrentPalette(byte *dest, int start, int num) const;
 	virtual void drawTextFontGlyph(const byte *src, int pitch, int hiresDestX, int hiresDestY, int hiresW, int hiresH, int transpColor, const PaletteMod *palMods, const byte *palModMapping) = 0;
+	virtual bool stageIndexedSprite(const Graphics::IndexedSprite &sprite) { return false; }
 	virtual byte remapTextColor(byte color) const { return color; }
 	virtual void setColorMap(const byte *colorMap) {}
 	virtual Common::Point getRealCoords(Common::Point &pos) const { return pos; }

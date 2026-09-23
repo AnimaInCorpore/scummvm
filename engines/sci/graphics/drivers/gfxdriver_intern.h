@@ -23,6 +23,8 @@
 #ifndef SCI_GRAPHICS_DRIVERS_GFXDRIVER_INTERN_H
 #define SCI_GRAPHICS_DRIVERS_GFXDRIVER_INTERN_H
 
+#include "common/array.h"
+#include "common/system.h"
 #include "common/platform.h"
 #include "sci/graphics/drivers/gfxdriver.h"
 
@@ -40,6 +42,7 @@ public:
 	void copyCurrentBitmap(byte *dest, uint32 size) const override;
 	void copyCurrentPalette(byte *dest, int start, int num) const override;
 	void drawTextFontGlyph(const byte*, int, int, int, int, int, int, const PaletteMod*, const byte*) override; // Only for HiRes fonts. Not implemented here.
+	bool stageIndexedSprite(const Graphics::IndexedSprite &sprite) override;
 	bool supportsPalIntensity() const override { return true; }
 	bool supportsHiResGraphics() const override { return false; }
 	bool driverBasedTextRendering() const override { return false; }
@@ -60,6 +63,9 @@ protected:
 	ColorConvProc _colorConv;
 	typedef void (*ColorConvModProc)(byte*, const byte*, int, int, int, const byte*, const byte*, Graphics::PixelFormat&, const PaletteMod*, const byte*);
 	ColorConvModProc _colorConvMod;
+	Graphics::IndexedSprite _pendingIndexedSprite;
+	Common::Array<byte> _pendingIndexedSpriteMask;
+	bool _hasPendingIndexedSprite = false;
 private:
 	void generateOutput(byte *dst, const byte *src, int pitch, int w, int h, const PaletteMod *palMods, const byte *palModMapping);
 };
