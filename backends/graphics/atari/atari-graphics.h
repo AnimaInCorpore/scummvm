@@ -226,6 +226,10 @@ private:
 
 	AtariSurface _chunkySurface;
 	Graphics::Surface _chunkySurfaceOffsetted;
+#ifdef ATARI_DSP_C2P
+	// The 68030 may continue drawing while DMA reads the stable frame copy.
+	AtariSurface _dspInputSurface;
+#endif
 
 	enum {
 		kOverlayVisible,

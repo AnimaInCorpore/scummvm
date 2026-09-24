@@ -191,17 +191,19 @@ the 68030 quiet and 170-175 ms with it busy.
 
 The ScummVM Falcon build `backends/platform/atari/build-falcon030-dspc2p.sh`
 (`ATARI_DSP_C2P`) boots this kernel, from `dsp-c2p-image.h`, which
-`gen-image-header.py` writes during `build.sh`. In triple-buffer graphics
-mode, when the DSP is available, `updateScreenDsp()` points DMA record at the
-currently displayed planar surface:
+`gen-image-header.py` writes during `build.sh`. When the DSP is available,
+`updateScreenDsp()` points DMA record at a hidden planar surface:
 
-- The DSP writes each converted group into that surface while video scanout
-  reads it. The screen can show a partially converted frame.
 - `updateScreen()` returns while conversion continues, so the 68030 runs the
-  game at the same time. After DMA stops, the backend clears the data cache
-  and redraws the cursor; no buffer flip is needed.
-- With the DSP, `gfx_mode=direct` takes the same path: the engine draws
-  into the chunky surface, and the DSP converts it into the front buffer.
+  game at the same time. Scanout keeps reading the previous complete frame.
+  After DMA stops, the backend clears the data cache, redraws the cursor, and
+  queues the completed surface for a VBL page flip.
+- Before starting DMA, the backend snapshots the chunky frame into ST-RAM so
+  the engine can draw its next frame without changing DMA's input mid-transfer.
+- The existing three-surface rotation protects the front page, a surface
+  pending its VBL flip, and the next conversion target.
+- With the DSP, `gfx_mode=direct` and `gfx_mode=single` also use the hidden
+  surface and VBL flip, rather than writing into the scanned-out page.
 - The overlay, and a cursor moving over an unchanged frame, stay on the
   68030. If DSP startup fails, ordinary triple buffering remains in use.
 

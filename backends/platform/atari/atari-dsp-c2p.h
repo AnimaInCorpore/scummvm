@@ -34,10 +34,10 @@
 // devtools/atari-falcon030/tools/ssi-dma-c2p/dsp/hsc2p.asm; the DSP and the
 // sound DMA belong to it, so the build plays no sound.
 //
-// One screen at a time: start() returns at once, and the 68030 runs the
-// game while the DMA and the DSP convert directly into the displayed planar
-// screen. Scanout can see the conversion in progress. The chunky pixels must
-// stay put until busy() turns false; finish() clears the data cache after DMA.
+// One screen at a time: start() returns at once, and the 68030 runs the game
+// while the DMA and the DSP convert into a hidden planar screen. The graphics
+// backend queues that screen for a VBL page flip only after busy() turns false;
+// finish() clears the data cache after DMA.
 namespace AtariDspC2p {
 
 // Boots the kernel and takes the sound system; false leaves both alone.
