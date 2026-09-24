@@ -473,7 +473,7 @@ Common::Error ScummMetaEngine::createInstance(OSystem *syst, Engine **engine,
 
 	// Finally, we have massaged the GameDescriptor to our satisfaction, and can
 	// instantiate the appropriate game engine. Hooray!
-#ifdef ATARI_FALCON_GAME_ONLY
+#if defined(ATARI_FALCON_GAME_ONLY) && !defined(ATARI_DSP_C2P)
 	// The Falcon build is deliberately a profile of four DOS games that share
 	// the AdLib driver its DSP synthesizes for: Fate of Atlantis, Monkey
 	// Island 1 (its v5 editions) and Monkey Island 2 (v5), and Day of the
