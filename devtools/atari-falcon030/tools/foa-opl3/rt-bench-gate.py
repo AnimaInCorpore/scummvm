@@ -246,10 +246,12 @@ def main():
     print(json.dumps(result, indent=2))
     if any(not case["bit_exact"] for case in cases):
         raise SystemExit("the DSP output differs from the host reference")
-    missed = [key for key in PATHS if not cases[1]["paths_exercised"][key]]
+    paths = next(case for case in cases if case["scenario"] == "paths")
+    missed = [key for key in PATHS if not paths["paths_exercised"][key]]
     if missed:
         raise SystemExit(f"the paths case no longer reaches: {', '.join(missed)}")
-    missed = [key for key in RHYTHM_PATHS if not cases[2]["paths_exercised"][key]]
+    rhythm = next(case for case in cases if case["scenario"] == "rhythm")
+    missed = [key for key in RHYTHM_PATHS if not rhythm["paths_exercised"][key]]
     if missed:
         raise SystemExit(f"the rhythm case no longer reaches: {', '.join(missed)}")
 
