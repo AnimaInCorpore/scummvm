@@ -251,6 +251,67 @@ void checkPause() {
 		fail("pause test did not resume an audible voice");
 }
 
+// A slow attack is temporarily inaudible, not an oscillator start delay.
+// Both operators share the channel clock even when a render path omits one.
+void checkSilentPhase() {
+	for (int connection = 0; connection < 2; ++connection)
+		for (int slow = 0; slow < 2; ++slow)
+			for (int ar = 1; ar <= 4; ++ar) {
+				Pair p;
+				for (int which = 0; which < 2; ++which) {
+					p.write(0x20 + 3 * which, 0x61); // shared vibrato too
+					p.write(0x60 + 3 * which, (which == slow ? ar : 15) << 4);
+				}
+				p.write(0xc0, connection);
+				p.write(0xa0, 0x41);
+				p.write(0xb0, 0x32);
+				for (int b = 0; b < 2100; ++b) {
+					p.renderBlocks(1);
+					if (p.practical.op[0].phase != p.practical.op[1].phase) {
+						fail("silent attack stopped phase", connection, slow, ar, b);
+						break;
+					}
+				}
+			}
+
+	// A carrier's silence must not change its modulator's phase or feedback.
+	Pair silent, audible;
+	for (Pair *p : { &silent, &audible }) {
+		p->write(0x20, 0x21); p->write(0x23, 0x21);
+		p->write(0x60, 0xf0); p->write(0x63, p == &silent ? 0 : 0xf0);
+		p->write(0xc0, 0x0a);
+		p->write(0xa0, 0x41); p->write(0xb0, 0x32);
+	}
+	for (int b = 0; b < 100; ++b) {
+		silent.renderBlocks(1); audible.renderBlocks(1);
+		if (silent.practical.op[0].phase != audible.practical.op[0].phase
+		    || silent.practical.ch[0].hist0 != audible.practical.ch[0].hist0
+		    || silent.practical.ch[0].hist1 != audible.practical.ch[0].hist1)
+			fail("silent carrier stopped feedback", b);
+	}
+
+	// Rhythm owns the hi-hat and cymbal phases; the otherwise unused snare
+	// oscillator and silent tom must keep time without stepping the cymbal twice.
+	Pair p;
+	for (int c = 6; c < 9; ++c) {
+		for (int which = 0; which < 2; ++which) {
+			const int offset = 0x10 + c - 6 + 3 * which;
+			p.write(0x20 + offset, 0x21);
+			p.write(0x60 + offset, which ? 0xf0 : 0x30);
+		}
+		p.write(0xc0 + c, 0x0b);
+		p.write(0xa0 + c, 0x41); p.write(0xb0 + c, 0x32);
+	}
+	for (int b = 0; b < 600; ++b) {
+		if (b == 0 || b == 300)
+			p.write(0xbd, b == 0 ? 0x3f : 0);
+		p.renderBlocks(1);
+		for (int op = 13; op < 18; ++op)
+			if (p.practical.op[op].phase != p.practical.op[12].phase)
+				fail("rhythm oscillator lost phase", b, op);
+	}
+}
+
 void checkReset() {
 	Pair p;
 	p.write(0x01, 0x20);
@@ -473,6 +534,7 @@ int main() {
 	const unsigned long levels = checkSustainLevel(&settled);
 	const unsigned attacks = checkAttackChanges();
 	checkPause();
+	checkSilentPhase();
 	checkReset();
 	const unsigned long selections = checkRhythmSelection();
 	const unsigned rhythmWrites = checkRhythmKeys();

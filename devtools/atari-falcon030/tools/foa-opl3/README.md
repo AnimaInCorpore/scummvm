@@ -456,6 +456,23 @@ the operators, feedback and LFOs, emits PCM alone, and resumes the same FM
 samples as an uninterrupted reference. The DSP paths benchmark exercises
 both held-attack cases and pause/resume against this host reference.
 
+The 2026-09-24 accuracy review fixes another distinction: skipping an
+inaudible operator's waveform calculation must still advance its phase.
+Unequal attacks could otherwise leave additive operators permanently out
+of phase; one reproduced patch lost 12.90 dB after both attacks finished.
+Silent operators now keep time, feedback continues behind a silent
+carrier, and entering or leaving rhythm mode preserves each oscillator's
+phase. The unit suite checks these invariants, and the DSP benchmark's
+`phase` scenario exposes them through later register changes. The
+[accuracy regression results](accuracy-regression-results.json) record
+the host, DSP and stream checks, including their source hashes.
+
+The same review corrects the tremolo period measurement: short RMS
+windows contain carrier ripple, whose first autocorrelation peak is not
+the AM period. Smoothing and selecting a strong repeating peak measures
+270 ms at both depths. `test-practical-gate.py` checks known modulation
+clocks at the normal, half and double rates.
+
 [practical-gate.py](practical-gate.py) scores it against the exact kernel
 on synthetic scenarios and the captured 60-second Atlantis stream, at each
 signal's own rate, on what a listener would notice. Every note of a
@@ -979,6 +996,7 @@ The practical kernel's gates, in the same tree:
 make -C devtools/atari-falcon030/tools/foa-opl3/build/headless \
   -f Makefile -f ../../kernel.mk opl-practical-unit-test opl-practical-test opl-rt-fixture
 devtools/atari-falcon030/tools/foa-opl3/build/headless/opl-practical-unit-test
+python3 devtools/atari-falcon030/tools/foa-opl3/test-practical-gate.py
 python3 devtools/atari-falcon030/tools/foa-opl3/practical-gate.py \
   --trace <opl-writes.ev> --rhythm-trace <cruise opl-writes.ev> --seconds 60 --wav \
   --output build-falcon030/opl3-practical

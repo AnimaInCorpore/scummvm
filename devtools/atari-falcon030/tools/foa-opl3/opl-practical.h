@@ -123,7 +123,8 @@ enum ChannelMode {
 	// rhythm mode: the bass drum's three shapes, the tom-tom, and channel
 	// seven standing for the hi-hat, the snare and the cymbal together
 	kModeBassCarrier = 8, kModeBassFmFeedback = 9, kModeBassFmPlain = 10, kModeTom = 11,
-	kModeDrums = 12, kModeDrumsSilent = 13
+	kModeDrums = 12, kModeDrumsSilent = 13,
+	kModeFeedbackOnly = 14, kModeBassAddFeedback = 15, kModeTomSilent = 16
 };
 
 // The rhythm section's operators, by record index.
@@ -410,12 +411,14 @@ static void rhythmBoundary(Chip *chip) {
 	switch (bass.w[CH_MODE]) {
 	case kModeFmFeedback: bass.w[CH_MODE] = kModeBassFmFeedback; break;
 	case kModeFmPlain: bass.w[CH_MODE] = kModeBassFmPlain; break;
+	case kModeAddFeedback: bass.w[CH_MODE] = kModeBassAddFeedback; break;
+	case kModeModOnlyFeedback: bass.w[CH_MODE] = kModeFeedbackOnly; break;
+	case kModeFeedbackOnly: break;
 	case kModeCarrierOnly:
-	case kModeAddFeedback:
 	case kModeAddPlain: bass.w[CH_MODE] = kModeBassCarrier; break;   // the carrier alone, whatever the connection
 	default: bass.w[CH_MODE] = kModeSkip; break;
 	}
-	chip->ch[kChannelTom].w[CH_MODE] = rhythmGain(chip->op[kOpTom]) ? kModeTom : kModeSkip;
+	chip->ch[kChannelTom].w[CH_MODE] = rhythmGain(chip->op[kOpTom]) ? kModeTom : kModeTomSilent;
 
 	const Op *drums[3] = { &chip->op[kOpHiHat], &chip->op[kOpCymbal], &chip->op[kOpSnare] };
 	const int32_t gains[3] = { rhythmGain(*drums[0]), rhythmGain(*drums[1]), rhythmGain(*drums[2]) };
@@ -457,7 +460,7 @@ static void blockBoundary(Chip *chip) {
 		const bool feedback = ch.w[CH_FBMUL] != 0;
 		int32_t mode;
 		if (!ch.w[CH_CONN]) {
-			mode = carSilent ? kModeSkip : modSilent ? kModeCarrierOnly
+			mode = carSilent ? (!modSilent && feedback ? kModeFeedbackOnly : kModeSkip) : modSilent ? kModeCarrierOnly
 			                             : feedback ? kModeFmFeedback : kModeFmPlain;
 		} else if (modSilent) {
 			mode = carSilent ? kModeSkip : kModeCarrierOnly;
@@ -466,7 +469,7 @@ static void blockBoundary(Chip *chip) {
 		} else {
 			mode = feedback ? kModeAddFeedback : kModeAddPlain;
 		}
-		if (mode == kModeSkip)
+		if (modSilent || mode == kModeSkip)
 			ch.hist0 = ch.hist1 = 0;
 		ch.w[CH_MODE] = mode;
 	}
@@ -484,6 +487,14 @@ static inline int32_t phaseIndex(const Op &op) { return (int32_t)(op.phase >> 24
 
 static inline void advance(Op &op) {
 	op.phase = (op.phase + (uint64_t)op.w[OP_INC] * 2046u) & 0x3ffffffffull;
+}
+
+// Omitting an inaudible product must not stop its oscillator. In particular,
+// unequal attacks still start in phase, and a silent carrier must not freeze
+// a sounding modulator. Read the current increment even for idle operators,
+// whose cached render parameters may be stale (rhythm can use their phases).
+static inline void advanceSilent(Chip *chip, Op &op) {
+	op.phase = (op.phase + (uint64_t)rhythmIncrement(chip, op) * (2046u * kBlockFrames)) & 0x3ffffffffull;
 }
 
 static inline int32_t fetch(const Op &op, int32_t index) {
@@ -600,6 +611,7 @@ static inline void renderBlock(Chip *chip, const int32_t *pcm, int32_t *out) {
 		Op &car = chip->op[slotOfChannel(c, 1)];
 		switch (ch.w[CH_MODE]) {
 		case kModeCarrierOnly:
+			advanceSilent(chip, mod);
 			independentAccumulate(chip, car);
 			break;
 		case kModeFmFeedback:
@@ -620,11 +632,22 @@ static inline void renderBlock(Chip *chip, const int32_t *pcm, int32_t *out) {
 			break;
 		case kModeModOnlyFeedback:
 			feedbackStage(chip, ch, mod, true);
+			advanceSilent(chip, car);
 			break;
 		case kModeModOnlyPlain:
 			independentAccumulate(chip, mod);
+			advanceSilent(chip, car);
+			break;
+		case kModeFeedbackOnly:
+			feedbackStage(chip, ch, mod, false);
+			advanceSilent(chip, car);
+			break;
+		case kModeBassAddFeedback:
+			feedbackStage(chip, ch, mod, false);
+			independentAccumulate(chip, car, true);
 			break;
 		case kModeBassCarrier:
+			advanceSilent(chip, mod);
 			independentAccumulate(chip, car, true);
 			break;
 		case kModeBassFmFeedback:
@@ -638,13 +661,20 @@ static inline void renderBlock(Chip *chip, const int32_t *pcm, int32_t *out) {
 		case kModeTom:
 			independentAccumulate(chip, mod, true);
 			break;
+		case kModeTomSilent:
+			advanceSilent(chip, mod); // the drum stage advances this channel's cymbal
+			break;
 		case kModeDrums:
+			advanceSilent(chip, car); // the snare's own phase matters on leaving rhythm mode
 			drumStage(chip);
 			break;
 		case kModeDrumsSilent:
+			advanceSilent(chip, car);
 			drumStageSilent(chip);
 			break;
 		default:
+			advanceSilent(chip, mod);
+			advanceSilent(chip, car);
 			break;
 		}
 	}

@@ -8,7 +8,7 @@
 //   block count, event count, and (block << 16 | address), value pairs.
 // EXPECT.BIN holds every chunk's output words in order, 24 bits each.
 //
-// usage: opl-rt-fixture <trace|stress|paths|rhythm> <opldata.bin> <expect.bin>
+// usage: opl-rt-fixture <trace|stress|paths|rhythm|phase> <opldata.bin> <expect.bin>
 //                       [--trace opl-writes.ev] [--from S] [--seconds N]
 //                       [--chunk-blocks N] [--play playdata.bin]
 //
@@ -266,6 +266,36 @@ std::vector<RegisterWrite> rhythmScript(double seconds) {
 	return writes;
 }
 
+// Unequal attacks, feedback behind a silent carrier, and rhythm entered
+// and left under held keys. Later writes expose the previously silent
+// oscillators, so stopping or double-stepping one changes the output.
+std::vector<RegisterWrite> phaseScript(double seconds) {
+	std::vector<RegisterWrite> writes;
+	for (int c = 0; c < 9; ++c) {
+		for (int which = 0; which < 2; ++which) {
+			const int offset = kModOffset[c] + 3 * which;
+			writes.push_back(RegisterWrite{0, (uint16)(0x20 + offset), 0x61});
+			const uint8 attack = (c & 1) == which ? 0xf0 : (c < 2 ? 0x30 : 0);
+			writes.push_back(RegisterWrite{0, (uint16)(0x60 + offset), attack});
+			if (!attack)
+				writes.push_back(RegisterWrite{seconds * 0.25, (uint16)(0x60 + offset), 0x70});
+		}
+		writes.push_back(RegisterWrite{0, (uint16)(0xc0 + c), (uint8)(c < 2 ? 1 : 0x0a | (c & 1))});
+		writes.push_back(RegisterWrite{0, (uint16)(0xa0 + c), 0x41});
+		writes.push_back(RegisterWrite{0, (uint16)(0xb0 + c), 0x32});
+		writes.push_back(RegisterWrite{seconds * 0.75, (uint16)(0xc0 + c), 0x0b});
+	}
+	writes.push_back(RegisterWrite{seconds * 0.1, 0xbd, 0x3f});
+	writes.push_back(RegisterWrite{seconds * 0.6, 0xbd, 0});
+	for (size_t i = 1; i < writes.size(); ++i)
+		for (size_t j = i; j > 0 && writes[j].seconds < writes[j - 1].seconds; --j) {
+			const RegisterWrite moved = writes[j];
+			writes[j] = writes[j - 1];
+			writes[j - 1] = moved;
+		}
+	return writes;
+}
+
 std::vector<RegisterWrite> traceScript(const char *path, double seconds, double from) {
 	std::vector<RegisterWrite> writes;
 	FILE *file = std::fopen(path, "r");
@@ -309,7 +339,7 @@ std::vector<RegisterWrite> traceScript(const char *path, double seconds, double 
 
 int main(int argc, char **argv) {
 	if (argc < 4) {
-		std::fprintf(stderr, "usage: opl-rt-fixture <trace|stress|paths|rhythm> <opldata.bin> <expect.bin>"
+		std::fprintf(stderr, "usage: opl-rt-fixture <trace|stress|paths|rhythm|phase> <opldata.bin> <expect.bin>"
 		                     " [--trace file] [--seconds N] [--chunk-blocks N]\n");
 		return 2;
 	}
@@ -342,6 +372,8 @@ int main(int argc, char **argv) {
 		writes = pathsScript(seconds);
 	else if (scenario == "rhythm")
 		writes = rhythmScript(seconds);
+	else if (scenario == "phase")
+		writes = phaseScript(seconds);
 	else if (scenario == "trace" && trace)
 		writes = traceScript(trace, seconds, from);
 	else
@@ -493,7 +525,8 @@ int main(int argc, char **argv) {
 				drumBlocks += chip.ch[P::kChannelDrums].w[P::CH_MODE] == P::kModeDrums;
 				drumSilentBlocks += chip.ch[P::kChannelDrums].w[P::CH_MODE] == P::kModeDrumsSilent;
 				tomBlocks += chip.ch[P::kChannelTom].w[P::CH_MODE] == P::kModeTom;
-				bassCarrierBlocks += chip.ch[P::kChannelBass].w[P::CH_MODE] == P::kModeBassCarrier;
+				bassCarrierBlocks += chip.ch[P::kChannelBass].w[P::CH_MODE] == P::kModeBassCarrier
+				                     || chip.ch[P::kChannelBass].w[P::CH_MODE] == P::kModeBassAddFeedback;
 				bassFeedbackBlocks += chip.ch[P::kChannelBass].w[P::CH_MODE] == P::kModeBassFmFeedback;
 				bassPlainBlocks += chip.ch[P::kChannelBass].w[P::CH_MODE] == P::kModeBassFmPlain;
 				drumVibratoBlocks += chip.ch[P::kChannelDrums].w[P::CH_MODE] == P::kModeDrums

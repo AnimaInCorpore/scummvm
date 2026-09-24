@@ -1,0 +1,355 @@
+{
+  "date": "2026-09-24",
+  "gate": "OPL2 silent-operator phase, feedback and tremolo measurement regressions",
+  "base_commit": "6ad5c078c90e3672781046e349ae81e3cfd889b1",
+  "block_frames": 48,
+  "source_sha256": {
+    "opl-practical.h": "3f08ca2ae48200f50cbc3ebf518eb6e323767d3cc800b3d060935de8810652df",
+    "dsp/oplrt.asm": "da70181a328212a89a536ff7a674296cfdfdd36b5afedc2d70f6c6d3a4698245",
+    "practical-unit-test.cpp": "26d691d9615ecff8a3ecc57aee2bfa667193b6928ff4aad5735d2d7262f2776d",
+    "practical-gate.py": "b25875322bf39b069740386272b74e81c0aea8e5bfe64c8b8f21063f311c79a0",
+    "test-practical-gate.py": "c7f9de809283933001a38b7bf6a60e2164bac31200140143d068aae97cba0f18",
+    "rt-fixture.cpp": "b606befacb496628865d47f88d0c63dd57d5f2312f7cae857b69499a78dea2f0",
+    "rt-bench-gate.py": "7b0c0dbee97c279955f63d5c54769a44a8f618c4b3aabaed115464b03b711c1e",
+    "rt-stream-gate.py": "3888a94336ffd705651d87d63f707a4f3ebecf3e779102b87a587006ccb8fd99"
+  },
+  "host_unit_tests": {
+    "increments_checked": 2097152,
+    "sustain_level_cases": 576,
+    "sustain_level_cases_settled_alike": 567,
+    "attack_change_cases": 38,
+    "rhythm_phase_selections": 4194304,
+    "rhythm_key_writes": 4000,
+    "failures": 0
+  },
+  "phase_regressions": [
+    "Unequal attacks in either operator, FM and additive connections, with vibrato",
+    "Feedback continues behind a silent carrier",
+    "Held channel keys across rhythm entry and exit; each oscillator advances once"
+  ],
+  "lfo_measurement_tests": {
+    "tests_passed": 2,
+    "known_tremolo_rates_hz": [
+      1.85,
+      3.7,
+      7.4
+    ],
+    "depths_db": [
+      1.125,
+      4.875
+    ],
+    "period_tolerance_s": 0.006
+  },
+  "quality_gate": {
+    "scenarios": [
+      {
+        "name": "tone",
+        "failures": []
+      },
+      {
+        "name": "pitch",
+        "failures": []
+      },
+      {
+        "name": "envelope",
+        "failures": []
+      },
+      {
+        "name": "waveforms",
+        "failures": []
+      },
+      {
+        "name": "feedback",
+        "failures": []
+      },
+      {
+        "name": "high-pitch",
+        "failures": []
+      },
+      {
+        "name": "tremolo",
+        "failures": []
+      },
+      {
+        "name": "vibrato",
+        "failures": []
+      },
+      {
+        "name": "polyphony",
+        "failures": []
+      },
+      {
+        "name": "rhythm",
+        "failures": []
+      }
+    ],
+    "passed": true,
+    "tremolo_period_s": 0.27
+  },
+  "dsp_bench": [
+    {
+      "scenario": "phase",
+      "block_frames": 48,
+      "seconds": 1.0,
+      "frames": 49152,
+      "blocks": 1024,
+      "chunks": 13,
+      "register_writes": 81,
+      "parameter_events": 509,
+      "peak_events_per_chunk": 494,
+      "paths_exercised": {
+        "blocks_decaying_past_sustain_level": 0,
+        "blocks_entering_sustain_above_level": 0,
+        "blocks_with_negative_increment": 0,
+        "blocks_with_vibrato": 759,
+        "blocks_paused": 0,
+        "blocks_holding_attack_zero": 255,
+        "blocks_holding_attack_max": 0,
+        "blocks_with_drums": 512,
+        "blocks_with_silent_drums": 0,
+        "blocks_with_tom": 512,
+        "blocks_with_bass_carrier_alone": 0,
+        "blocks_with_bass_feedback_fm": 358,
+        "blocks_with_bass_plain_fm": 0,
+        "blocks_with_drum_vibrato": 382,
+        "blocks_melodic_after_rhythm": 410
+      },
+      "frame_words_compared": 49152,
+      "mismatches_against_host_kernel": 0,
+      "first_mismatch_frame": null,
+      "bit_exact": true,
+      "instruction_cycles_per_frame": 215.53,
+      "instruction_cycles_per_frame_by_range": {
+        "stages": 149.97,
+        "op_boundary": 23.83,
+        "stream_emit": 0.0,
+        "trigger_attack": 0.01,
+        "render_driver": 6.65,
+        "loaders_and_modes": 9.1,
+        "clear_mix": 1.12,
+        "emit": 5.19,
+        "block_and_channel_boundary": 18.65,
+        "render_block": 0.54,
+        "apply_events": 0.47
+      },
+      "budget_cycles_per_frame": 326.27,
+      "budget_use_percent": 66.1
+    },
+    {
+      "scenario": "stress",
+      "block_frames": 48,
+      "seconds": 1.0,
+      "frames": 49152,
+      "blocks": 1024,
+      "chunks": 13,
+      "register_writes": 146,
+      "parameter_events": 637,
+      "peak_events_per_chunk": 574,
+      "paths_exercised": {
+        "blocks_decaying_past_sustain_level": 0,
+        "blocks_entering_sustain_above_level": 0,
+        "blocks_with_negative_increment": 0,
+        "blocks_with_vibrato": 759,
+        "blocks_paused": 0,
+        "blocks_holding_attack_zero": 0,
+        "blocks_holding_attack_max": 0,
+        "blocks_with_drums": 0,
+        "blocks_with_silent_drums": 0,
+        "blocks_with_tom": 0,
+        "blocks_with_bass_carrier_alone": 0,
+        "blocks_with_bass_feedback_fm": 0,
+        "blocks_with_bass_plain_fm": 0,
+        "blocks_with_drum_vibrato": 0,
+        "blocks_melodic_after_rhythm": 0
+      },
+      "frame_words_compared": 49152,
+      "mismatches_against_host_kernel": 0,
+      "first_mismatch_frame": null,
+      "bit_exact": true,
+      "instruction_cycles_per_frame": 248.38,
+      "instruction_cycles_per_frame_by_range": {
+        "stages": 185.06,
+        "op_boundary": 26.03,
+        "stream_emit": 0.0,
+        "trigger_attack": 0.01,
+        "render_driver": 6.65,
+        "loaders_and_modes": 9.19,
+        "clear_mix": 1.12,
+        "emit": 5.19,
+        "block_and_channel_boundary": 14.06,
+        "render_block": 0.54,
+        "apply_events": 0.53
+      },
+      "budget_cycles_per_frame": 326.27,
+      "budget_use_percent": 76.1
+    },
+    {
+      "scenario": "rhythm",
+      "block_frames": 48,
+      "seconds": 1.0,
+      "frames": 49152,
+      "blocks": 1024,
+      "chunks": 13,
+      "register_writes": 198,
+      "parameter_events": 1127,
+      "peak_events_per_chunk": 574,
+      "paths_exercised": {
+        "blocks_decaying_past_sustain_level": 0,
+        "blocks_entering_sustain_above_level": 0,
+        "blocks_with_negative_increment": 0,
+        "blocks_with_vibrato": 633,
+        "blocks_paused": 0,
+        "blocks_holding_attack_zero": 0,
+        "blocks_holding_attack_max": 0,
+        "blocks_with_drums": 694,
+        "blocks_with_silent_drums": 268,
+        "blocks_with_tom": 619,
+        "blocks_with_bass_carrier_alone": 39,
+        "blocks_with_bass_feedback_fm": 313,
+        "blocks_with_bass_plain_fm": 297,
+        "blocks_with_drum_vibrato": 348,
+        "blocks_melodic_after_rhythm": 48
+      },
+      "frame_words_compared": 49152,
+      "mismatches_against_host_kernel": 0,
+      "first_mismatch_frame": null,
+      "bit_exact": true,
+      "instruction_cycles_per_frame": 208.09,
+      "instruction_cycles_per_frame_by_range": {
+        "stages": 139.92,
+        "op_boundary": 22.94,
+        "stream_emit": 0.0,
+        "trigger_attack": 0.04,
+        "render_driver": 6.65,
+        "loaders_and_modes": 9.06,
+        "clear_mix": 1.12,
+        "emit": 5.19,
+        "block_and_channel_boundary": 21.65,
+        "render_block": 0.54,
+        "apply_events": 0.98
+      },
+      "budget_cycles_per_frame": 326.27,
+      "budget_use_percent": 63.8
+    },
+    {
+      "scenario": "paths",
+      "block_frames": 48,
+      "seconds": 1.0,
+      "frames": 49152,
+      "blocks": 1024,
+      "chunks": 13,
+      "register_writes": 229,
+      "parameter_events": 1214,
+      "peak_events_per_chunk": 574,
+      "paths_exercised": {
+        "blocks_decaying_past_sustain_level": 169,
+        "blocks_entering_sustain_above_level": 1,
+        "blocks_with_negative_increment": 124,
+        "blocks_with_vibrato": 629,
+        "blocks_paused": 102,
+        "blocks_holding_attack_zero": 543,
+        "blocks_holding_attack_max": 257,
+        "blocks_with_drums": 0,
+        "blocks_with_silent_drums": 0,
+        "blocks_with_tom": 0,
+        "blocks_with_bass_carrier_alone": 0,
+        "blocks_with_bass_feedback_fm": 0,
+        "blocks_with_bass_plain_fm": 0,
+        "blocks_with_drum_vibrato": 0,
+        "blocks_melodic_after_rhythm": 0
+      },
+      "frame_words_compared": 49152,
+      "mismatches_against_host_kernel": 0,
+      "first_mismatch_frame": null,
+      "bit_exact": true,
+      "instruction_cycles_per_frame": 197.83,
+      "instruction_cycles_per_frame_by_range": {
+        "stages": 140.61,
+        "op_boundary": 21.72,
+        "stream_emit": 0.0,
+        "trigger_attack": 0.03,
+        "render_driver": 5.98,
+        "loaders_and_modes": 8.42,
+        "clear_mix": 1.12,
+        "emit": 5.19,
+        "block_and_channel_boundary": 13.2,
+        "render_block": 0.54,
+        "apply_events": 1.02
+      },
+      "budget_cycles_per_frame": 326.27,
+      "budget_use_percent": 60.6
+    }
+  ],
+  "streams": [
+    {
+      "date": "2026-09-24",
+      "gate": "practical OPL kernel stream mode on the emulated Falcon: transport, timing, exactness",
+      "source_sha256": {
+        "dsp/oplrt.asm": "da70181a328212a89a536ff7a674296cfdfdd36b5afedc2d70f6c6d3a4698245",
+        "m68k/oplplay.s": "cc70bb0cc91a13cacf9ec7c9ddc41863ce8dfcac5931f083d78926fed2517d22",
+        "rt-fixture.cpp": "b606befacb496628865d47f88d0c63dd57d5f2312f7cae857b69499a78dea2f0",
+        "opl-practical.h": "3f08ca2ae48200f50cbc3ebf518eb6e323767d3cc800b3d060935de8810652df"
+      },
+      "scenario": "stress",
+      "trace_sha256": null,
+      "trace_from_s": null,
+      "seconds": 1.0,
+      "periods_submitted": 64,
+      "periods_rendered": 64,
+      "late_periods": 0,
+      "register_writes": 146,
+      "parameter_events": 637,
+      "checksum_expected": 11786712,
+      "checksum_dsp": 11786712,
+      "word_exact": true,
+      "on_time": true,
+      "block_frames": 48,
+      "min_slack_frames": 106,
+      "min_slack_ms": 2.166,
+      "min_slack_percent_of_period": 13.9,
+      "starvation": null,
+      "not_established": [
+        "No audio captured or auditioned from the emulator; the checksum proves the rendered words",
+        "The 68030 here does nothing but submit periods; a game's load is not modelled",
+        "No hardware run"
+      ]
+    },
+    {
+      "date": "2026-09-24",
+      "gate": "practical OPL kernel stream mode on the emulated Falcon: transport, timing, exactness",
+      "source_sha256": {
+        "dsp/oplrt.asm": "da70181a328212a89a536ff7a674296cfdfdd36b5afedc2d70f6c6d3a4698245",
+        "m68k/oplplay.s": "cc70bb0cc91a13cacf9ec7c9ddc41863ce8dfcac5931f083d78926fed2517d22",
+        "rt-fixture.cpp": "b606befacb496628865d47f88d0c63dd57d5f2312f7cae857b69499a78dea2f0",
+        "opl-practical.h": "3f08ca2ae48200f50cbc3ebf518eb6e323767d3cc800b3d060935de8810652df"
+      },
+      "scenario": "rhythm",
+      "trace_sha256": null,
+      "trace_from_s": null,
+      "seconds": 1.0,
+      "periods_submitted": 64,
+      "periods_rendered": 64,
+      "late_periods": 0,
+      "register_writes": 198,
+      "parameter_events": 1127,
+      "checksum_expected": 10645516,
+      "checksum_dsp": 10645516,
+      "word_exact": true,
+      "on_time": true,
+      "block_frames": 48,
+      "min_slack_frames": 104,
+      "min_slack_ms": 2.115,
+      "min_slack_percent_of_period": 13.5,
+      "starvation": null,
+      "not_established": [
+        "No audio captured or auditioned from the emulator; the checksum proves the rendered words",
+        "The 68030 here does nothing but submit periods; a game's load is not modelled",
+        "No hardware run"
+      ]
+    }
+  ],
+  "limitations": [
+    "Synthetic scenarios only in this rerun; archived game and captured-trace results were not replaced",
+    "DSP execution and timing checked in Hatari; no physical Falcon run"
+  ]
+}

@@ -316,25 +316,33 @@ def compare_spectra(ref_spectrum, cand_spectrum, note_hz, pitch_limit_hz):
     }
 
 
-def period_windows(values):
-    """Period of a periodic series in samples: the first autocorrelation
-    maximum after its first minimum."""
+def period_windows(values, min_lag=1, max_lag=None):
+    """Fundamental period in windows, or zero without a convincing repeat.
+
+    Normalize each overlap and select the earliest strong correlation peak:
+    a small local maximum can be carrier ripple, while the strongest peak
+    alone can be a multiple of the fundamental.
+    """
     n = len(values)
-    mean = sum(values) / n
-    c = [v - mean for v in values]
-    r = [sum(c[i] * c[i + lag] for i in range(n - lag)) / (n - lag) for lag in range(n // 2)]
-    lag = 1
-    while lag + 1 < len(r) and r[lag + 1] < r[lag]:
-        lag += 1
-    while lag + 1 < len(r) and r[lag + 1] > r[lag]:
-        lag += 1
-    return lag
+    limit = min(max_lag if max_lag is not None else n // 2, n // 2)
+    if limit <= min_lag or max(values, default=0) - min(values, default=0) < 1e-9:
+        return 0
+    r = [1.0] + [correlation(values[:-lag], values[lag:]) for lag in range(1, limit + 2)]
+    peaks = [lag for lag in range(min_lag, limit + 1)
+             if r[lag] >= r[lag - 1] and r[lag] > r[lag + 1]]
+    best = max([r[lag] for lag in peaks] or [0.0])
+    return next((lag for lag in peaks if r[lag] >= max(0.8, best * 0.98)), 0)
 
 
 def tremolo_metrics(pcm, rate, t0, t1):
     env = envelope(pcm[int(t0 * rate):int(t1 * rate)], rate, 0.005)
     depth = max(env) - min(env)
-    period = period_windows(env) * 0.005
+    # A 5 ms RMS window contains a fractional number of carrier cycles.
+    # Smooth that ripple before measuring the much slower AM oscillator.
+    # Search broadly enough to detect half/double-rate regressions, rather
+    # than constraining the answer to the chip's expected 270 ms period.
+    smooth = [sum(env[i:i + 5]) / 5.0 for i in range(len(env) - 4)]
+    period = period_windows(smooth, 15, 130) * 0.005
     return {"depth_db": round(depth, 3), "period_s": round(period, 4)}
 
 
@@ -574,7 +582,8 @@ def grade(result, polyphonic):
         # A note the chip plays without vibrato has no period to compare; the
         # zero-crossing pitch track of a steady sine jitters by 2 to 3 cents.
         modulated = e.get("depth_cents", 99.0) >= 5.0
-        if modulated and e["period_s"] and abs(p["period_s"] - e["period_s"]) > 0.03 * e["period_s"]:
+        if modulated and (not e["period_s"] or not p["period_s"]
+                          or abs(p["period_s"] - e["period_s"]) > 0.03 * e["period_s"]):
             failures.append("lfo rate")
     return failures
 

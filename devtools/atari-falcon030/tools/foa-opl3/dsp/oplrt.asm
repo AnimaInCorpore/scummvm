@@ -983,9 +983,11 @@ load_carrier_x0:                        ; x0 = mix gain, for the serial stage
 ; -------------------------------------------------------- channel modes
 
 mode_skip:
-        rts
+        jsr     advance_mod
+        jmp     advance_carrier
 
 mode_carrier_only:
+        jsr     advance_mod
         jsr     load_carrier
         jmp     stage_indep_mix
 
@@ -1014,16 +1016,47 @@ mode_add_plain:
         jmp     stage_indep_mix
 
 mode_mod_only_fb:
+        jsr     advance_carrier
         jsr     load_mod
         jmp     stage_mod_fb_mix
 
 mode_mod_only_plain:
+        jsr     advance_carrier
         jsr     load_mod
         jmp     stage_indep_mix
+
+; A silent FM carrier does not stop its sounding modulator's feedback.
+mode_feedback_only:
+        jsr     advance_carrier
+        jsr     load_mod_ring
+        jmp     stage_mod_fb
+
+; Skip waveform work, not phase time. Idle render parameters may be stale,
+; so derive the increment from the register record just as rhythm does.
+advance_carrier:
+        move    x:render_op,a
+        move    #>OP_STRIDE,x0
+        add     x0,a
+        move    a1,r1
+        jmp     advance_operator
+advance_mod:
+        move    x:render_op,r1
+advance_operator:
+        jsr     rb_increment
+        move    a1,x1
+        move    r1,r7
+        jmp     drums_skip_block
 
 ; ---------------------------------------------------- rhythm mode's modes
 
 mode_bass_carrier:
+        jsr     advance_mod
+        jsr     load_carrier
+        jmp     stage_indep_mix_neg
+
+mode_bass_add_fb:
+        jsr     load_mod_ring
+        jsr     stage_mod_fb             ; onward ring is unused, history keeps running
         jsr     load_carrier
         jmp     stage_indep_mix_neg
 
@@ -1043,8 +1076,12 @@ mode_tom:
         jsr     load_mod
         jmp     stage_indep_mix_neg
 
+mode_tom_silent:
+        jmp     advance_mod              ; cymbal belongs to the drum stage
+
 ; Channel seven stands for the hi-hat, the snare and the cymbal together.
 mode_drums:
+        jsr     advance_carrier          ; snare's own phase, for leaving rhythm mode
         move    x:noise_state,a
         move    #>NOISE_TAPS,x0
         move    #>NOISE_BITS,y0
@@ -1064,6 +1101,7 @@ mode_drums:
 ; With all three silent the two oscillators still run, since their phase
 ; bits shape whichever drum sounds next: a block's advance in one product.
 mode_drums_silent:
+        jsr     advance_carrier
         move    #>OP_BASE+OP_HIHAT*OP_STRIDE,r7
         move    x:rhythm_inc_hh,x1
         jsr     drums_skip_block
@@ -1207,12 +1245,20 @@ rhythm_boundary:
         move    #>mode_carrier_only,x0
         cmp     x0,a
         jeq     rb_bass_doubled
-        move    #>mode_add_fb,x0
-        cmp     x0,a
-        jeq     rb_bass_doubled
         move    #>mode_add_plain,x0
         cmp     x0,a
         jeq     rb_bass_doubled
+        move    #>mode_bass_add_fb,b
+        move    #>mode_add_fb,x0
+        cmp     x0,a
+        jeq     rb_bass_doubled
+        move    #>mode_feedback_only,b
+        move    #>mode_mod_only_fb,x0
+        cmp     x0,a
+        jeq     rb_bass_store
+        move    #>mode_feedback_only,x0
+        cmp     x0,a
+        jeq     rb_bass_store
         move    #>mode_skip,b
         jmp     rb_bass_store
 rb_bass_doubled:
@@ -1230,7 +1276,7 @@ rb_bass_store:
         move    #>mode_tom,b
         tst     a
         jne     rb_tom_store
-        move    #>mode_skip,b
+        move    #>mode_tom_silent,b
 rb_tom_store:
         move    b1,x:>CH_BASE+CH_TOM*CH_STRIDE
 
@@ -1362,7 +1408,7 @@ channel_boundary:
         jne     cb_additive
         move    x:ob_gain_car,a
         tst     a
-        jeq     cb_skip
+        jeq     cb_fm_silent
         move    x:ob_gain_mod,a
         tst     a
         jeq     cb_carrier_only
@@ -1374,6 +1420,15 @@ channel_boundary:
 cb_fm_plain:
         move    #>mode_fm_plain,a
         jmp     cb_store
+cb_fm_silent:
+        tst     b
+        jeq     cb_skip
+        move    x:ob_gain_mod,a
+        tst     a
+        jeq     cb_skip
+        move    #>mode_feedback_only,a
+        move    x:ob_gainmod_mod,x0
+        jmp     cb_store_pair
 cb_additive:
         move    x:ob_gain_mod,a
         tst     a
@@ -1383,7 +1438,7 @@ cb_additive:
         jeq     cb_skip
 cb_carrier_only:
         move    #>mode_carrier_only,a
-        jmp     cb_store
+        jmp     cb_clear_history
 cb_add_mod_on:
         move    x:ob_gain_car,a
         tst     a
@@ -1407,6 +1462,7 @@ cb_mod_only_plain:
         jmp     cb_store
 cb_skip:
         move    #>mode_skip,a
+cb_clear_history:
         clr     b
         move    b1,x:(r5)
         move    b1,y:(r5)

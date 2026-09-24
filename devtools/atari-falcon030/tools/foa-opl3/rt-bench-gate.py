@@ -184,6 +184,7 @@ def main():
     cases = [
         run_case("stress", ["stress", "--seconds", str(args.stress_seconds)], args.output, args.vbls),
         run_case("paths", ["paths", "--seconds", str(args.stress_seconds)], args.output, args.vbls),
+        run_case("phase", ["phase", "--seconds", str(args.stress_seconds)], args.output, args.vbls),
         run_case("rhythm", ["rhythm", "--seconds", str(args.stress_seconds)], args.output, args.vbls),
         run_case("atlantis", ["trace", "--trace", str(args.trace.resolve()), "--seconds", str(args.seconds)],
                  args.output, args.vbls),
