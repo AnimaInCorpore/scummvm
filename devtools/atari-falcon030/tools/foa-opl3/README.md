@@ -15,7 +15,7 @@ and its own committed result file.
 | Exact DSP synthesis loop: 209% at 32.78 kHz, 314% at 49.17 kHz, nine channels | [bench-results.json](bench-results.json) | `bench-gate.py` |
 | Practical kernel against the exact one | [practical-results.json](practical-results.json) | `practical-gate.py` |
 | Practical kernel's register semantics, word for word | [practical-unit-results.json](practical-unit-results.json) | `opl-practical-unit-test` |
-| Practical DSP kernel at 49.17 kHz in 48-frame blocks: word exact against its practical reference, rhythm included, 58-76% of budget before production transport/SSI | [rt-bench-results.json](rt-bench-results.json) | `rt-bench-gate.py` |
+| Practical DSP kernel at 49.17 kHz: the current path uses 32-frame blocks; the linked benchmark is the 48-frame baseline, word exact against its practical reference, rhythm included | [rt-bench-results.json](rt-bench-results.json) | `rt-bench-gate.py` |
 | Stream mode through the SSI: word exact, no late period, also under the worst-case load, whose tightest period leaves 2.17 ms | [rt-stream-results.json](rt-stream-results.json), [rt-stream-stress-results.json](rt-stream-stress-results.json) | `rt-stream-gate.py` |
 | The same with rhythm mode: every shape of it, and Cruise for a Corpse's drums | [rt-stream-rhythm-results.json](rt-stream-rhythm-results.json), [rt-stream-cruise-results.json](rt-stream-cruise-results.json) | `rt-stream-gate.py --scenario rhythm`, `--trace <cruise> --from 153` |
 | A host stall is counted: a 0.995 s silence reads 62 late periods, not 0 | [rt-stream-starved-results.json](rt-stream-starved-results.json) | `rt-stream-gate.py --starve 50` |
@@ -33,12 +33,12 @@ For current capabilities see [OPL2 and OPL3 scope](#current-opl2-and-opl3-scope)
 The [quality improvements and OPL3 roadmap](../../docs/opl3-feasibility.md#quality-improvements-and-opl3-roadmap)
 records the 2026-09-22 assessment: shorter control blocks, native-rate
 synthesis with resampling, more accurate rhythm noise, and a separate
-eighteen-channel experiment. The first is done and measured there: the
-kernel renders 48-frame blocks instead of 64, measured against 64 and 32.
-The others are proposals, not benchmark results. The Tentacle and Monkey
-Island game records were made with 64-frame blocks and have not been rerun;
-Atlantis's and Cruise for a Corpse's game records have, and so have the
-Cruise windows of the practical, bench and stream gates.
+eighteen-channel experiment. The current Falcon path now uses 32-frame
+blocks (0.65 ms), reducing the block-boundary write lead from the earlier
+48-frame baseline (0.98 ms). Native-rate synthesis, rhythm-noise changes,
+and event-aligned splits remain proposals. The game records and linked
+quality result files are historical 48/64-frame baselines; full-game
+32-frame runs still need to be recorded.
 
 ## How the capture works
 
@@ -298,17 +298,45 @@ support.
 | --- | --- |
 | Nine two-operator channels, four waveforms | Implemented, including OPL2 waveform-select enable |
 | Rhythm mode | Implemented with block-rate envelopes and approximate noise timing |
-| Eighteen two-operator channels | Decoder/record capacity exists; production is configured for nine and full-load practical DSP timing is unmeasured |
-| OPL3 waveforms 4-7 | Not implemented: `Decoder::updateSlot` maps selections modulo the four loaded tables |
-| Stereo channel routing | Not implemented: channel output-enable bits are ignored and `emit_block_stream` duplicates the mono mix |
+| Eighteen two-operator channels | Implemented in the experimental host and DSP paths; the full layered load misses the 49.17 kHz deadline, so production remains configured for nine |
+| OPL3 waveforms 4-7 | Implemented in separate Y-memory tables above the DSP program island |
+| Stereo channel routing | Implemented for the two banks in the practical host and DSP stream; the chip's one-sample output delays are not reproduced |
 | Hardware four-operator pairing | Not implemented in either host kernel or DSP renderer |
 
 The exact host kernel tests eighteen-channel two-operator OPL3 behavior,
-including all eight waveforms, against Nuked. That does not validate the
-missing practical features. See [opl-practical.h](opl-practical.h),
+including all eight waveforms, against Nuked. The practical host and DSP
+agree word for word on the layered fixture's left output, but this validates their shared
+approximation rather than chip accuracy. The practical renderer still uses
+block-rate envelopes, LFOs and noise, and its stereo path omits the chip's
+one-sample output delays. See [opl-practical.h](opl-practical.h),
 [dsp/oplrt.asm](dsp/oplrt.asm), and the
 [roadmap](../../docs/opl3-feasibility.md#opl3-features-and-full-polyphony-cost)
 for the implementation gaps and cycle estimate.
+
+The reproducible eighteen-channel fixture uses both register banks, all
+eight waveforms and Sam & Max's both-output primary and alternating left or
+right secondary routing. A 0.2 s DSP bench compares 9,792 output frames with
+the host reference's left output without a mismatch, but costs **507.8 cycles/frame**
+against the **326.27-cycle** 49.17 kHz budget. Its two synthesis stages alone
+cost 370.1 cycles/frame. A 1 s SSI stream renders all 64 submitted periods
+with the same stereo output checksum but counts 93 late playback periods. A
+matching checksum does not prove each right output word. These are
+emulated-Falcon measurements of a sustained full load; no Sam & Max game
+data or hardware capture was available. The nine-channel OPL2 stress stream
+still has zero late periods and 1.98 ms minimum period slack after the
+stereo changes. The raw reports are
+[layered bench](rt-layered-bench-results.json) and
+[layered stream](rt-layered-stream-results.json), with the
+[OPL2 stress rerun](rt-stress-routing-results.json).
+
+Reproduce the layered measurements after building the DSP and host fixture:
+
+```sh
+python3 devtools/atari-falcon030/tools/foa-opl3/rt-bench-gate.py \
+  --scenario layered --stress-seconds 0.2 --output /tmp/opl3-layered-bench
+python3 devtools/atari-falcon030/tools/foa-opl3/rt-stream-gate.py \
+  --scenario layered --seconds 1 --output /tmp/opl3-layered-stream
+```
 
 ## The practical kernel
 
@@ -331,7 +359,7 @@ sample equality in three places:
   chip's own does: the excess is 0.9 dB and the mean third-octave
   difference 1.8 dB, from 2.9.
 - **Block-rate control.** Envelopes, tremolo and vibrato advance once per
-  48-frame block (0.98 ms; 64 frames, 1.30 ms, until 2026-09-22), which is
+  32-frame block (0.65 ms; the 48-frame baseline was 0.98 ms), which is
   what lets each operator run as one hardware loop over the block,
   operator-major, the way the sibling YM2151 kernel does. Decay and release are a per-block step; attack is a
   per-block retention factor fitted to the audible part of the chip's curve
@@ -341,10 +369,10 @@ sample equality in three places:
   level, key scaling, the envelope-type flag, the silence snap and the
   instant attack keep their chip semantics.
 - **Block-boundary writes.** A register write takes effect at the start of
-  the block it falls in, so up to 0.98 ms early; the Atlantis key-ons take
-  effect a mean 0.53 ms early (0.63 ms with 64-frame blocks). Key-on edges
-  are counted, not sampled, so an off-then-on inside one block still
-  retriggers.
+  the block it falls in, so up to 0.65 ms early on the current path. The
+  Atlantis key-on measurements in the quality table are from the 48-frame
+  baseline. Key-on edges are counted, not sampled, so an off-then-on inside
+  one block still retriggers.
 
 Register decoding stays on the 68030 in the same header (`Decoder`): each
 write becomes a few parameter words for the DSP's operator and channel
@@ -503,8 +531,9 @@ are held to a level instead (the strongest below -30 dB, or no more than
 | Atlantis, 60 s | | 0.9862 | 0.61 / 7.26 dB | | | | mix of coincident partials; broad bands within 0.61, 0.65 and 1.07 dB on average, below 3 kHz, at 3-8 and 8-15 kHz |
 | Cruise for a Corpse, 60 s from 105 s | | 0.9968 | 0.11 / 3.21 dB | | | | tom-tom, snare and bass drum through rhythm mode; broad bands within 0.23, 1.64 and 2.41 dB on average (0.9972 and 0.10 / 3.17 dB with 64-frame blocks) |
 
-All rows are 48-frame blocks; the
-[control-timing comparison](../../docs/opl3-feasibility.md#control-timing-48-frame-blocks)
+The quality rows below are the 48-frame baseline; the current DSP default is
+32 frames. The
+[control-timing comparison](../../docs/opl3-feasibility.md#control-timing-32-frame-blocks-current-48-frame-baseline)
 sets them beside 64 and 32 frames. For a mix, the gate compares the level
 of three broad bands in a window every half second (`mix_band_db_*`), where
 a few loud stretches used to be its only spectral check: on Atlantis those
@@ -899,10 +928,11 @@ presence and level, not auditioned.
   everything it shares with the engine sits behind a mutex; the Atari's
   mutexes count so the interrupt can stay out, but nothing verifies that
   the engine locks everything it should.
-- Sam & Max data was not available here, so the layered OPL3 path remains
-  unmeasured. The practical records and decoder have eighteen-channel
-  capacity, but production uses nine; extra waveforms, stereo routing and
-  four-operator mode are missing (see [scope](#current-opl2-and-opl3-scope)).
+- Sam & Max data was not available here, so no game trace or audition
+  qualifies its arrangement. The synthetic layered path is measured and
+  misses the real-time deadline at full occupancy. Production uses nine
+  channels and continues to advertise OPL2; hardware four-operator mode
+  remains absent (see [scope](#current-opl2-and-opl3-scope)).
 - Rhythm mode's noise is the chip's generator, not the chip's sequence, and
   the hi-hat's and the cymbal's fastest phase bits fold where the codec
   rate puts them. Cruise for a Corpse's drums were scored from its captured

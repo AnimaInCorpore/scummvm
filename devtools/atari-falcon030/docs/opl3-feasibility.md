@@ -5,20 +5,21 @@ running Fate of Atlantis. This note started as a source audit, a
 reproduction of F030MXDRV measurements and a capture of the game's own OPL
 register stream; it now also records the outcome.
 
-**Status, 2026-09-22.** The measured exact DSP implementation exceeds the
+**Status, 2026-09-27.** The measured exact DSP implementation exceeds the
 budget; the practical OPL2 renderer runs at 49.17 kHz, with rhythm mode,
-from the ScummVM build (`opl_driver=atari_dsp`). It now renders 48-frame
-blocks, so a register write takes effect at most 0.98 ms early instead of
-1.30 ms. Its kernel costs 58% of the budget on the Atlantis excerpt and 76%
-in the nine-channel stress fixture, excluding production transport and SSI
-overhead. Separate stream tests pass without late periods; the tightest
-stress period leaves 2.17 ms. It preserves the AdLib arrangement and live
-iMUSE behavior; nothing here has run on physical hardware. Atlantis passes
-its game gate on the emulated Falcon with the 48-frame blocks; the other
-game runs predate them.
+from the ScummVM build (`opl_driver=atari_dsp`). The current path renders
+32-frame blocks, so a register write takes effect at most 0.65 ms early
+instead of 0.98 ms in the earlier 48-frame baseline. That baseline costs 58%
+of the budget on the Atlantis excerpt and 76% in the nine-channel stress
+fixture, excluding production transport and SSI overhead. The current 32-frame
+DSP and stream gates remain word-exact and on time in Hatari, but the modeled
+rhythm margin is only 0.142 ms. It preserves the AdLib arrangement and live
+iMUSE behavior; nothing here has run on physical hardware. Existing game
+records are 48/64-frame baselines; full-game 32-frame coverage is still open.
 
-Approximate OPL3 is a worthwhile experiment, but full OPL3 at the current
-sample rate needs more than enabling eighteen channels. See
+An approximate OPL3 layered prototype now renders both banks and stereo,
+but its full eighteen-channel load misses the current sample-rate deadline.
+See
 [Outcome](#outcome) for established results and
 [Quality improvements and OPL3 roadmap](#quality-improvements-and-opl3-roadmap)
 for the measured timing change and the proposed work. The exact benchmark
@@ -365,7 +366,7 @@ ADL resources.
   are implemented and qualified.
 - **Audio-clock callbacks:** the driver's 250 Hz callbacks advance on a
   fractional sample timeline during period production, and each callback's
-  writes land in the 48-frame block that contains its time. Timer A handles
+  writes land in the 32-frame block that contains its time. Timer A handles
   delivery and starts production only outside the tracked critical
   sections. Extension periods keep synthesis running when callbacks cannot
   run; each postpones the sequencer by one 15.62 ms period.
@@ -468,11 +469,12 @@ experiments have not been implemented or benchmarked. Evaluate an
 eighteen-channel prototype separately, and keep the 49.17 kHz OPL2 path as
 the comparison baseline.
 
-### Control timing: 48-frame blocks
+### Control timing: 32-frame blocks (current; 48-frame baseline)
 
 Envelopes and LFOs advance once per block, and a register write takes
 effect at the start of the block that contains its timestamp, up to one
-block early. The block was 64 frames (1.30 ms) and is now 48 (0.98 ms).
+block early. The block was 64 frames (1.30 ms), then 48 (0.98 ms), and is
+now 32 (0.65 ms).
 This quantization is separate from output buffering and from the 15.62 ms
 sequencer slip caused by an extension period; shorter synthesis blocks do
 not cure either of those transport effects.
@@ -489,7 +491,7 @@ and LFO tables, and the assertions in `atari-dsp.cpp` hold
 Three block lengths were measured with the same gates, the kernel and
 stream ones on the emulated Falcon:
 
-| Frames per block | 64 | **48, adopted** | 32 |
+| Frames per block | 64 | 48, baseline | **32, current** |
 | --- | ---: | ---: | ---: |
 | Control interval, blocks per period | 1.30 ms, 12 | 0.98 ms, 16 | 0.65 ms, 24 |
 | Atlantis key-on lead, mean / max | 0.63 / 1.30 ms | 0.53 / 0.98 ms | 0.33 / 0.65 ms |
@@ -562,34 +564,58 @@ has been established for this candidate.
 
 ### OPL3 features and full-polyphony cost
 
-The practical decoder and records have room for eighteen channels, but
-only four waveform tables are loaded: selections 4-7 alias to 0-3 through
-`selected % kWaveforms`. Channel output-enable bits are ignored, the SSI
-writer duplicates the mono mix, and four-operator pairing is absent. A
-complete OPL3 path needs eight waveforms, stereo routing, mode-switch
-semantics and four-operator algorithms, plus a revised memory layout and
-factory/build integration. See the
+The experimental practical path now loads all eight waveforms, decodes both
+register banks and routes each channel to both, left, right or neither SSI
+output. Waveforms 4-7 live at `Y:$2800-$37ff`: the first attempt at
+`Y:$2000` overwrote the external program through the Falcon's memory alias,
+as the sibling project's memory probe predicted. The host and DSP agree word
+for word on the left output of a full eighteen-channel layered fixture; the
+stereo stream's summed output checksum also matches. Production still
+advertises OPL2 only. The practical path retains block-rate envelopes, LFOs
+and noise and omits the chip's one-sample output delays; hardware
+four-operator pairing is absent. A complete OPL3 path still needs those
+semantics and factory/build integration. See the
 [implementation scope](../tools/foa-opl3/README.md#current-opl2-and-opl3-scope).
 
-The existing stages alone extrapolate from 185.1 to **370.1 cycles/frame**
-when nine fully active feedback FM channels become eighteen. That exceeds
-the entire **326.27-cycle** budget at 49.17 kHz before control, stereo
-mixing, transport or SSI. This is a scaling estimate for the current loops,
-not a measured eighteen-channel practical benchmark. Full-rate OPL3 needs
-substantial optimization or another rendering strategy. Four-operator
-pairing connects the same pool of 36 operators; it does not double that
-pool again, although routing and algorithms need implementation and timing.
+The eighteen-channel bench measures **507.8 cycles/frame**, or 155.6% of
+the **326.27-cycle** budget at 49.17 kHz. The feedback modulator and serial
+carrier stages cost 204.0 and 166.1 cycles/frame; the rest costs 137.7.
+The 1 s SSI fixture rendered all 64 submitted periods and matched the host
+checksum, but counted 93 late playback periods. The checksum does not prove
+individual right output words. Parallel moves and a new
+X/Y ring layout could reduce the synthesis cost; a reduction of about 182
+cycles/frame, or 36% of the measured total, is needed just to reach the
+average budget, before a safety margin. Four-operator pairing connects the
+same pool of 36 operators; it does not double that pool again.
+The committed [bench report](../tools/foa-opl3/rt-layered-bench-results.json)
+and [stream report](../tools/foa-opl3/rt-layered-stream-results.json) contain
+the fixture counts and source hashes.
 
-At 32.78 kHz the budget is 489.40 cycles/frame, making an approximate
-eighteen-channel prototype plausible but tight. That is not established
-capacity, and the earlier OPL2 version's audible aliasing makes it a quality
-tradeoff. Silent-channel skipping is already implemented and cannot be
-counted as a new worst-case optimization.
+The practical assembly already overlaps moves with arithmetic in both hot
+stages. Each feedback modulator and serial carrier also reads waveform and
+ring data from Y memory, limiting further parallel reads without a new X/Y
+layout. Saving one instruction per operator per frame would recover only 36
+cycles/frame, about one fifth of the gap. F030MXDRV's stereo path shows a
+useful layout pattern—one common ring and separate side streams—but its
+YM2151 stages and tables cannot be reused as OPL3 instructions. Moving the
+envelope boundary pass to the 68030 or changing the synthesis rate are other
+architectural experiments; neither has been measured here, and the lower
+rate previously lost audible OPL2 detail. A result that merely averages
+under budget would still need worst-period and game-load margin.
+The hot section ends at `P:$01fa`, leaving five internal-program words
+before the `P:$0200` limit. The image generator rejects growth past that
+limit or into the Y-memory waveform and stereo ranges.
+
+At 32.78 kHz the budget is 489.40 cycles/frame, still below the measured
+507.8 before resampling or transport. The earlier OPL2 version's audible
+aliasing makes a lower rate a quality tradeoff. Silent-channel skipping is
+already implemented and cannot be counted as a new worst-case optimization.
 
 Sam & Max's layered two-operator path is the first useful ScummVM OPL3
 target: it needs both banks and stereo, but no hardware four-operator mode.
-Capture its actual waveform usage and event bursts when data is available,
-then test all eighteen channels active as well as the game trace. OPL3
+The synthetic all-active case has been tested; capture the game's actual
+waveform usage and event bursts when data is available, then optimize and
+measure both the full load and game trace. OPL3
 support does not upgrade Atlantis's source arrangement; preserve its
 existing AdLib driver behavior.
 

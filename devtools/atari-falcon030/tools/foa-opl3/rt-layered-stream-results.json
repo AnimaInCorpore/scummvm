@@ -1,0 +1,33 @@
+{
+  "date": "2026-09-22",
+  "gate": "practical OPL kernel stream mode on the emulated Falcon: transport, timing, exactness",
+  "source_sha256": {
+    "dsp/oplrt.asm": "edc36de0fab5a19b5b65feece4b13449b6f9ffb7be8dbcce5bfa41fd26165606",
+    "m68k/oplplay.s": "cc70bb0cc91a13cacf9ec7c9ddc41863ce8dfcac5931f083d78926fed2517d22",
+    "rt-fixture.cpp": "9a5199f9ac21e0794f1a78972d062db3ecdfde1e01da3c3311672659f1a6b664",
+    "opl-practical.h": "6ea490eb4f8eaf8ab798c073851bbbd014b86759076064e9d3462265425a498d"
+  },
+  "scenario": "layered",
+  "trace_sha256": null,
+  "trace_from_s": null,
+  "seconds": 1.0,
+  "periods_submitted": 64,
+  "periods_rendered": 64,
+  "late_periods": 93,
+  "register_writes": 237,
+  "parameter_events": 1131,
+  "checksum_expected": 4500274,
+  "checksum_dsp": 4500274,
+  "checksum_equal": true,
+  "on_time": false,
+  "block_frames": 48,
+  "min_slack_frames": 0,
+  "min_slack_ms": 0.0,
+  "min_slack_percent_of_period": 0.0,
+  "starvation": null,
+  "not_established": [
+    "No audio captured or auditioned from the emulator; a checksum match does not prove individual words",
+    "The 68030 here does nothing but submit periods; a game's load is not modelled",
+    "No hardware run"
+  ]
+}

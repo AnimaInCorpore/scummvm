@@ -168,7 +168,9 @@ def run_case(name, fixture_args, output, vbls):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--trace", type=Path, required=True, help="captured opl-writes.ev to replay")
+    parser.add_argument("--trace", type=Path, help="captured opl-writes.ev to replay")
+    parser.add_argument("--scenario", choices=("standard", "layered"), default="standard",
+                        help="layered profiles all eighteen routed two-operator channels without a game trace")
     parser.add_argument("--seconds", type=float, default=4.0)
     parser.add_argument("--rhythm-trace", type=Path,
                         help="a second captured stream, of a game that uses rhythm mode (Cruise for a Corpse)")
@@ -177,19 +179,25 @@ def main():
     parser.add_argument("--stress-seconds", type=float, default=1.0)
     parser.add_argument("--vbls", type=int, default=60000)
     args = parser.parse_args()
+    if args.scenario == "standard" and not args.trace:
+        parser.error("--trace is required for the standard scenarios")
     if not HATARI.is_file():
         parser.error(f"the DSP-calibrated Hatari is not at {HATARI}")
     args.output.mkdir(parents=True, exist_ok=False)
 
-    cases = [
-        run_case("stress", ["stress", "--seconds", str(args.stress_seconds)], args.output, args.vbls),
-        run_case("paths", ["paths", "--seconds", str(args.stress_seconds)], args.output, args.vbls),
-        run_case("phase", ["phase", "--seconds", str(args.stress_seconds)], args.output, args.vbls),
-        run_case("rhythm", ["rhythm", "--seconds", str(args.stress_seconds)], args.output, args.vbls),
-        run_case("atlantis", ["trace", "--trace", str(args.trace.resolve()), "--seconds", str(args.seconds)],
-                 args.output, args.vbls),
-    ]
-    if args.rhythm_trace:
+    if args.scenario == "layered":
+        cases = [run_case("layered", ["layered", "--seconds", str(args.stress_seconds)], args.output, args.vbls)]
+    else:
+        cases = [
+            run_case("stress", ["stress", "--seconds", str(args.stress_seconds)], args.output, args.vbls),
+            run_case("timing", ["timing", "--seconds", str(args.stress_seconds)], args.output, args.vbls),
+            run_case("paths", ["paths", "--seconds", str(args.stress_seconds)], args.output, args.vbls),
+            run_case("phase", ["phase", "--seconds", str(args.stress_seconds)], args.output, args.vbls),
+            run_case("rhythm", ["rhythm", "--seconds", str(args.stress_seconds)], args.output, args.vbls),
+            run_case("atlantis", ["trace", "--trace", str(args.trace.resolve()), "--seconds", str(args.seconds)],
+                     args.output, args.vbls),
+        ]
+    if args.rhythm_trace and args.scenario == "standard":
         cases.append(run_case("cruise", ["trace", "--trace", str(args.rhythm_trace.resolve()),
                                          "--from", str(args.rhythm_from), "--seconds", str(args.seconds)],
                               args.output, args.vbls))
@@ -211,12 +219,12 @@ def main():
         "scummvm_commit": repository,
         "scummvm_worktree_dirty": dirty,
         "source_sha256": {name: source_sha256(HERE / name) for name in sources},
-        "trace_sha256": hashlib.sha256(args.trace.read_bytes()).hexdigest(),
+        "trace_sha256": hashlib.sha256(args.trace.read_bytes()).hexdigest() if args.trace else None,
         "rhythm_trace_sha256": (hashlib.sha256(args.rhythm_trace.read_bytes()).hexdigest()
                                 if args.rhythm_trace else None),
         "rhythm_trace_from_s": args.rhythm_from if args.rhythm_trace else None,
         "dsp_program_words": program_words,
-        "reference": "opl-practical.h, scored against the exact kernel by practical-gate.py",
+        "reference": "opl-practical.h; its OPL2 quality is scored against the exact kernel by practical-gate.py",
         "cases": cases,
         "budget_basis": {
             "oscillator_hz": OSCILLATOR,
@@ -230,13 +238,14 @@ def main():
                         "tremolo and vibrato at block rate, the vibrato from the decoder's exact"
                         " per-position increments", "negative (aliased) phase increments",
                         "a full reset through parameter events", "feedback, FM and additive connections",
-                        "all four OPL2 waveforms and the OPL2's waveform select enable",
+                        "all eight OPL3 waveforms and the OPL2's waveform select enable",
+                        "two-bank, two-operator OPL3 output routing in the layered fixture",
                         "rhythm mode: the bass drum and the tom-tom at twice the level, the hi-hat, the"
                         " snare and the cymbal from the two oscillators' phase bits and the noise",
                         "channel skipping when silent",
-                        "parameter events applied at block boundaries"],
-        "not_implemented": ["SSI output and the period-paced host transport", "PCM mixing",
-                            "four-operator mode"],
+                        "sample-stamped parameter events split fixed control blocks"],
+        "not_implemented_in_this_bench": ["SSI output and the period-paced host transport", "PCM mixing"],
+        "not_implemented_in_renderer": ["four-operator mode", "the OPL3 output's one-sample delays"],
         "not_established": [
             "No hardware run: every cycle figure is Hatari's model",
             "No audio was auditioned from the DSP; the practical kernel's quality is the host gate's",
@@ -246,14 +255,15 @@ def main():
     print(json.dumps(result, indent=2))
     if any(not case["bit_exact"] for case in cases):
         raise SystemExit("the DSP output differs from the host reference")
-    paths = next(case for case in cases if case["scenario"] == "paths")
-    missed = [key for key in PATHS if not paths["paths_exercised"][key]]
-    if missed:
-        raise SystemExit(f"the paths case no longer reaches: {', '.join(missed)}")
-    rhythm = next(case for case in cases if case["scenario"] == "rhythm")
-    missed = [key for key in RHYTHM_PATHS if not rhythm["paths_exercised"][key]]
-    if missed:
-        raise SystemExit(f"the rhythm case no longer reaches: {', '.join(missed)}")
+    if args.scenario == "standard":
+        paths = next(case for case in cases if case["scenario"] == "paths")
+        missed = [key for key in PATHS if not paths["paths_exercised"][key]]
+        if missed:
+            raise SystemExit(f"the paths case no longer reaches: {', '.join(missed)}")
+        rhythm = next(case for case in cases if case["scenario"] == "rhythm")
+        missed = [key for key in RHYTHM_PATHS if not rhythm["paths_exercised"][key]]
+        if missed:
+            raise SystemExit(f"the rhythm case no longer reaches: {', '.join(missed)}")
 
 
 if __name__ == "__main__":

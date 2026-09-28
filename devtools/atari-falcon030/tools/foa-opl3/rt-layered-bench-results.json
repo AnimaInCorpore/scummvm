@@ -1,0 +1,99 @@
+{
+  "date": "2026-09-22",
+  "gate": "practical OPL kernel on the emulated Falcon DSP56001: exactness and cycle cost",
+  "scummvm_commit": "6ad5c078c90e3672781046e349ae81e3cfd889b1",
+  "scummvm_worktree_dirty": true,
+  "source_sha256": {
+    "dsp/oplrt.asm": "edc36de0fab5a19b5b65feece4b13449b6f9ffb7be8dbcce5bfa41fd26165606",
+    "m68k/oplrt.s": "9905ca7b528c622a8ad90d46cf805171c0ec3dab823548c81700951cf8678f20",
+    "rt-fixture.cpp": "9a5199f9ac21e0794f1a78972d062db3ecdfde1e01da3c3311672659f1a6b664",
+    "opl-practical.h": "6ea490eb4f8eaf8ab798c073851bbbd014b86759076064e9d3462265425a498d",
+    "rt-bench-gate.py": "8b3f35a9050320e9bd1bee7ec89eaf54714025db492b7791c1b2319892b82498",
+    "generate-tables.py": "6e62ce3c14e6ce1f99f471425fb90935e2e782e5f118004e6fa0759e335069b0"
+  },
+  "trace_sha256": null,
+  "rhythm_trace_sha256": null,
+  "rhythm_trace_from_s": null,
+  "dsp_program_words": 1725,
+  "reference": "opl-practical.h; its OPL2 quality is scored against the exact kernel by practical-gate.py",
+  "cases": [
+    {
+      "scenario": "layered",
+      "block_frames": 48,
+      "seconds": 0.2,
+      "frames": 9792,
+      "blocks": 204,
+      "chunks": 3,
+      "register_writes": 237,
+      "parameter_events": 1131,
+      "peak_events_per_chunk": 1129,
+      "paths_exercised": {
+        "blocks_decaying_past_sustain_level": 0,
+        "blocks_entering_sustain_above_level": 0,
+        "blocks_with_negative_increment": 0,
+        "blocks_with_vibrato": 140,
+        "blocks_paused": 0,
+        "blocks_holding_attack_zero": 0,
+        "blocks_holding_attack_max": 0,
+        "blocks_with_drums": 0,
+        "blocks_with_silent_drums": 0,
+        "blocks_with_tom": 0,
+        "blocks_with_bass_carrier_alone": 0,
+        "blocks_with_bass_feedback_fm": 0,
+        "blocks_with_bass_plain_fm": 0,
+        "blocks_with_drum_vibrato": 0,
+        "blocks_melodic_after_rhythm": 0
+      },
+      "frame_words_compared": 9792,
+      "mismatches_against_host_kernel": 0,
+      "first_mismatch_frame": null,
+      "bit_exact": true,
+      "instruction_cycles_per_frame": 507.8,
+      "instruction_cycles_per_frame_by_range": {
+        "stages": 370.12,
+        "op_boundary": 54.75,
+        "stream_emit": 0.0,
+        "trigger_attack": 0.13,
+        "render_driver": 16.96,
+        "loaders_and_modes": 18.38,
+        "clear_mix": 7.54,
+        "emit": 9.38,
+        "block_and_channel_boundary": 26.28,
+        "render_block": 0.54,
+        "apply_events": 3.72
+      },
+      "budget_cycles_per_frame": 326.27,
+      "budget_use_percent": 155.6
+    }
+  ],
+  "budget_basis": {
+    "oscillator_hz": 32084988,
+    "clocks_per_instruction_cycle": 2,
+    "codec_rate_hz": 49169.921875,
+    "note": "Cycles are attributed by code range from Hatari's DSP profile; the host-port waits of the bench transport are excluded, SSI output and a production transport are not yet included"
+  },
+  "implemented": [
+    "block-rate envelope with the chip's rates retimed to the codec rate",
+    "tremolo and vibrato at block rate, the vibrato from the decoder's exact per-position increments",
+    "negative (aliased) phase increments",
+    "a full reset through parameter events",
+    "feedback, FM and additive connections",
+    "all eight OPL3 waveforms and the OPL2's waveform select enable",
+    "two-bank, two-operator OPL3 output routing in the layered fixture",
+    "rhythm mode: the bass drum and the tom-tom at twice the level, the hi-hat, the snare and the cymbal from the two oscillators' phase bits and the noise",
+    "channel skipping when silent",
+    "parameter events applied at block boundaries"
+  ],
+  "not_implemented_in_this_bench": [
+    "SSI output and the period-paced host transport",
+    "PCM mixing"
+  ],
+  "not_implemented_in_renderer": [
+    "four-operator mode",
+    "the OPL3 output's one-sample delays"
+  ],
+  "not_established": [
+    "No hardware run: every cycle figure is Hatari's model",
+    "No audio was auditioned from the DSP; the practical kernel's quality is the host gate's"
+  ]
+}

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Stream the captured Atlantis register stream through the DSP kernel's
 production transport on the emulated Falcon, and check that every period
-rendered on time and that the emitted words reproduce the host reference.
+rendered on time and that its output checksum matches the host reference.
 
 The stream host boots the kernel, routes the DSP's SSI to the DAC at
 49.170 kHz, and submits one 768-frame period per refill through the real
@@ -9,11 +9,12 @@ protocol: READY handshake, paced host-port blast of the events and PCM
 flag, acknowledgement. The kernel counts every period the transmitter plays
 without a fresh render - one it caught mid-render, or a replay while the
 host is silent - and sums every emitted word; the fixture computes the same
-sum from the host reference.
+sum from the host reference. A matching sum does not prove each stereo word
+matched. The DSP bench compares individual left-channel frames.
 
 What this establishes: the transport and SSI path run, the double-buffered
 handoff keeps up with the 68030 submitting periods as fast as the DSP takes
-them, and the stream-mode render is word-exact. What it does not: no audio
+them, and the output checksum matches. What it does not: no audio
 was captured or auditioned from Hatari, no game engine was involved, and
 the emulator's DSP timing is a model.
 
@@ -103,9 +104,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--trace", type=Path, help="captured opl-writes.ev (the trace scenario)")
-    parser.add_argument("--scenario", choices=("trace", "stress", "rhythm"), default="trace",
+    parser.add_argument("--scenario", choices=("trace", "stress", "timing", "rhythm", "layered"), default="trace",
                         help="stress: nine feedback FM channels with tremolo and vibrato held, the kernel's worst "
-                             "case; rhythm: rhythm mode at its most expensive, then every shape it takes")
+                             "case; rhythm: rhythm mode at its most expensive, then every shape it takes; "
+                             "layered: eighteen routed channels in the Sam & Max layout")
     parser.add_argument("--seconds", type=float, default=10.0)
     parser.add_argument("--from", dest="start", type=float, default=0.0,
                         help="start the trace's window this many seconds in, on the register image left by then")
@@ -141,7 +143,7 @@ def main():
         subprocess.run([str(HATARI), "--machine", "falcon", "--dsp", "emu", "--memsize", "14",
                         "--conout", "2", "--tos", str(TOS), "--patch-tos", "true",
                         "--fast-boot", "true", "--fast-forward", "true", "--sound", "off",
-                        "--confirm-quit", "false", "--run-vbls", str(args.vbls),
+    "--confirm-quit", "false", "--run-vbls", str(args.vbls),
                         "--parse", str((case / "start.ini").resolve()),
                         "--log-file", str((case / "hatari.log").resolve()), "OPLPLAY.TOS"],
                        cwd=case, stdout=log, stderr=subprocess.STDOUT, check=True)
@@ -183,7 +185,7 @@ def main():
         "parameter_events": shape["parameter_events"],
         "checksum_expected": shape["period_checksum"],
         "checksum_dsp": checksum,
-        "word_exact": checksum == shape["period_checksum"] and periods_rendered == shape["periods"],
+        "checksum_equal": checksum == shape["period_checksum"] and periods_rendered == shape["periods"],
         "on_time": late == 0,
         # The least time any render on time left before the transmitter reached
         # the half it rendered: the stream's tightest deadline, the host's
@@ -195,15 +197,15 @@ def main():
         "min_slack_percent_of_period": round(100.0 * slack_words / 2 / PERIOD_FRAMES, 1),
         "starvation": stall,
         "not_established": [
-            "No audio captured or auditioned from the emulator; the checksum proves the rendered words",
+            "No audio captured or auditioned from the emulator; a checksum match does not prove individual words",
             "The 68030 here does nothing but submit periods; a game's load is not modelled",
             "No hardware run",
         ],
     }
     (case / "results.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result, indent=2))
-    if not result["word_exact"]:
-        raise SystemExit("the stream-mode output differs from the host reference")
+    if not result["checksum_equal"]:
+        raise SystemExit("the stream-mode checksum differs from the host reference")
     if stall is not None:
         if not stall["counted"]:
             raise SystemExit(f"a {stall['seconds']:.3f} s stall counted {stall['late_at_end']} late periods, "
