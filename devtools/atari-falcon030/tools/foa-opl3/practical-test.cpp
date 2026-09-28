@@ -445,23 +445,31 @@ std::vector<int16> renderPractical(const Script &s, unsigned long long *writesOu
 	pcm.reserve(blocks * OplPractical::kBlockFrames);
 	size_t next = 0;
 	int32 out[OplPractical::kBlockFrames];
-	for (uint64 block = 0; block < blocks; ++block) {
-		while (next < s.events.size()
-		       && (uint64)(s.events[next].seconds * kCodecRate) / OplPractical::kBlockFrames <= block) {
+	int32 right[OplPractical::kBlockFrames];
+	for (uint64 frame = 0; frame < blocks * OplPractical::kBlockFrames;) {
+		while (next < s.events.size() && (uint64)(s.events[next].seconds * kCodecRate) <= frame) {
 			uint64 before = 0, after = 0;
 			for (int i = 0; i < OplPractical::kSlots; ++i)
 				before += decoder.slotTrigger[i];
-			decoder.write((uint32)block, s.events[next].reg, s.events[next].value);
+			decoder.write((uint32)frame, s.events[next].reg, s.events[next].value);
 			for (int i = 0; i < OplPractical::kSlots; ++i)
 				after += decoder.slotTrigger[i];
 			const double due = s.events[next].seconds * kCodecRate;
-			lead->note((due - (double)(block * OplPractical::kBlockFrames)) * 1000.0 / kCodecRate, after != before);
+			lead->note((due - (double)frame) * 1000.0 / kCodecRate, after != before);
 			++next;
 		}
 		decoder.flush();
-		OplPractical::renderBlock(&chip, nullptr, out);
-		for (int i = 0; i < OplPractical::kBlockFrames; ++i)
+		uint64 until = (frame / OplPractical::kBlockFrames + 1) * OplPractical::kBlockFrames;
+		if (next < s.events.size()) {
+			const uint64 eventFrame = (uint64)(s.events[next].seconds * kCodecRate);
+			if (eventFrame < until)
+				until = eventFrame;
+		}
+		OplPractical::renderSpanStereo(&chip, nullptr, out, right, (int)(until - frame),
+		                              frame % OplPractical::kBlockFrames == 0);
+		for (uint64 i = 0; i < until - frame; ++i)
 			pcm.push_back((int16)(out[i] >> 8));
+		frame = until;
 	}
 	*writesOut = s.events.size();
 	return pcm;

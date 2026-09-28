@@ -33,7 +33,7 @@
  * it one 768-frame period at a time through the host port.
  *
  * A period is a payload of parameter events for the kernel's operator and
- * channel records, stamped with the block (of 16) they land in, plus 192
+ * channel records, stamped with the sample they land on, plus 192
  * mono samples at a quarter of the 49,170 Hz codec rate. The DSP acknowledges
  * a payload before rendering it, so the 68030 stays one period ahead; a
  * period that arrives late repeats the previous one and is counted.
@@ -67,11 +67,11 @@ public:
 	enum {
 		kCodecRateHz = 49170,        // 25.175 MHz / 256 / 2, rounded: within 1.1% of the chip's own rate
 		kPeriodFrames = 768,
-		kPeriodBlocks = 16,
-		kBlockFrames = 48,           // 0.98 ms: how early a write can take effect
+		kPeriodBlocks = 24,
+		kBlockFrames = 32,           // envelope/LFO control interval; writes split blocks
 		kPcmPerPeriod = 192,
 		kPcmRateHz = 12292,          // a quarter of the codec rate, rounded
-		kMaxEvents = 2048,           // the kernel's table holds 4,096; a period never needs half
+		kMaxEvents = 2048,           // bounded payload of parameter events
 		kPayloadWords = 1 + 2 * kMaxEvents + 1 + kPcmPerPeriod,
 		kProduceAhead = 4,           // periods queued ahead of delivery: 62 ms of tolerance
 		kExtendBelow = 2,            // refused production extends while fewer than this are queued
@@ -118,8 +118,8 @@ public:
 	Period *beginPeriod(bool extension);
 	/** Adds a kernel parameter event to the period being filled. */
 	/** Adds an event to the period; false, and nothing added, once the period is full. */
-	bool addEvent(Period *period, uint32 block, uint16 address, uint32 value);
-	/** Sets the period's PCM: 160 signed 16-bit samples, or nullptr for silence. */
+	bool addEvent(Period *period, uint32 frame, uint16 address, uint32 value);
+	/** Sets the period's PCM: 192 signed 16-bit samples, or nullptr for silence. */
 	void setPcm(Period *period, const int16 *samples);
 	/** Queues the period for delivery. */
 	void submit(Period *period);

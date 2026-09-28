@@ -5,10 +5,10 @@
 // OPLDATA.BIN is big-endian 32-bit throughout:
 //   'OPLR', upload block count, then per block: space (0 = X, 1 = Y),
 //   address, word count, the words; then chunk count, then per chunk:
-//   block count, event count, and (block << 16 | address), value pairs.
+//   block count, event count, and (frame << 12 | address), value pairs.
 // EXPECT.BIN holds every chunk's output words in order, 24 bits each.
 //
-// usage: opl-rt-fixture <trace|stress|paths|rhythm|phase> <opldata.bin> <expect.bin>
+// usage: opl-rt-fixture <trace|stress|paths|rhythm|phase|layered> <opldata.bin> <expect.bin>
 //                       [--trace opl-writes.ev] [--from S] [--seconds N]
 //                       [--chunk-blocks N] [--play playdata.bin]
 //
@@ -21,6 +21,7 @@
 // checksum the DSP's stream emit must reproduce: the sum of the limited
 // output words over every period, modulo 2^24.
 #define FORBIDDEN_SYMBOL_ALLOW_ALL
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -51,18 +52,30 @@ void fail(const char *what) {
 	std::exit(1);
 }
 
-struct Event {
-	uint32 block;
-	uint16 address;
-	int32 value;
-};
+typedef P::Event Event;
 
 struct RecordingSink : P::Sink {
 	std::vector<Event> events;
-	void write(uint32 block, uint16 address, int32 value) override {
-		events.push_back(Event{block, address, value});
+	void write(uint32 frame, uint16 address, int32 value) override {
+		events.push_back(Event{frame, address, value});
 	}
 };
+
+// The same event split as the DSP, keeping the envelope/LFO clock fixed.
+void renderTimed(P::Chip *chip, const std::vector<Event> &events, size_t &at, size_t end,
+                 uint32 first, int32 *left, int32 *right) {
+	const uint32 limit = first + P::kBlockFrames;
+	for (uint32 frame = first; frame < limit;) {
+		while (at < end && events[at].frame <= frame) {
+			P::poke(chip, events[at].address, events[at].value);
+			++at;
+		}
+		const uint32 until = at < end && events[at].frame < limit ? events[at].frame : limit;
+		P::renderSpanStereo(chip, nullptr, left + frame - first, right + frame - first,
+		                    until - frame, frame == first);
+		frame = until;
+	}
+}
 
 struct RegisterWrite {
 	double seconds;
@@ -110,8 +123,53 @@ std::vector<RegisterWrite> stressScript(double seconds) {
 	return writes;
 }
 
+// Sam & Max's two-bank layout: the primary layer reaches both outputs and
+// each secondary layer reaches one side. Hold all eighteen channels to make
+// the render and stream deadline a meaningful worst-case measurement.
+std::vector<RegisterWrite> layeredScript(double seconds) {
+	std::vector<RegisterWrite> writes;
+	writes.push_back(RegisterWrite{0.0, 0x105, 1});
+	for (int layer = 0; layer < 2; ++layer) {
+		const uint16 bank = (uint16)(layer << 8);
+		for (int c = 0; c < 9; ++c) {
+			const uint8 mod = kModOffset[c], car = (uint8)(mod + 3);
+			const uint16 pitch = (uint16)(0x180 + c * 23);
+			for (int op = 0; op < 2; ++op) {
+				const uint8 slot = op ? car : mod;
+				writes.push_back(RegisterWrite{0.0, (uint16)(bank | (0x20 + slot)), (uint8)(0xe1 + ((c + op) & 3))});
+				writes.push_back(RegisterWrite{0.0, (uint16)(bank | (0x40 + slot)), (uint8)(op ? 0 : 0x18)});
+				writes.push_back(RegisterWrite{0.0, (uint16)(bank | (0x60 + slot)), 0xf3});
+				writes.push_back(RegisterWrite{0.0, (uint16)(bank | (0x80 + slot)), 0x24});
+				writes.push_back(RegisterWrite{0.0, (uint16)(bank | (0xe0 + slot)), (uint8)((2 * c + layer + op) & 7)});
+			}
+			const uint8 route = layer ? (uint8)((c & 1) ? 0x20 : 0x10) : 0x30;
+			writes.push_back(RegisterWrite{0.0, (uint16)(bank | (0xc0 + c)), (uint8)(route | (5 << 1))});
+			writes.push_back(RegisterWrite{0.0, (uint16)(bank | (0xa0 + c)), (uint8)pitch});
+			writes.push_back(RegisterWrite{0.0, (uint16)(bank | (0xb0 + c)), (uint8)(0x20 | (3 << 2) | (pitch >> 8))});
+		}
+	}
+	writes.push_back(RegisterWrite{seconds * 0.5, 0x1c0, 0x2a});
+	writes.push_back(RegisterWrite{seconds * 0.75, 0x1c0, 0x1a});
+	return writes;
+}
+
 // The stress case, then the paths a musical patch rarely takes, so that the
 // DSP's are compared word for word too. Not a cost measurement.
+// Approximately 250 Hz writes on a fully occupied chip, covering every
+// offset inside a control block and both sides of period/chunk boundaries.
+std::vector<RegisterWrite> timingScript(double seconds) {
+	std::vector<RegisterWrite> writes = stressScript(seconds);
+	for (uint32 frame = 1; frame < (uint32)(seconds * OPL_PRACTICAL_CODEC_RATE); frame += 197) {
+		const int channel = (frame / 197) % 9;
+		writes.push_back(RegisterWrite{frame / OPL_PRACTICAL_CODEC_RATE,
+		                 (uint16)(0x40 + kModOffset[channel]), (uint8)(8 + (frame / 197) % 24)});
+	}
+	for (uint32 frame : { 31u, 32u, 33u, 767u, 768u, 769u, 4095u, 4096u, 4097u })
+		if (frame < (uint32)(seconds * OPL_PRACTICAL_CODEC_RATE))
+			writes.push_back(RegisterWrite{frame / OPL_PRACTICAL_CODEC_RATE, 0xc0, (uint8)(frame & 14)});
+	return writes;
+}
+
 std::vector<RegisterWrite> pathsScript(double seconds) {
 	std::vector<RegisterWrite> writes = stressScript(seconds);
 	// Rate changes during attack must hold, but the later key-on at maximum
@@ -339,7 +397,7 @@ std::vector<RegisterWrite> traceScript(const char *path, double seconds, double 
 
 int main(int argc, char **argv) {
 	if (argc < 4) {
-		std::fprintf(stderr, "usage: opl-rt-fixture <trace|stress|paths|rhythm|phase> <opldata.bin> <expect.bin>"
+		std::fprintf(stderr, "usage: opl-rt-fixture <trace|stress|paths|rhythm|phase|layered> <opldata.bin> <expect.bin>"
 		                     " [--trace file] [--seconds N] [--chunk-blocks N]\n");
 		return 2;
 	}
@@ -368,35 +426,49 @@ int main(int argc, char **argv) {
 	std::vector<RegisterWrite> writes;
 	if (scenario == "stress")
 		writes = stressScript(seconds);
+	else if (scenario == "timing")
+		writes = timingScript(seconds);
 	else if (scenario == "paths")
 		writes = pathsScript(seconds);
 	else if (scenario == "rhythm")
 		writes = rhythmScript(seconds);
 	else if (scenario == "phase")
 		writes = phaseScript(seconds);
+	else if (scenario == "layered")
+		writes = layeredScript(seconds);
 	else if (scenario == "trace" && trace)
 		writes = traceScript(trace, seconds, from);
 	else
 		fail("unknown scenario, or --trace missing");
 
+	// Scripts describe several channels independently. Merge their timelines
+	// before decoding; otherwise one channel's later key-on can strand the
+	// next channel's earlier key-off in the following transport period.
+	std::stable_sort(writes.begin(), writes.end(), [](const RegisterWrite &a, const RegisterWrite &b) {
+		return a.seconds < b.seconds;
+	});
 	const uint32 totalBlocks = (uint32)((uint64)(seconds * OPL_PRACTICAL_CODEC_RATE) / P::kBlockFrames);
 	const uint32 chunks = (totalBlocks + chunkBlocks - 1) / chunkBlocks;
 
-	// Decode every register write into block-stamped parameter events.
+	// Decode every register write into sample-stamped parameter events.
 	RecordingSink sink;
 	P::Decoder decoder;
-	decoder.reset(&sink, 9);
+	const int channelCount = scenario == "layered" ? 18 : 9;
+	decoder.reset(&sink, channelCount);
 	for (size_t i = 0; i < writes.size(); ++i) {
-		const uint32 block = (uint32)((uint64)(writes[i].seconds * OPL_PRACTICAL_CODEC_RATE) / P::kBlockFrames);
+		const uint32 frame = (uint32)(writes[i].seconds * OPL_PRACTICAL_CODEC_RATE);
 		if (writes[i].reg == kResetChip)
-			decoder.reset(&sink, 9, block);
+			decoder.reset(&sink, channelCount, frame);
 		else if (writes[i].reg == kPauseChip) {
 			decoder.flush();
-			sink.write(block, P::SC_PAUSED, writes[i].value);
+			sink.write(frame, P::SC_PAUSED, writes[i].value);
 		} else
-			decoder.write(block, writes[i].reg, writes[i].value);
+			decoder.write(frame, writes[i].reg, writes[i].value);
 	}
 	decoder.flush();
+	for (size_t i = 1; i < sink.events.size(); ++i)
+		if (sink.events[i].frame < sink.events[i - 1].frame)
+			fail("decoded events are not in sample order");
 
 	// ---- the DSP image
 	Writer out;
@@ -404,17 +476,17 @@ int main(int argc, char **argv) {
 	if (!out.file)
 		fail("cannot create the data image");
 	out.word(kMagic);
-	out.word(13);   // upload blocks
+	out.word(17);   // upload blocks
 
 	out.word(0); out.word(P::SC_TREMOLO_SHIFT); out.word(4);
-	out.word(4); out.word(0); out.word(9); out.word(0x7fffff);
+	out.word(4); out.word(0); out.word(channelCount); out.word(0x7fffff);
 
 	out.word(0); out.word(P::kGainTable); out.word(512);
 	for (int i = 0; i < 512; ++i)
 		out.word(kOplGain[i]);
 
 	P::Chip chip;
-	P::reset(&chip, 9);
+	P::reset(&chip, channelCount);
 	out.word(0); out.word(P::kOpBase); out.word(P::kSlots * P::kOpStride);
 	for (int i = 0; i < P::kSlots; ++i)
 		for (int w = 0; w < P::kOpStride; ++w)
@@ -435,11 +507,24 @@ int main(int argc, char **argv) {
 	out.word(0); out.word(P::kVibratoTable); out.word(8);
 	for (int i = 0; i < 8; ++i)
 		out.word((uint32)P::kVibratoOffset[i]);
+	out.word(0); out.word(P::kRouteTable); out.word(4);
+	out.word(P::kMuteRing); out.word(P::kLeftRing); out.word(P::kRightRing); out.word(0);
 
-	out.word(1); out.word(P::kWaveBase); out.word(P::kWaveforms * 1024);
-	for (int wf = 0; wf < P::kWaveforms; ++wf)
+	out.word(1); out.word(P::kWaveBase); out.word(4 * 1024);
+	for (int wf = 0; wf < 4; ++wf)
 		for (uint16 phase = 0; phase < 1024; ++phase)
 			out.word((uint32)P::waveSample((uint8)wf, phase) & 0xffffff);
+	out.word(1); out.word(P::kOpl3WaveBase); out.word(4 * 1024);
+	for (int wf = 4; wf < P::kWaveforms; ++wf)
+		for (uint16 phase = 0; phase < 1024; ++phase)
+			out.word((uint32)P::waveSample((uint8)wf, phase) & 0xffffff);
+
+	out.word(1); out.word(P::kNoiseJump); out.word(768);
+	for (int i = 0; i < 768; ++i)
+		out.word(kOplNoiseJump[i]);
+	out.word(1); out.word(P::kNoisePowers); out.word(529);
+	for (int i = 0; i < 529; ++i)
+		out.word(kOplNoisePowers[i]);
 
 	// rhythm mode's lookups
 	out.word(0); out.word(P::kRhythmHiHat); out.word(1024);
@@ -472,11 +557,12 @@ int main(int argc, char **argv) {
 	uint32 bassPlainBlocks = 0, drumVibratoBlocks = 0, melodicAfterRhythmBlocks = 0;
 	bool rhythmSeen = false;
 	int32 frames[P::kBlockFrames];
+	int32 rightFrames[P::kBlockFrames];
 	for (uint32 chunk = 0; chunk < chunks; ++chunk) {
 		const uint32 first = chunk * chunkBlocks;
 		const uint32 count = (first + chunkBlocks <= totalBlocks) ? chunkBlocks : totalBlocks - first;
 		size_t end = next;
-		while (end < sink.events.size() && sink.events[end].block < first + count)
+		while (end < sink.events.size() && sink.events[end].frame < (first + count) * P::kBlockFrames)
 			++end;
 		const uint32 eventCount = (uint32)(end - next);
 		if (eventCount > kMaxEventsPerChunk)
@@ -486,16 +572,16 @@ int main(int argc, char **argv) {
 		out.word(count);
 		out.word(eventCount);
 		for (size_t i = next; i < end; ++i)
-			if (sink.events[i].block < first)
+			if (sink.events[i].frame < first * P::kBlockFrames)
 				fail("events are not in block order");
 		for (size_t i = next; i < end; ++i) {
-			out.word(((sink.events[i].block - first) << 16) | sink.events[i].address);
+			out.word(P::packEvent(sink.events[i].frame - first * P::kBlockFrames, sink.events[i].address));
 			out.word((uint32)sink.events[i].value & 0xffffff);
 		}
 		// the reference consumes the same events at the same blocks
 		size_t at = next;
 		for (uint32 b = 0; b < count; ++b) {
-			while (at < end && sink.events[at].block == first + b) {
+			while (at < end && sink.events[at].frame == (first + b) * P::kBlockFrames) {
 				P::poke(&chip, sink.events[at].address, sink.events[at].value);
 				++at;
 			}
@@ -512,7 +598,7 @@ int main(int argc, char **argv) {
 					attackMax |= w[P::OP_RATE_A] >= 60;
 				}
 			}
-			P::renderBlock(&chip, nullptr, frames);
+			renderTimed(&chip, sink.events, at, end, (first + b) * P::kBlockFrames, frames, rightFrames);
 			for (int i = 0; i < 18; ++i) {
 				const int32 *w = chip.op[i].w;
 				if (w[P::OP_GAIN] && w[P::OP_INC] < 0)
@@ -562,27 +648,30 @@ int main(int argc, char **argv) {
 		pl.word(0x4F504C50);
 		pl.word(periods);
 		P::Chip stream;
-		P::reset(&stream, 9);
+		P::reset(&stream, channelCount);
 		size_t at = 0;
 		for (uint32 period = 0; period < periods; ++period) {
 			const uint32 first = period * periodBlocks;
 			size_t end = at;
-			while (end < sink.events.size() && sink.events[end].block < first + periodBlocks)
+			while (end < sink.events.size() && sink.events[end].frame < (first + periodBlocks) * P::kBlockFrames)
 				++end;
 			pl.word((uint32)(end - at));
 			for (size_t i = at; i < end; ++i) {
-				pl.word(((sink.events[i].block - first) << 16) | sink.events[i].address);
+				if (sink.events[i].frame < first * P::kBlockFrames)
+					fail("a stream event precedes its period");
+				pl.word(P::packEvent(sink.events[i].frame - first * P::kBlockFrames, sink.events[i].address));
 				pl.word((uint32)sink.events[i].value & 0xffffff);
 			}
 			pl.word(0);   // silent PCM
 			for (uint32 b = 0; b < periodBlocks; ++b) {
-				while (at < end && sink.events[at].block == first + b) {
+				while (at < end && sink.events[at].frame == (first + b) * P::kBlockFrames) {
 					P::poke(&stream, sink.events[at].address, sink.events[at].value);
 					++at;
 				}
-				P::renderBlock(&stream, nullptr, frames);
+				renderTimed(&stream, sink.events, at, end, (first + b) * P::kBlockFrames, frames, rightFrames);
 				for (int i = 0; i < P::kBlockFrames; ++i)
-					checksum = (checksum + ((uint32)frames[i] & 0xffffff)) & 0xffffff;
+					checksum = (checksum + ((uint32)frames[i] & 0xffffff)
+					            + ((uint32)rightFrames[i] & 0xffffff)) & 0xffffff;
 			}
 			at = end;
 		}

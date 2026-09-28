@@ -2,8 +2,8 @@
 ;
 ; The DSP side of opl-practical.h: a memory-image machine whose operator and
 ; channel records the 68030 writes, and whose output must match that host
-; reference word for word. It renders blocks of BLOCK_FRAMES frames (48,
-; 0.98 ms) at the codec rate, operator-major: each operator runs one hardware
+; reference word for word. It renders blocks of BLOCK_FRAMES frames (32,
+; 0.65 ms) at the codec rate, operator-major: each operator runs one hardware
 ; loop over the block, the modulator writing an internal ring the carrier
 ; consumes. Envelopes and the LFO advance once per block, at the boundary,
 ; from tables the host uploads.
@@ -33,6 +33,7 @@
 ;   X external $0a00-$0a3f  attack factor per block, by 6-bit rate
 ;   X external $0a40-$0a7f  decay step per block, by rate
 ;   X external $0a80-$0a87  record offset of the vibrato delta, by LFO position
+;   X external $0a90-$0a93  output mask to mix-ring address
 ;   X external $0b00-$0b8f  per-operator render parameters, 4 words each
 ;   X external $0c00-$0eff  stream: one period's PCM, expanded to 768 frames
 ;   X external $1000-$1bff  stream: the SSI ring, two periods of stereo
@@ -42,7 +43,10 @@
 ;   X external $2000-$3fff  stream events, same format, 4,096 of them
 ;   Y external $0400-$087f  phase fractions, the L-space partners of the records
 ;   Y external $0c00-$0fff  rhythm: select column by the cymbal's phase
-;   Y external $1000-$1fff  waveforms as linear samples * 256, 1,024 each
+;   Y external $1000-$1fff  waveforms 0-3 as linear samples * 256
+;   Y external $2000-$27ff  program island: Y aliases external P here
+;   Y external $2800-$37ff  waveforms 4-7
+;   Y external $3800-$38bf  left, right and muted mix rings
 ;
 ; Arithmetic conventions shared with the host reference
 ;   phase      48-bit index.fraction in B; the index is B1 masked to 10 bits
@@ -65,16 +69,18 @@ CH_STRIDE       equ     8
 ATTACK_TABLE    equ     $0a00
 DECAY_TABLE     equ     $0a40
 VIB_TABLE       equ     $0a80
+ROUTE_TABLE     equ     $0a90
 RT_BASE         equ     $0b00
 RT_STRIDE       equ     4
 FRAME_BASE      equ     $2000
 EVENT_BASE      equ     $3000
-STREAM_EVENT_BASE equ   $2000           ; stream mode: the bench output area, 4,096 events
+STREAM_EVENT_BASE equ   $2000           ; two alternating tables, 2,048 events each
+PCM_PENDING     equ     $0f00           ; next period's 192 unexpanded PCM words
 
 PCM_STAGE       equ     $0c00           ; expanded PCM of one period, 768 words
 SSI_RING        equ     $1000           ; two periods of interleaved stereo
-BLOCK_FRAMES    equ     OPL_BLOCK_FRAMES ; 48: 0.98 ms at the codec's 49,170 Hz
-PERIOD_BLOCKS   equ     OPL_PERIOD_BLOCKS ; 16: 768 frames, 15.62 ms
+BLOCK_FRAMES    equ     OPL_BLOCK_FRAMES ; 32: 0.65 ms at the codec's 49,170 Hz
+PERIOD_BLOCKS   equ     OPL_PERIOD_BLOCKS ; 24: 768 frames, 15.62 ms
 SSI_HALF_WORDS  equ     2*BLOCK_FRAMES*PERIOD_BLOCKS
 SSI_RING_WORDS  equ     2*SSI_HALF_WORDS
 PCM_PER_PERIOD  equ     OPL_PCM_PER_PERIOD ; 192: host PCM at a quarter of the codec rate
@@ -82,6 +88,9 @@ PCM_PER_PERIOD  equ     OPL_PCM_PER_PERIOD ; 192: host PCM at a quarter of the c
 MOD_RING        equ     $0040           ; X internal, BLOCK_FRAMES words
 HIST_BASE       equ     $0080           ; X and Y internal
 MIX_RING        equ     $0000           ; Y internal, BLOCK_FRAMES words
+LEFT_RING       equ     $3800           ; Y external, BLOCK_FRAMES words
+RIGHT_RING      equ     $3840
+MUTE_RING       equ     $3880
 GAIN_RING       equ     $0040           ; Y internal, two words per channel
 
 ; rhythm mode
@@ -92,6 +101,8 @@ NOISE_RING      equ     $00c0           ; Y internal, BLOCK_FRAMES words
 RHYTHM_PHASES   equ     $08a0           ; X external, 12 words
 ROW_TABLE       equ     $1c00           ; X external, 1,024 words
 COLUMN_TABLE    equ     $0c00           ; Y external, 1,024 words
+NOISE_JUMP      equ     $3900
+NOISE_POWERS    equ     $3c00
 NOISE_TAPS      equ     $400100         ; x^23 + x^14 + 1, right-shifting Galois form
 NOISE_BITS      equ     $000009         ; the two state bits a frame's drums read
 OP_BASS_CAR     equ     13              ; record indices of the rhythm section
@@ -124,6 +135,7 @@ OPR_VIBDELTA    equ     19              ; five words: zero, +half, +full, -half,
 CHR_MODE        equ     0               ; render routine address
 CHR_CONN        equ     1
 CHR_FBMUL       equ     2
+CHR_ROUTE       equ     3               ; output mask: 1 left, 2 right
 
 ENV_SNAP        equ     $1f8000         ; 0x1f8 << 12
 ENV_SILENT      equ     $1ff000
@@ -154,7 +166,7 @@ last_command:   ds      1
 frame_pointer:  ds      1
 event_read:     ds      1
 event_count:    ds      1
-block_index:    ds      1
+frame_index:    ds      1
 tremolo_phase:  ds      1
 vibrato_phase:  ds      1
 tremolo_value:  ds      1
@@ -208,6 +220,20 @@ rhythm_g_hh:    ds      1               ; this block's drum gains, doubled and n
 rhythm_g_sd:    ds      1
 rhythm_g_tc:    ds      1
 min_slack:      ds      1               ; stream: the least ring words a render left before its deadline
+render_mix:     ds      1               ; this channel's mix ring, selected from CHR_ROUTE
+span_frames:    ds      1               ; 1..BLOCK_FRAMES, ending at an event or control tick
+control_tick:   ds      1               ; nonzero only at the fixed envelope/LFO boundary
+block_end:      ds      1               ; exclusive frame limit of the current control block
+silent_step:    ds      1               ; span_frames * $3ff, for silent phase advancement
+early_state:    ds      1               ; 0 idle, 1 READY sent, 2 payload resident, 3 deferred command
+pending_count:  ds      1
+pending_pcm:    ds      1
+
+        org     x:$0092
+current_events: ds      1               ; the current event table, $2000 or $3000
+deferred_command: ds    1
+noise_pending:  ds      1               ; silent frames, modulo $7fffff
+noise_catchup_bits: ds  1
 
 ; ------------------------------------------------------------ entry vectors
 
@@ -239,11 +265,11 @@ min_slack:      ds      1               ; stream: the least ring words a render 
 ; Software-pipelined: the first store lands in the ring's last slot under
 ; a modulo of the block length, and the epilogue commits the last product.
 stage_mod_plain:
-        move    #MOD_RING+BLOCK_FRAMES-1,r3
-        move    #BLOCK_FRAMES-1,m3
+        move    #MOD_RING+63,r3
+        move    #63,m3
         and     y1,b
         move    b1,n0
-        do      #BLOCK_FRAMES,smp_done
+        do      x:span_frames,smp_done
         mac     x1,y1,b   y:(r0+n0),x0
         and     y1,b      a,x:(r3)+
         move    b1,n0
@@ -256,10 +282,10 @@ smp_done:
 
 ; An unmodulated operator accumulating into the mix ring: y0 = mix gain.
 stage_indep_mix:
-        move    #MIX_RING,r5
+        move    x:render_mix,r5
         and     y1,b
         move    b1,n0
-        do      #BLOCK_FRAMES,sim_done
+        do      x:span_frames,sim_done
         mac     x1,y1,b   y:(r0+n0),x0
         and     y1,b      y:(r5),a
         move    b1,n0
@@ -272,10 +298,10 @@ sim_done:
 ; A carrier modulated by the ring, accumulating into the mix: x0 = gain.
 stage_serial_mix:
         move    #MOD_RING,r3
-        move    #MIX_RING,r5
+        move    x:render_mix,r5
         nop
         move    x:(r3)+,a
-        do      #BLOCK_FRAMES,ssm_done
+        do      x:span_frames,ssm_done
         add     b,a
         and     y1,a
         move    a1,n0
@@ -301,7 +327,7 @@ stage_mod_fb:
         move    #1,m5
         nop
         move    y:(r5)+,y0
-        do      #BLOCK_FRAMES,smf_done
+        do      x:span_frames,smf_done
         move    x:(r2),x0 y:(r4),a
         add     x0,a      x0,y:(r4)
         add     b,a
@@ -320,14 +346,14 @@ smf_done:
 ; The same operator accumulating into the mix ring (additive connection).
 stage_mod_fb_mix:
         move    r7,x:save_r7
-        move    #MIX_RING,r7
+        move    x:render_mix,r7
         move    x:render_hist,r2
         move    x:render_hist,r4
         move    x:render_gain,r5
         move    #1,m5
         nop
         move    y:(r5)+,y0
-        do      #BLOCK_FRAMES,smfm_done
+        do      x:span_frames,smfm_done
         move    x:(r2),x0 y:(r4),a
         add     x0,a      x0,y:(r4)
         add     b,a
@@ -355,10 +381,10 @@ smfm_done:
 
 ; The tom-tom, and the bass drum's carrier alone: stage_indep_mix, negated.
 stage_indep_mix_neg:
-        move    #MIX_RING,r5
+        move    x:render_mix,r5
         and     y1,b
         move    b1,n0
-        do      #BLOCK_FRAMES,simn_done
+        do      x:span_frames,simn_done
         mac     x1,y1,b   y:(r0+n0),x0
         and     y1,b      y:(r5),a
         move    b1,n0
@@ -371,10 +397,10 @@ simn_done:
 ; The bass drum's modulated carrier: stage_serial_mix, negated.
 stage_serial_mix_neg:
         move    #MOD_RING,r3
-        move    #MIX_RING,r5
+        move    x:render_mix,r5
         nop
         move    x:(r3)+,a
-        do      #BLOCK_FRAMES,ssmn_done
+        do      x:span_frames,ssmn_done
         add     b,a
         and     y1,a
         move    a1,n0
@@ -397,22 +423,48 @@ ssmn_done:
 ; table's row, kept as that row's address. a = the state, x0 = the taps,
 ; y0 = the two bits' mask, x1 = the drum table's address.
 stage_drum_noise:
+        jsr     catch_up_noise
         move    #NOISE_RING,r4
-        do      #BLOCK_FRAMES,sdn_done
-        lsr     a
-        jcc     <sdn_first
-        eor     x0,a
-sdn_first:
-        lsr     a
-        jcc     <sdn_second
-        eor     x0,a
-sdn_second:
-        move    a1,b
-        and     y0,b
-        or      x1,b
+        move    #>NOISE_JUMP,r0
+        move    #>NOISE_JUMP+256,r1
+        move    #>NOISE_JUMP+512,r2
+        move    x:noise_state,a
+sdn_render:
+        do      x:span_frames,sdn_done
+        move    a1,x1
+        move    #>$020000,y0            ; >> 6: hi-hat slot in bit 3, snare in bit 0
+        mpy     x1,y0,b
+        move    #>NOISE_BITS,x0
+        and     x0,b
+        move    #>DRUM_TABLE,x0
+        or      x0,b
         move    b1,y:(r4)+
+        jsr     noise_jump
+        nop
 sdn_done:
         move    a1,x:noise_state
+        rts
+
+; A = bit-reversed Fibonacci state. Each byte contributes linearly to the
+; state after 36 slot clocks (or one whole silent control block).
+noise_jump:
+        move    a1,x1
+        move    #>$ff,x0
+        and     x0,a
+        move    a1,n0
+        move    #>$008000,y0
+        mpy     x1,y0,a
+        and     x0,a
+        move    a1,n1
+        move    #>$000080,y0
+        mpy     x1,y0,a
+        and     x0,a
+        move    a1,n2
+        move    y:(r0+n0),a
+        move    y:(r1+n1),x0
+        move    y:(r2+n2),x1
+        eor     x0,a
+        eor     x1,a
         rts
 
 ; The hi-hat's oscillator: each frame's phase becomes the address of a
@@ -421,7 +473,7 @@ stage_drum_rows:
         move    #ROW_RING,r3
         and     y1,b
         move    b1,n0
-        do      #BLOCK_FRAMES,sdr_done
+        do      x:span_frames,sdr_done
         mac     x1,y1,b   x:(r0+n0),y0
         and     y1,b
         move    b1,n0
@@ -436,10 +488,10 @@ sdr_done:
 stage_drum_mix:
         move    #ROW_RING,r3
         move    #NOISE_RING,r2
-        move    #MIX_RING,r1
+        move    x:render_mix,r1
         and     y1,b
         move    b1,n0
-        do      #BLOCK_FRAMES,sdm_done
+        do      x:span_frames,sdm_done
         mac     x1,y1,b   x:(r3)+,r4
         and     y1,b      y:(r0+n0),n4
         move    y:(r2)+,r5
@@ -490,6 +542,7 @@ ob_keyed:
         move    x:(r1)+,n1              ; STATE; -> ENV
         move    x:(r1)+,b               ; ENV; -> SL
         move    x:(r1)+,x1              ; SL; -> RATE_A
+        jclr    #0,x:control_tick,ob_env_store
         move    x:(r1+n1),n0            ; the rate of this state
         jset    #1,n1,ob_slide          ; sustain or release
         jset    #0,n1,ob_decay
@@ -596,6 +649,15 @@ ob_idle:                                ; r1 -> STATE
 ; limited, as interleaved stereo into the SSI ring, with a running checksum
 ; of the limited words for the exactness gate.
 emit_block_stream:
+        move    x:channel_count,a
+        move    #>9,x0
+        cmp     x0,a
+        jeq     emit_block_stream_mono
+        jmp     emit_block_stream_stereo
+
+; Nine-channel OPL2 has only the common ring. Keep its paired SSI words and
+; checksum, without reading and clearing the two OPL3 side rings per frame.
+emit_block_stream_mono:
         move    x:out_pointer,r2
         move    x:pcm_read,r1
         move    #MIX_RING,r5
@@ -603,22 +665,22 @@ emit_block_stream:
         move    x:master_gain,y0
         move    x:pcm_present,a
         tst     a
-        jeq     ebs_silent
-        do      #BLOCK_FRAMES,ebs_done
+        jeq     ebm_silent
+        do      x:span_frames,ebm_done
         move    x:(r1)+,x0 y:(r5)+,y1
-        mpyr    y0,y1,a                 ; the mix scaled by the master gain: rounded,
-                                        ; so that $7fffff passes it unchanged
+        mpyr    y0,y1,a
         add     x0,a
         asl     a
         move    a,x:(r2)+
         move    a,x:(r2)+
         move    a,x1
         add     x1,b
-ebs_done:
+        add     x1,b
+ebm_done:
         move    r1,x:pcm_read
-        jmp     ebs_store
-ebs_silent:
-        do      #BLOCK_FRAMES,ebs_silent_done
+        jmp     ebm_store
+ebm_silent:
+        do      x:span_frames,ebm_silent_done
         move    y:(r5)+,y1
         mpyr    y0,y1,a
         asl     a
@@ -626,8 +688,9 @@ ebs_silent:
         move    a,x:(r2)+
         move    a,x1
         add     x1,b
-ebs_silent_done:
-ebs_store:
+        add     x1,b
+ebm_silent_done:
+ebm_store:
         move    r2,x:out_pointer
         move    b1,x:checksum
         rts
@@ -675,7 +738,7 @@ start_cleared:
         move    a1,x:k_env_snap
         move    #>$1ff,a
         move    a1,x:k_env_out_max
-        move    #>1,a
+        move    #>$400000,a
         move    a1,x:noise_state
         jsr     rewind
 
@@ -819,7 +882,7 @@ rewind:
         move    a1,x:event_read
         clr     a
         move    a1,x:event_count
-        move    a1,x:block_index
+        move    a1,x:frame_index
         rts
 
 command_argument:
@@ -893,7 +956,13 @@ render_channels:
         move    #>$3ff,y1
         do      x:channel_count,rc_done
         move    x:render_ch,r0
+        move    #<CHR_ROUTE,n0
         nop
+        move    x:(r0+n0),n1
+        move    #>ROUTE_TABLE,r1
+        nop
+        move    x:(r1+n1),a
+        move    a1,x:render_mix
         move    x:(r0),r0
         nop
         jsr     (r0)
@@ -1108,34 +1177,182 @@ mode_drums_silent:
         move    #>OP_BASE+OP_CYMBAL*OP_STRIDE,r7
         move    x:rhythm_inc_tc,x1
 drums_skip_block:
-        move    #>$3ff*BLOCK_FRAMES,y0
+        move    x:silent_step,y0
         move    l:(r7),b10
         mac     x1,y0,b
         and     y1,b
         move    b10,l:(r7)
         rts
 
+clock_silent_noise:
+        jclr    #0,x:rhythm_on,csn_advance
+        move    x:>CH_BASE+CH_DRUMS*CH_STRIDE,a
+        move    #>mode_drums,x0
+        cmp     x0,a
+        jeq     csn_done
+csn_advance:
+        move    x:noise_pending,a
+        move    x:span_frames,x0
+        add     x0,a
+        move    #>$7fffff,x0
+        cmp     x0,a
+        jlt     csn_store
+        sub     x0,a
+csn_store:
+        move    a1,x:noise_pending
+csn_done:
+        rts
+
+; Silent time is advanced lazily in O(log frames), even after a long spell
+; outside rhythm mode. Each matrix has 23 columns, one per LFSR state bit.
+catch_up_noise:
+        move    x:noise_pending,a
+        tst     a
+        jeq     cun_done
+        move    #>NOISE_POWERS,r0
+        move    #>23,n0
+cun_power:
+        lsr     a
+        move    a1,x:noise_catchup_bits
+        jcc     cun_skip
+        move    x:noise_state,a
+        clr     b
+        do      #23,cun_column_done
+        lsr     a         y:(r0)+,x0
+        jcc     cun_column_next
+        eor     x0,b
+cun_column_next:
+        nop
+cun_column_done:
+        move    b1,x:noise_state
+        jmp     cun_next
+cun_skip:
+        move    (r0)+n0
+cun_next:
+        move    x:noise_catchup_bits,a
+        tst     a
+        jne     cun_power
+        move    a1,x:noise_pending
+cun_done:
+        rts
+
 clear_mix:
         move    #MIX_RING,r5
         clr     a
-        rep     #BLOCK_FRAMES
+        rep     x:span_frames
         move    a,y:(r5)+
+        move    x:channel_count,a
+        move    #>9,x0
+        cmp     x0,a
+        jeq     clear_mix_done
+        clr     a
+        move    #>LEFT_RING,r5
+        rep     x:span_frames
+        move    a,y:(r5)+
+        move    #>RIGHT_RING,r5
+        rep     x:span_frames
+        move    a,y:(r5)+
+        move    #>MUTE_RING,r5
+        rep     x:span_frames
+        move    a,y:(r5)+
+clear_mix_done:
         rts
 
 ; The mix ring doubled and limited into the bench output, two frames per
 ; pair of instructions: each shifts one accumulator while the other is
 ; stored and refilled.
 emit_block:
+        move    x:channel_count,a
+        move    #>9,x0
+        cmp     x0,a
+        jne     eb_left
         move    x:frame_pointer,r1
         move    #MIX_RING,r5
         move    x:master_gain,y0
-        do      #BLOCK_FRAMES,eb_done
+        do      x:span_frames,eb_done
         move    y:(r5)+,y1
         mpyr    y0,y1,a
         asl     a
         move    a,x:(r1)+
 eb_done:
         move    r1,x:frame_pointer
+        rts
+eb_left:
+        move    x:frame_pointer,r1
+        move    #MIX_RING,r5
+        move    #>LEFT_RING,r4
+        move    x:master_gain,y0
+        do      x:span_frames,eb_left_done
+        move    y:(r5)+,a
+        move    y:(r4)+,x0
+        add     x0,a
+        move    a1,y1
+        mpyr    y0,y1,a
+        asl     a
+        move    a,x:(r1)+
+eb_left_done:
+        move    r1,x:frame_pointer
+        rts
+
+emit_block_stream_stereo:
+        move    x:out_pointer,r2
+        move    x:pcm_read,r1
+        move    #MIX_RING,r5
+        move    #>LEFT_RING,r4
+        move    #>RIGHT_RING,r3
+        move    x:checksum,b
+        move    x:master_gain,y0
+        move    x:pcm_present,a
+        tst     a
+        jeq     ebs_silent
+        do      x:span_frames,ebs_done
+        move    x:(r1)+,x0 y:(r5),a
+        move    y:(r4)+,x1
+        add     x1,a
+        move    a1,y1
+        mpyr    y0,y1,a
+        add     x0,a
+        asl     a
+        move    a,x:(r2)+
+        move    a,x1
+        add     x1,b
+        move    y:(r5)+,a
+        move    y:(r3)+,x1
+        add     x1,a
+        move    a1,y1
+        mpyr    y0,y1,a
+        add     x0,a
+        asl     a
+        move    a,x:(r2)+
+        move    a,x1
+        add     x1,b
+ebs_done:
+        move    r1,x:pcm_read
+        jmp     ebs_store
+ebs_silent:
+        do      x:span_frames,ebs_silent_done
+        move    y:(r5),a
+        move    y:(r4)+,x1
+        add     x1,a
+        move    a1,y1
+        mpyr    y0,y1,a
+        asl     a
+        move    a,x:(r2)+
+        move    a,x1
+        add     x1,b
+        move    y:(r5)+,a
+        move    y:(r3)+,x1
+        add     x1,a
+        move    a1,y1
+        mpyr    y0,y1,a
+        asl     a
+        move    a,x:(r2)+
+        move    a,x1
+        add     x1,b
+ebs_silent_done:
+ebs_store:
+        move    r2,x:out_pointer
+        move    b1,x:checksum
         rts
 
 ; ---------------------------------------------------- block boundary pass
@@ -1146,6 +1363,7 @@ eb_done:
 ; r4 = gain pair, r5 = history word.
 
 block_boundary:
+        jclr    #0,x:control_tick,bb_operators
         ; tremolo: a 210-step triangle at 3.7 Hz, positions in 12 fraction bits
         move    x:tremolo_phase,a
         move    #>OPL_TREMOLO_STEP,x0
@@ -1201,6 +1419,7 @@ bb_vib_wrapped:
         sub     x0,a                    ; op_boundary indexes from WFBASE
         move    a1,x:vibrato_offset
 
+bb_operators:
         move    #>OP_BASE+OPR_TRIG,r1
         move    #>CH_BASE,r2
         move    #>RT_BASE,r3
@@ -1485,56 +1704,85 @@ cb_store:
 ; ------------------------------------------------------------ one block
 
 render_block:
-        jsr     apply_events
+        move    x:frame_index,a
+        move    #>BLOCK_FRAMES,x0
+        add     x0,a
+        move    a1,x:block_end
+        move    #>1,a
+        move    a1,x:control_tick
+rb_span:
+        jsr     apply_events            ; also selects the next span's end
         jset    #0,x:fm_paused,rb_paused
         jsr     block_boundary
         jsr     clear_mix
         jsr     render_channels
+        jsr     clock_silent_noise
 rb_emit:
         move    x:emit_routine,r0
         nop
         jsr     (r0)
-        move    x:block_index,a
-        move    #>1,x0
+        clr     a
+        move    a1,x:control_tick        ; event splits refresh, never advance the control clock
+        move    x:frame_index,a
+        move    x:span_frames,x0
         add     x0,a
-        move    a1,x:block_index
+        move    a1,x:frame_index
+        move    x:block_end,x0
+        cmp     x0,a
+        jlt     rb_span
         rts
 rb_paused:
         jsr     clear_mix              ; no FM or synth-state advance, but PCM still plays
         jmp     rb_emit
 
-; Apply every pending event due at this block. The table is sorted by
-; block; each event is (block << 16 | X address) followed by the value.
+; Events are sorted by sample, each (frame << 12 | X address), value.
+; Every host-owned address is below $1000. The frame is unsigned, including
+; the upper half of a 4,096-frame benchmark chunk.
 apply_events:
         move    x:event_count,a
         tst     a
-        jeq     ae_done
+        jeq     ae_block_end
         move    x:event_read,r0
         nop
 ae_loop:
-        move    x:(r0),a
-        move    a1,x1
-        move    #>$000080,y0
-        mpy     x1,y0,a                 ; event block = word >> 16
-        move    a1,a                    ; drop the shifted-out address bits
-        move    x:block_index,x0
+        move    x:(r0),x1
+        move    #>$000800,y0
+        mpy     x1,y0,a                 ; signed word >> 12
+        move    #>$000fff,x0
+        and     x0,a                    ; unsigned 12-bit frame
+        move    a1,a
+        move    x:frame_index,x0
         cmp     x0,a
-        jne     ae_store_pointer
+        jgt     ae_next
         move    (r0)+
         move    x1,a
-        move    #>$00ffff,x0
+        move    #>$000fff,x0
         and     x0,a
         move    a1,r1
-        move    x:(r0)+,x0              ; value
+        move    x:(r0)+,x0
         move    x:event_count,a
         move    x0,x:(r1)
         move    #>1,x0
         sub     x0,a
         move    a1,x:event_count
         jne     ae_loop
-ae_store_pointer:
+        move    x:block_end,a
+ae_next:
         move    r0,x:event_read
-ae_done:
+        move    x:block_end,x0
+        cmp     x0,a
+        jle     ae_span
+ae_block_end:
+        move    x:block_end,a
+ae_span:
+        move    x:frame_index,x0
+        sub     x0,a
+        move    a1,x:span_frames
+        move    a1,x1
+        move    #>$3ff,y0
+        mpy     x1,y0,a
+        asr     a
+        move    a0,x:silent_step
         rts
 
 
@@ -1572,6 +1820,9 @@ css_cleared:
         move    a1,x:checksum
         move    a1,x:pcm_previous
         move    a1,x:pcm_present
+        move    a1,x:early_state
+        move    #>STREAM_EVENT_BASE,a
+        move    a1,x:current_events
         move    #>SSI_HALF_WORDS,a
         move    a1,x:min_slack
         move    #>1,a
@@ -1589,8 +1840,18 @@ css_cleared:
         jsr     host_ack
 
 stream_loop:
+        move    x:early_state,a
+        move    #>3,x0
+        cmp     x0,a
+        jne     stream_receive
+        clr     a
+        move    a1,x:early_state
+        move    x:deferred_command,a
+        jmp     stream_dispatch
+stream_receive:
         jsclr   #0,x:m_hsr,wait_rx
         movep   x:m_hrx,a
+stream_dispatch:
         move    a1,x:last_command
         move    a1,x1
         move    #>$000080,y0
@@ -1631,9 +1892,9 @@ command_refill:
         jsr     host_send
         jsr     host_receive
         move    a1,x:event_count
-        move    #>STREAM_EVENT_BASE,b
+        move    x:current_events,b
         move    b1,x:event_read
-        move    #>STREAM_EVENT_BASE,r0
+        move    b1,r0
         tst     a
         jeq     refill_events_done
         do      a1,refill_events_done
@@ -1652,8 +1913,127 @@ refill_pcm_present:
         jsr     receive_pcm
 refill_pcm_done:
         jsr     send_status             ; the acknowledgement carries the counters
+refill_render:
         jsr     render_period
-        jmp     stream_loop
+        ; An announced payload must finish before accepting another command.
+        ; A resident one is promoted only after all current events and PCM
+        ; have been consumed. The acknowledgement already transferred ownership.
+refill_pending:
+        jsr     track_halves
+        jsr     early_receive
+        move    x:early_state,a
+        move    #>1,x0
+        cmp     x0,a
+        jeq     refill_pending
+        move    #>2,x0
+        cmp     x0,a
+        jne     stream_loop
+        move    x:current_events,a
+        move    #>$1000,x0
+        eor     x0,a
+        move    a1,x:current_events
+        move    a1,x:event_read
+        move    x:pending_count,a
+        move    a1,x:event_count
+        move    x:pending_pcm,a
+        move    a1,x:pcm_present
+        tst     a
+        jne     promote_pcm
+        move    a1,x:pcm_previous
+        jmp     promote_done
+promote_pcm:
+        jsr     expand_pending_pcm
+promote_done:
+        clr     a
+        move    a1,x:early_state
+        jmp     refill_render
+
+; Service the next refill while waiting for the SSI half or between render
+; blocks. READY is sent without waiting for the host's next 1 kHz tick.
+; Once its first word arrives, receive the paced blast into disjoint staging
+; memory. SSI tracking continues during every host wait. Queries and STOP
+; are deferred until all acknowledged periods have rendered.
+early_receive:
+        move    x:early_state,a
+        tst     a
+        jne     early_payload
+        jclr    #0,x:m_hsr,early_done
+        movep   x:m_hrx,a
+        move    a1,x:deferred_command
+        move    #>CMD_REFILL*$10000,x0
+        cmp     x0,a
+        jeq     early_ready
+        move    #>3,a
+        move    a1,x:early_state
+        rts
+early_ready:
+        move    #>REPLY_READY,a
+        jsr     host_send
+        move    #>1,a
+        move    a1,x:early_state
+        rts
+early_payload:
+        move    #>1,x0
+        cmp     x0,a
+        jne     early_done
+        jclr    #0,x:m_hsr,early_done
+        movep   x:m_hrx,a
+        move    a1,x:pending_count
+        move    a1,b
+        move    x:current_events,a
+        move    #>$1000,x0
+        eor     x0,a
+        move    a1,r0
+        tst     b
+        jeq     early_events_done
+        do      b1,early_events_done
+        jsclr   #0,x:m_hsr,wait_rx
+        movep   x:m_hrx,x:(r0)+
+        jsclr   #0,x:m_hsr,wait_rx
+        movep   x:m_hrx,x:(r0)+
+early_events_done:
+        jsr     host_receive
+        move    a1,x:pending_pcm
+        tst     a
+        jeq     early_received
+        move    #>PCM_PENDING,r0
+        do      #PCM_PER_PERIOD,early_pcm_done
+        jsclr   #0,x:m_hsr,wait_rx
+        movep   x:m_hrx,x:(r0)+
+early_pcm_done:
+early_received:
+        move    #>2,a
+        move    a1,x:early_state
+        jsr     send_status
+early_done:
+        rts
+
+; Expand staged samples only at promotion; the previous render still owns
+; PCM_STAGE and pcm_previous while an early receive fills PCM_PENDING.
+expand_pending_pcm:
+        move    #PCM_PENDING,r0
+        move    #PCM_STAGE,r1
+        move    x:pcm_previous,b
+        move    #>$200000,y0
+        do      #PCM_PER_PERIOD,epp_done
+        move    x:(r0)+,a
+        move    a1,x0
+        sub     b,a
+        move    a1,x1
+        mpy     x1,y0,a
+        move    a1,x1
+        move    b1,a
+        add     x1,a
+        move    a1,x:(r1)+
+        add     x1,a
+        move    a1,x:(r1)+
+        add     x1,a
+        move    a1,x:(r1)+
+        move    x0,x:(r1)+
+        move    x0,b
+epp_done:
+        move    b1,x:pcm_previous
+        rts
 
 ; 192 samples, each 16 bits in bits 7-22 of its word, expanded to 768
 ; frames by linear interpolation from the previous sample.
@@ -1698,6 +2078,7 @@ render_period:
         move    #>1,a
         move    a1,x:stream_primed
 rp_first:
+        jsr     early_receive
         jsr     track_halves
         move    x:stream_next_half,b
         move    r6,a
@@ -1711,6 +2092,7 @@ rp_first_a:
         cmp     x0,a                    ; rendering A: wait until r6 is in A
         jge     rp_first
 rp_wait:
+        jsr     early_receive
         jsr     track_halves
         move    x:stream_next_half,b
         move    r6,a
@@ -1730,9 +2112,10 @@ rp_go:
         move    #>PCM_STAGE,a
         move    a1,x:pcm_read
         clr     a
-        move    a1,x:block_index
+        move    a1,x:frame_index
         do      #PERIOD_BLOCKS,rp_rendered
         jsr     render_block
+        jsr     early_receive
         jsr     track_halves            ; so a crossing mid-render is seen within a block
         nop
 rp_rendered:

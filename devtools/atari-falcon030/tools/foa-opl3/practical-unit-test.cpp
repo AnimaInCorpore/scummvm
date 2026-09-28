@@ -418,18 +418,36 @@ unsigned long checkRhythmSelection() {
 			}
 		}
 	}
-	// The noise generator: the chip's recurrence, s[n + 23] = s[n + 14] ^ s[n].
-	int32_t noise = 1;
-	uint8_t bits[4096];
-	for (int n = 0; n < 4096; ++n) {
-		bits[n] = (uint8_t)(noise & 1);
-		noise = (noise >> 1) ^ ((noise & 1) ? P::kNoiseTaps : 0);
-	}
-	for (int n = 0; n + 23 < 4096; ++n)
-		if (bits[n + 23] != (bits[n + 14] ^ bits[n])) {
-			fail("noise recurrence", n);
-			break;
+	// Compare the jump tables and both drum taps with independent single-slot
+	// clocks, including catch-up after long silent spans and the LFSR period.
+	uint32_t exactNoise = 1;
+	P::Chip noiseChip;
+	P::reset(&noiseChip, 9);
+	for (int n = 0; n < 100000; ++n) {
+		if (n % 97 == 0) {
+			P::catchUpNoise(&noiseChip);
+			const uint32_t taps = ((exactNoise >> 13) & 1) * 8 + ((exactNoise >> 16) & 1);
+			if (((noiseChip.noise >> 6) & 9) != (int32_t)taps)
+				fail("36-slot noise taps", n);
+			noiseChip.noise = P::noiseJump(noiseChip.noise);
+		} else {
+			noiseChip.frames = 1;
+			P::silentNoise(&noiseChip);
 		}
+		for (int slot = 0; slot < 36; ++slot)
+			exactNoise = (exactNoise >> 1) | (((exactNoise ^ (exactNoise >> 14)) & 1) << 22);
+	}
+	P::catchUpNoise(&noiseChip);
+	int32_t reversed = 0;
+	for (int bit = 0; bit < 23; ++bit)
+		reversed |= ((exactNoise >> bit) & 1) << (22 - bit);
+	if (noiseChip.noise != reversed)
+		fail("silent noise catch-up state");
+	noiseChip.noisePending = 0x7ffffe;
+	noiseChip.frames = 1;
+	P::silentNoise(&noiseChip);
+	if (noiseChip.noisePending != 0 || noiseChip.noise != reversed)
+		fail("silent noise period wrap");
 	return checked;
 }
 
@@ -526,7 +544,86 @@ void checkWaveformEnable() {
 		fail("an OPL3 has no waveform select enable", chip.op[0].w[P::OP_WFBASE]);
 }
 
+void checkOpl3Layers() {
+	E::Chip exact;
+	E::reset(&exact, 18);
+	P::Chip practical;
+	P::reset(&practical, 18);
+	P::DirectSink sink(&practical);
+	P::Decoder decoder;
+	decoder.reset(&sink, 18);
+	const uint16_t regs[] = { 0x105, 0xe0, 0x1e0, 0xc0, 0x1c0, 0x105, 0x1e0, 0x1c0 };
+	const uint8_t values[] = { 1, 7, 5, 0x30, 0x20, 0, 7, 0x10 };
+	for (unsigned i = 0; i < sizeof(regs) / sizeof(regs[0]); ++i) {
+		E::writeRegister(&exact, regs[i], values[i]);
+		decoder.write(0, regs[i], values[i]);
+		decoder.flush();
+		for (int c = 0; c < 18; ++c) {
+			const int route = exact.channel[c].outLeftMask | (exact.channel[c].outRightMask << 1);
+			if (practical.ch[c].w[P::CH_ROUTE] != route)
+				fail("OPL3 output masks", i, c, practical.ch[c].w[P::CH_ROUTE], route);
+		}
+		for (int c = 0; c < 18; ++c)
+			for (int op = 0; op < 2; ++op) {
+				const int index = 2 * c + op;
+				const int chipSlot = E::kChannelSlot[c] + 3 * op;
+				const int expected = P::waveBase(exact.slot[chipSlot].regWf);
+				if (practical.op[index].w[P::OP_WFBASE] != expected)
+					fail("OPL3 waveform selection", i, index, practical.op[index].w[P::OP_WFBASE], expected);
+			}
+	}
+}
+
 } // namespace
+
+// Splitting a block without changing a register is observationally neutral:
+// same samples, envelopes, oscillator phases, feedback and LFO clock.
+void checkEventSplits() {
+	for (int rhythm = 0; rhythm < 2; ++rhythm) {
+		Pair p;
+		for (int c = 0; c < 9; ++c) {
+			const int off = (c / 3) * 8 + c % 3;
+			for (int o : { off, off + 3 }) {
+				p.write(0x20 + o, 0xe1);
+				p.write(0x60 + o, 0xb4);
+				p.write(0x80 + o, 0x24);
+			}
+			p.write(0xc0 + c, 6);
+			p.write(0xa0 + c, 0x41);
+			p.write(0xb0 + c, 0x32);
+		}
+		if (rhythm)
+			p.write(0xbd, 0xff);
+		p.renderBlocks(20);
+		for (int cut = 1; cut < P::kBlockFrames; ++cut) {
+			P::Chip whole = p.practical, split = p.practical;
+			int32_t expected[P::kBlockFrames], right[P::kBlockFrames], got[P::kBlockFrames];
+			P::renderBlockStereo(&whole, nullptr, expected, right);
+			P::renderSpanStereo(&split, nullptr, got, right, cut, true);
+			P::renderSpanStereo(&split, nullptr, got + cut, right + cut, P::kBlockFrames - cut, false);
+			if (memcmp(expected, got, sizeof(got)) || memcmp(whole.op, split.op, sizeof(whole.op))
+			    || memcmp(whole.ch, split.ch, sizeof(whole.ch))
+			    || whole.tremoloPhase != split.tremoloPhase || whole.vibratoPhase != split.vibratoPhase
+			    || whole.noise != split.noise || whole.noisePending != split.noisePending)
+				fail("event split changed synthesis time", rhythm, cut);
+		}
+	}
+	// A level write lands precisely at its sample; PCM survives a mid-block
+	// pause and parameter refresh does not advance the envelope or LFO.
+	Pair p;
+	p.write(0x23, 0x21); p.write(0x63, 0xf0); p.write(0xa0, 0x41); p.write(0xb0, 0x32);
+	p.renderBlocks(1);
+	int32_t out[P::kBlockFrames], right[P::kBlockFrames], pcm[P::kBlockFrames];
+	for (int i = 0; i < P::kBlockFrames; ++i) pcm[i] = (i - 16) * 128;
+	P::renderSpanStereo(&p.practical, pcm, out, right, 1, true);
+	const int32_t env = p.practical.op[1].w[P::OP_ENV], tremolo = p.practical.tremoloPhase;
+	P::poke(&p.practical, P::SC_PAUSED, 1);
+	P::renderSpanStereo(&p.practical, pcm + 1, out + 1, right + 1, P::kBlockFrames - 1, false);
+	for (int i = 1; i < P::kBlockFrames; ++i)
+		if (out[i] != 2 * pcm[i] || right[i] != 2 * pcm[i]) fail("mid-block pause moved PCM", i);
+	if (p.practical.op[1].w[P::OP_ENV] != env || p.practical.tremoloPhase != tremolo)
+		fail("mid-block pause advanced control time");
+}
 
 int main() {
 	const unsigned long pitches = checkPitch();
@@ -539,6 +636,8 @@ int main() {
 	const unsigned long selections = checkRhythmSelection();
 	const unsigned rhythmWrites = checkRhythmKeys();
 	checkWaveformEnable();
+	checkOpl3Layers();
+	checkEventSplits();
 	std::printf("{\"increments_checked\": %lu, \"sustain_level_cases\": %lu,"
 	            " \"sustain_level_cases_settled_alike\": %lu, \"attack_change_cases\": %u,"
 	            " \"rhythm_phase_selections\": %lu, \"rhythm_key_writes\": %u, \"failures\": %u}\n",

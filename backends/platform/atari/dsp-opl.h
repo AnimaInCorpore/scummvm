@@ -34,9 +34,9 @@
  * The AdLib driver above it is unchanged: it writes registers and asks for
  * a 250 Hz timer. Register writes go through the practical kernel's decoder
  * into parameter events for the DSP's operator records, stamped with the
- * 48-frame block of the period being produced; the timer callbacks run
+ * sample within the period being produced; the timer callbacks run
  * inside period production, on the audio clock, so a callback's writes land
- * in the block that corresponds to its time. AtariMixerManager owns the
+ * at the sample that corresponds to its time. AtariMixerManager owns the
  * transport, whose interrupt calls producePeriod() once per 768-frame
  * period, so the callbacks, and with them iMUSE's sequencing, run in
  * interrupt context (see atari-dsp.h for what that requires).
@@ -87,10 +87,10 @@ private:
 	bool _running;
 	uint32 _framesPerTick16;   // codec frames per callback, 16.16
 	uint32 _nextTick16;        // next callback's frame within the period, 16.16
-	uint32 _block;             // block of the period the current writes belong to
+	uint32 _frame;             // sample within the period the current writes belong to
 	bool _resetting;           // the decoder's reset is being emitted
 
-	void resetDecoder(uint32 atBlock);
+	void resetDecoder(uint32 atFrame);
 	void noteLost();
 
 	// Writes between periods wait here for the next one. A song start from

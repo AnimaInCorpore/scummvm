@@ -128,25 +128,26 @@ inline uint32 readReply() {
 	return value;
 }
 
-// One delivery step: announce the head period, or blast it once the
-// kernel has parked its receiver, or take its acknowledgement.
+// Drain up to three immediately ready transitions per tick. In particular,
+// taking an acknowledgement can announce the next queued period at once.
+// Only the READY-protected payload transfer waits on the paced host port.
 void deliverStep() {
-	if (s_head == s_tail)
-		return;
-	AtariDspAudio::Period *period = s_queue[s_head];
-	switch (s_pollState) {
-	case 0:
-		if (txde()) {
+	for (int step = 0; step < 3 && s_head != s_tail; ++step) {
+		AtariDspAudio::Period *period = s_queue[s_head];
+		switch (s_pollState) {
+		case 0:
+			if (!txde())
+				return;
 			*kHostData = kCmdRefill;
 			s_pollState = 1;
-		}
-		break;
-	case 1:
-		if (rxdf()) {
+			break;
+		case 1: {
+			if (!rxdf())
+				return;
 			if (readReply() != kReplyReady) {
 				++s_protocolErrors;
 				s_pollState = 0;
-				break;
+				return;
 			}
 			const uint32 pcmWords = period->words[1 + 2 * period->eventCount] ? 1 + AtariDspAudio::kPcmPerPeriod : 1;
 			const uint32 count = 1 + 2 * period->eventCount + pcmWords;
@@ -157,16 +158,17 @@ void deliverStep() {
 				*kHostData = *word++;
 			}
 			s_pollState = 2;
+			break;
 		}
-		break;
-	default:
-		if (rxdf()) {
+		default:
+			if (!rxdf())
+				return;
 			s_status = readReply();
 			period->inFlight = false;
 			s_head = (s_head + 1) % kQueueSize;
 			s_pollState = 0;
+			break;
 		}
-		break;
 	}
 }
 
@@ -375,11 +377,17 @@ bool AtariDspAudio::uploadTables() {
 	for (int i = 0; i < 8; ++i)
 		buffer[i] = (uint32)P::kVibratoOffset[i];
 	uploadWords(false, P::kVibratoTable, buffer, 8);
+	const uint32 routes[4] = { P::kMuteRing, P::kLeftRing, P::kRightRing, 0 };
+	uploadWords(false, P::kRouteTable, routes, 4);
 
-	for (int wf = 0; wf < P::kWaveforms; ++wf)
+	for (int wf = 0; wf < P::kWaveforms; ++wf) {
 		for (int phase = 0; phase < 1024; ++phase)
-			buffer[wf * 1024 + phase] = (uint32)P::waveSample((uint8)wf, (uint16)phase) & 0xffffff;
-	uploadWords(true, P::kWaveBase, buffer, P::kWaveforms * 1024);
+			buffer[phase] = (uint32)P::waveSample((uint8)wf, (uint16)phase) & 0xffffff;
+		uploadWords(true, P::waveBase(wf), buffer, 1024);
+	}
+
+	uploadWords(true, P::kNoiseJump, kOplNoiseJump, 768);
+	uploadWords(true, P::kNoisePowers, kOplNoisePowers, 529);
 
 	// Rhythm mode's lookups: the select table's row by the hi-hat's phase and
 	// its column by the cymbal's, the table, and the phases the drums play.
@@ -548,12 +556,13 @@ AtariDspAudio::Period *AtariDspAudio::beginPeriod(bool extension) {
 	return nullptr;
 }
 
-bool AtariDspAudio::addEvent(Period *period, uint32 block, uint16 address, uint32 value) {
-	if (period->eventCount >= kMaxEvents) {
+bool AtariDspAudio::addEvent(Period *period, uint32 frame, uint16 address, uint32 value) {
+	if (period->eventCount >= kMaxEvents || frame >= kPeriodFrames || address >= 0x1000
+	    || (period->eventCount && frame < (period->words[2 * period->eventCount - 1] >> 12))) {
 		++s_protocolErrors;
 		return false;
 	}
-	period->words[1 + 2 * period->eventCount] = ((block & 0xff) << 16) | address;
+	period->words[1 + 2 * period->eventCount] = OplPractical::packEvent(frame, address);
 	period->words[2 + 2 * period->eventCount] = value & 0xffffff;
 	++period->eventCount;
 	return true;

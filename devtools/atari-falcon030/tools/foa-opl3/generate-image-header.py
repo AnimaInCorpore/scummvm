@@ -23,6 +23,17 @@ def main():
     spec.loader.exec_module(stage2)
     boot = stage2.make_boot_image(args.bootstrap)
     stream, sections, program_words = stage2.make_program_stream(args.program)
+    # External Y:$2800-$3eff holds the added OPL3 waveforms and stereo
+    # rings. On the Falcon it aliases external P word for word; an assembler
+    # section that grows into it would otherwise corrupt code at boot.
+    for section in stage2.parse_lod(args.program)[0]:
+        if section.space == "P" and section.address < 0x0200 and section.limit > 0x0200:
+            raise SystemExit("error: hot P code exceeds the DSP56001's $0000-$01ff internal program RAM")
+        if section.space == "P" and section.address < 0x3f00 and section.limit > 0x2800:
+            raise SystemExit(
+                f"error: P:${section.address:04x}-${section.limit - 1:04x} overlaps"
+                " OPL3 waveform/stereo/noise Y memory ($2800-$3eff)"
+            )
     source = Path(__file__).resolve().parent / "dsp/oplrt.asm"
     digest = source_sha256(source)[:16]
 

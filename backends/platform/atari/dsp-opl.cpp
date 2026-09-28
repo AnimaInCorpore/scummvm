@@ -49,7 +49,7 @@ AtariDspAudio *g_atariDspAudio = nullptr;
 
 AtariDspOPL::AtariDspOPL(AtariDspAudio *audio)
 	: _audio(audio), _period(nullptr), _decoder(new OplPractical::Decoder), _address(0),
-	  _running(false), _framesPerTick16(0), _nextTick16(0), _block(0), _resetting(false) {
+	  _running(false), _framesPerTick16(0), _nextTick16(0), _frame(0), _resetting(false) {
 	_sink.owner = this;
 	// The kernel outlives every OPL and may hold an earlier one's patches:
 	// the decoder's reset sends the whole reset state rather than trust it.
@@ -62,10 +62,10 @@ AtariDspOPL::AtariDspOPL(AtariDspAudio *audio)
 // A reset supersedes every write before it, lost ones included, so it also
 // ends a resync that is still due; if its own events are lost, noteLost
 // schedules the resync again, with the machine's words.
-void AtariDspOPL::resetDecoder(uint32 atBlock) {
+void AtariDspOPL::resetDecoder(uint32 atFrame) {
 	s_resync = s_resyncMachine = false;
 	_resetting = true;
-	_decoder->reset(&_sink, 9, atBlock);
+	_decoder->reset(&_sink, 9, atFrame);
 	_resetting = false;
 }
 
@@ -107,7 +107,7 @@ void AtariDspOPL::reset() {
 	// period belong to what the reset ends.
 	if (!_period)
 		s_pendingCount = 0;
-	resetDecoder(_block);
+	resetDecoder(_frame);
 }
 
 void AtariDspOPL::write(int a, int v) {
@@ -120,7 +120,7 @@ void AtariDspOPL::write(int a, int v) {
 
 void AtariDspOPL::writeReg(int r, int v) {
 	AtariCriticalSection critical;
-	_decoder->write(_block, (uint16)(r & 0x1ff), (uint8)v);
+	_decoder->write(_frame, (uint16)(r & 0x1ff), (uint8)v);
 	// Outside a period there is no block to wait for: the words go to the
 	// pending queue now, as they always did. Inside one, the decoder derives
 	// them when the block moves on, and producePeriod flushes the last.
@@ -175,7 +175,7 @@ void AtariDspOPL::flushPending(AtariDspAudio *audio, AtariDspAudio::Period *peri
 	// A fresh period takes the whole queue, the largest resend (every slot,
 	// the machine's words too, and the three scalars), the master gain and pause
 	// state, and still has room.
-	static_assert(kPendingMax + OplPractical::kSlots * 18 + OplPractical::kChannels * 2 + 3 + 2
+	static_assert(kPendingMax + OplPractical::kSlots * 18 + OplPractical::kChannels * 3 + 3 + 2
 	              <= AtariDspAudio::kMaxEvents, "a full queue and its resync must fit one period");
 	for (uint32 i = 0; i < s_pendingCount; ++i) {
 		if (!audio->addEvent(period, 0, (uint16)s_pending[2 * i], s_pending[2 * i + 1])) {
@@ -212,12 +212,12 @@ void AtariDspOPL::stopCallbacks() {
 
 void AtariDspOPL::producePeriod(AtariDspAudio::Period *period) {
 	_period = period;
-	_block = 0;
+	_frame = 0;
 
 	const uint32 periodFrames16 = (uint32)AtariDspAudio::kPeriodFrames << 16;
 	if (_running && _framesPerTick16) {
 		while (_nextTick16 < periodFrames16) {
-			_block = (_nextTick16 >> 16) / AtariDspAudio::kBlockFrames;
+			_frame = _nextTick16 >> 16;
 			if (_callback && _callback->isValid())
 				(*_callback)();
 			_nextTick16 += _framesPerTick16;
@@ -225,9 +225,8 @@ void AtariDspOPL::producePeriod(AtariDspAudio::Period *period) {
 		_nextTick16 -= periodFrames16;
 	}
 	_decoder->flush();
-	_block = AtariDspAudio::kPeriodBlocks - 1;
 	_period = nullptr;
-	_block = 0;
+	_frame = 0;
 }
 
 #endif

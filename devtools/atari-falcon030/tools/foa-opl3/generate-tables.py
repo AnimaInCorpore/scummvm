@@ -11,7 +11,7 @@ on chip: the eight 1,024-entry unpacked waveform tables a desktop build uses
 are reconstructed from the quarter sine by index and sign arithmetic instead.
 
 The practical kernel renders at the Falcon codec's 49,169.921875 Hz in blocks
-of 48 frames, and advances its envelopes and LFO once per block. Its tables
+of 32 frames, and advances its envelopes and LFO once per block. Its tables
 are derived here from the exact envelope machine rather than typed in:
 each rate's attack curve and decay slope are measured by running that
 machine, then retimed to the codec rate and folded into one step per block.
@@ -26,13 +26,13 @@ EXP = [2 * (int(round((2 ** ((255 - i) / 256.0) - 1) * 1024)) + 1024) for i in r
 NATIVE_RATE = 49716.0
 CODEC_RATE = 25175000.0 / 256.0 / 2.0   # the codec's 49,170 Hz: within 1.1% of the chip's native rate
 RATIO = NATIVE_RATE / CODEC_RATE
-# 0.98 ms: a write takes effect at the start of its block, so up to a block
+# 0.65 ms: a write takes effect at the start of its block, so up to a block
 # early, and envelopes and LFOs step once a block. Every per-block cost on the
 # DSP amortizes over the block, so a shorter one costs cycles: the stress case
 # takes 71% of the budget at 64 frames, 76% at 48 and 86% at 32, where the
 # tightest stream period leaves half a millisecond, less than the game's
 # transport needs. The rt-bench and rt-stream gates measure both.
-BLOCK_FRAMES = 48
+BLOCK_FRAMES = 32
 NATIVE_PER_BLOCK = BLOCK_FRAMES * RATIO
 PERIOD_FRAMES = 768  # the stream transport's period, 15.62 ms, whatever the block
 if PERIOD_FRAMES % BLOCK_FRAMES:
@@ -172,6 +172,32 @@ def practical_tables():
     }
 
 
+def noise_jump(state, steps):
+    # Bit-reversed OPL Fibonacci LFSR: its hi-hat/snare taps are bits 9/6.
+    for _ in range(steps):
+        state = ((state << 1) & 0x7fffff) | (((state >> 22) ^ (state >> 8)) & 1)
+    return state
+
+
+NOISE_JUMP = [noise_jump(byte << shift, 36)
+              for shift in (0, 8, 16) for byte in range(256)]
+
+
+def noise_transform(columns, state):
+    value = 0
+    for bit in range(23):
+        if state & (1 << bit):
+            value ^= columns[bit]
+    return value
+
+
+NOISE_POWERS = []
+noise_columns = [noise_jump(1 << bit, 36) for bit in range(23)]
+for _ in range(23):
+    NOISE_POWERS += noise_columns
+    noise_columns = [noise_transform(noise_columns, column) for column in noise_columns]
+
+
 def c_table(name, values, per_line=8, ctype="uint16_t", width=4):
     body = ""
     for start in range(0, len(values), per_line):
@@ -234,6 +260,10 @@ def main():
                 + c_table("kOplDecayBlock", tables["decay"], ctype="uint32_t", width=6) +
                 "\n/* Half the envelope gain 2^(-envOut/32), 24-bit fraction, zero from 0x1f8. */\n"
                 + c_table("kOplGain", tables["gain"], ctype="uint32_t", width=6)
+                + "\n/* GF(2) noise jump by 36 slot clocks, three byte slices. */\n"
+                + c_table("kOplNoiseJump", NOISE_JUMP, ctype="uint32_t", width=6)
+                + "\n/* 23 columns for each power-of-two frame jump through silent time. */\n"
+                + c_table("kOplNoisePowers", NOISE_POWERS, ctype="uint32_t", width=6)
                 + "\n#endif\n")
         if args.practical_dsp:
             # Only the LFO steps are assembled in; the tables reach the DSP in
