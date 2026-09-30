@@ -76,7 +76,7 @@ struct Callback {
 struct Decoder { void flush() {} };
 struct AtariDspOPL {
  AtariDspAudio::Period *_period = nullptr;
- uint32 _block = 0;
+ uint32 _frame = 0;
  bool _running = true;
  uint32 _framesPerTick16 = (uint32)((OPL_PRACTICAL_CODEC_RATE / 250) * 65536.0 + 0.5);
  uint32 _nextTick16 = 0;
