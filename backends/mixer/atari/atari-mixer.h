@@ -84,9 +84,6 @@ private:
 	volatile uint _dspPauseLevel = 0;     // nested mixer pauses, including the FM synth
 	int _dspFmVolume = -1;
 	uint32 _dspLoggedPeriods = 0;
-	volatile uint32 _probePc = 0, _probeActiveGaps = 0;
-	volatile bool _probeWasEmpty = false, _probeActive = false;
-	uint32 _probeLogged = 0, _probeUpdate = 0, _probeMixMax = 0;
 #endif
 };
 

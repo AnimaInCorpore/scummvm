@@ -49,7 +49,6 @@
 #include "devtools/atari-falcon030/tools/foa-opl3/opl-practical.h"
 
 extern AtariDspAudio *g_atariDspAudio;
-extern "C" void *atari_dsp_saved_stack;
 
 namespace {
 
@@ -339,7 +338,6 @@ bool AtariMixerManager::initDsp() {
 	// Fills the ring, then the interrupt takes over the periods.
 	resumeAudio();
 	_dsp->setProducer(produceDspPeriod, this);
-	debug("PCMProbe: producer %p", (void *)produceDspPeriod);
 	return true;
 }
 
@@ -350,24 +348,13 @@ bool AtariMixerManager::initDsp() {
 void AtariMixerManager::updateDsp() {
 	if (_audioSuspended)
 		return;
-	const uint32 probeNow = g_system->getMillis();
-	if (_probeLogged != _dspPcmUnderruns) {
-		debug("PCMGap: missed %u, active %u, pc %08x, update gap %u ms, mix max %u ms, channels %d/%d",
-		      _dspPcmUnderruns - _probeLogged, _probeActiveGaps, _probePc, probeNow - _probeUpdate, _probeMixMax,
-		      _mixer->hasActiveChannelOfType(Audio::Mixer::kSpeechSoundType), _mixer->hasActiveChannelOfType(Audio::Mixer::kSFXSoundType));
-		_probeLogged = _dspPcmUnderruns;
-	}
-	_probeUpdate = probeNow;
 	_dsp->poll();
 	while (true) {
 		const int filled = (_dspPcmTail - _dspPcmHead + kDspPcmChunks) % kDspPcmChunks;
 		if (filled >= kDspPcmAhead)
 			break;
-		const uint32 probeMix = g_system->getMillis();
 		const int processed = _mixer->mixCallback(_sampleBuffer, _sampleBufferSize);
-		_probeActive = processed > 0;
 		_dspLastChunkAudible = processed > 0;
-		_probeMixMax = MAX<uint32>(_probeMixMax, g_system->getMillis() - probeMix);
 		const int32 *src = (const int32 *)_sampleBuffer;
 		int16 *chunk = _dspPcmRing + _dspPcmTail * AtariDspAudio::kPcmPerPeriod;
 		for (int i = 0; i < _samples; ++i) {
@@ -446,16 +433,9 @@ bool AtariMixerManager::produceDspPeriod(void *context, bool runCallbacks) {
 	{
 		AtariInterruptsOff off;
 		if (self->_dspPcmHead != self->_dspPcmTail) {
-			self->_probeWasEmpty = false;
 			self->_dsp->setPcm(period, self->_dspPcmRing + self->_dspPcmHead * AtariDspAudio::kPcmPerPeriod);
 			self->_dspPcmHead = (self->_dspPcmHead + 1) % kDspPcmChunks;
 		} else {
-			if (!self->_probeWasEmpty) {
-				self->_probePc = *(uint32 *)((byte *)atari_dsp_saved_stack + 62);
-				self->_probeWasEmpty = true;
-			}
-			if (self->_probeActive)
-				++self->_probeActiveGaps;
 			self->_dsp->setPcm(period, nullptr);
 			if (runCallbacks) {
 				++self->_dspPcmUnderruns;
