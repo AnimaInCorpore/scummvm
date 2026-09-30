@@ -814,6 +814,24 @@ The ScummVM build wires it in without touching the AdLib driver:
   bodies, including nested pauses and a negative control that ignores pause.
   `atari_dsp_audio=false` restores DMA playback.
 
+A period that finds the PCM ring empty counts as a PCM underrun; one that
+follows a chunk which carried speech or effects also counts as an audible PCM
+gap. The transport's log line ends with `N audible pcm gaps`, and
+[game-gate.py](game-gate.py) records it as `pcm_audible_gaps` (it does not
+fail on it yet). On 2026-09-30 two 90-second Atlantis runs on the emulated
+Falcon, one with speech muted and one with it on, counted 1,525 and 1,526
+underruns in about 5,820 periods and no audible gap. About 1,175 of the
+underruns precede the game: the main loop makes no mixer update during the
+18.6 s of startup. The rest are stalls of 0.5 to 2.4 s in the engine's own
+decoding (`Gdi::drawStripBasicV`, `MajMinCodec::decodeLine`, the MSRLE and
+dither decoders), sampled at the moment the ring ran dry, with no speech or
+effect channel active. A deeper ring cannot cover stalls that long, and every
+chunk it holds is latency added to each new sound. Slicing file reads to refill
+the ring between slices cut the total by only 4% (1,525 to 1,461) and was
+dropped. Not established: whether any speech or effect played in those 90
+seconds, so the zero says no gap followed sound, not that the ring survived
+heavy PCM load; a scene change during speech is the test still to run.
+
 [game-gate.py](game-gate.py) runs Atlantis on the emulated Falcon with that
 build, records Hatari's DAC output and reads the transport's counters from
 the log. [game-results.json](game-results.json) is the 48-frame kernel's
