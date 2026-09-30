@@ -366,6 +366,7 @@ void AtariMixerManager::updateDsp() {
 		const uint32 probeMix = g_system->getMillis();
 		const int processed = _mixer->mixCallback(_sampleBuffer, _sampleBufferSize);
 		_probeActive = processed > 0;
+		_dspLastChunkAudible = processed > 0;
 		_probeMixMax = MAX<uint32>(_probeMixMax, g_system->getMillis() - probeMix);
 		const int32 *src = (const int32 *)_sampleBuffer;
 		int16 *chunk = _dspPcmRing + _dspPcmTail * AtariDspAudio::kPcmPerPeriod;
@@ -388,9 +389,9 @@ void AtariMixerManager::updateDsp() {
 		_dsp->queryCounters(rendered, late);
 		_dsp->productionStats(refusedStreak, refusedMutex, refusedAllocator, refusedLevel, extended, produceMax, emptyTicks, emptyStreak);
 		debug("AtariDspAudio: %u periods submitted, %u rendered, %u late, %u protocol errors, %u pcm underruns, "
-		      "%u extended, refused %u ms max (%u mutex, %u allocator, %u level), production %u ms max, empty %u ticks (%u max)",
+		      "%u extended, refused %u ms max (%u mutex, %u allocator, %u level), production %u ms max, empty %u ticks (%u max), %u audible pcm gaps",
 		      submitted, rendered, late, _dsp->protocolErrors(), _dspPcmUnderruns,
-		      extended, refusedStreak, refusedMutex, refusedAllocator, refusedLevel, produceMax, emptyTicks, emptyStreak);
+		      extended, refusedStreak, refusedMutex, refusedAllocator, refusedLevel, produceMax, emptyTicks, emptyStreak, _dspPcmAudibleGaps);
 	}
 }
 
@@ -456,8 +457,13 @@ bool AtariMixerManager::produceDspPeriod(void *context, bool runCallbacks) {
 			if (self->_probeActive)
 				++self->_probeActiveGaps;
 			self->_dsp->setPcm(period, nullptr);
-			if (runCallbacks)
+			if (runCallbacks) {
 				++self->_dspPcmUnderruns;
+				// An empty ring is harmless while nothing is playing (boot,
+				// loading); only a gap right after sound is audible.
+				if (self->_dspLastChunkAudible)
+					++self->_dspPcmAudibleGaps;
+			}
 		}
 		self->_dsp->submit(period);
 	}

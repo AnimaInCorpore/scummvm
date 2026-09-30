@@ -95,7 +95,8 @@ struct AtariMixerManager {
  AtariDspMixer mixer{12292, 192, _dspPauseLevel};
  Audio::MixerImpl *_mixer = &mixer;
  bool _audioSuspended = false;
- int _dspFmVolume = -1, _dspPcmHead = 0, _dspPcmTail = 0, _dspPcmUnderruns = 0;
+ int _dspFmVolume = -1, _dspPcmHead = 0, _dspPcmTail = 0, _dspPcmUnderruns = 0, _dspPcmAudibleGaps = 0;
+ bool _dspLastChunkAudible = false;
  int16 _dspPcmRing[kDspPcmChunks * AtariDspAudio::kPcmPerPeriod] = {};
  static bool produceDspPeriod(void *, bool);
  void period(bool callbacks = true) {

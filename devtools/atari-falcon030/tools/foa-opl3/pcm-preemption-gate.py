@@ -64,7 +64,7 @@ struct AtariMixerManager {
  int16 _dspPcmRing[kDspPcmChunks * AtariDspAudio::kPcmPerPeriod] = {};
  volatile int _dspPcmHead = 0, _dspPcmTail = 0;
  volatile bool _dspPcmTaking = false;
- int _dspPcmUnderruns = 0;
+ int _dspPcmUnderruns = 0, _dspPcmAudibleGaps = 0; bool _dspLastChunkAudible = false;
  static bool produceDspPeriod(void *, bool);
 };
 #define PREEMPT() do { if (!g_nested && ++g_point == g_target && g_mask == 0) { \

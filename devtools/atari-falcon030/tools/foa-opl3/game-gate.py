@@ -32,6 +32,7 @@ from datetime import date
 import json
 import math
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -283,7 +284,11 @@ def main():
                 # Periods the interrupt submitted without timer callbacks
                 # because the main loop held a critical section too long
                 # (a resource load): the sequencer slipped 14.6 ms each.
-                "extended": int(parts[13]) if len(parts) > 13 else None}
+                "extended": int(parts[13]) if len(parts) > 13 else None,
+                # Underruns that followed a chunk carrying speech or effects:
+                # the audible ones. The raw count above includes boot and
+                # loading, when nothing plays and an empty ring is harmless.
+                "pcm_audible_gaps": int(m.group(1)) if (m := re.search(r"(\d+) audible pcm gaps", line)) else None}
     late_max = max((int(line.split("AtariDspAudio: ")[1].split()[5]) for line in fresh), default=None)
 
     audio = {}

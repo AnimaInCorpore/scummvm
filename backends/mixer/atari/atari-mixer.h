@@ -79,6 +79,8 @@ private:
 	volatile int _dspPcmHead = 0;          // the interrupt's next chunk
 	volatile int _dspPcmTail = 0;          // the main loop's next chunk
 	volatile uint32 _dspPcmUnderruns = 0;  // periods produced with no chunk to take
+	volatile uint32 _dspPcmAudibleGaps = 0; // ...of which followed a chunk that carried sound
+	volatile bool _dspLastChunkAudible = false; // the newest mixed chunk held speech or effects
 	volatile uint _dspPauseLevel = 0;     // nested mixer pauses, including the FM synth
 	int _dspFmVolume = -1;
 	uint32 _dspLoggedPeriods = 0;
