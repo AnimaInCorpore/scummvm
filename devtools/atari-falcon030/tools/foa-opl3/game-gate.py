@@ -29,6 +29,7 @@ enough periods have streamed. --play and --click need the FIFO.
 import argparse
 import hashlib
 from datetime import date
+import fnmatch
 import json
 import math
 import os
@@ -99,6 +100,11 @@ def main():
     parser.add_argument("--game", type=Path, required=True, help="the game's data directory")
     parser.add_argument("--gameid", default="atlantis", help="game id of the build's profile: atlantis, monkey2, tentacle, or an SCI game")
     parser.add_argument("--engine", default="scumm", help="the target's engine id: scumm or sci")
+    parser.add_argument("--hide", action="append", default=[], metavar="GLOB",
+                        help="leave the game files matching GLOB out of the game's directory for this run; "
+                             "repeatable. Monkey Island 1's trackN.wav rips are played as a music stream beside the "
+                             "DSP's FM and make the transport's audible-gap counter read the engine's decoding stalls, "
+                             "so its record hides them (--hide 'track*.wav'). Needs symlinks or hard links")
     parser.add_argument("--extra", default="CD", help="the target's extra field, e.g. CD, Floppy, or empty")
     parser.add_argument("--binary", type=Path,
                         default=ROOT / "build-falcon030/scummvm-2026.3.1git-atari-lite/scummvm.prg")
@@ -139,7 +145,18 @@ def main():
     app.mkdir(parents=True)
     shutil.copy2(args.binary, app / "SCUMMVM.PRG")
     folder = args.gameid.upper()
-    link_directory(hd / folder, args.game.resolve())
+    if args.hide:
+        view = hd / folder
+        view.mkdir()
+        for entry in sorted(args.game.resolve().iterdir()):
+            if any(fnmatch.fnmatch(entry.name.lower(), g.lower()) for g in args.hide):
+                continue
+            try:
+                (view / entry.name).symlink_to(entry, target_is_directory=entry.is_dir())
+            except OSError:
+                os.link(entry, view / entry.name)   # no symlink privilege: a hard link, on the same volume
+    else:
+        link_directory(hd / folder, args.game.resolve())
     ini = ("[scummvm]\ngui_theme=builtin\ngui_renderer=normal\n"
            + f"music_driver=adlib\nopl_driver={args.opl}\nautosave_period=0\n"
            + f"atari_dsp_audio={'false' if args.no_dsp_audio else 'true'}\n"
@@ -263,7 +280,8 @@ def main():
                 proc.kill()
                 proc.wait()
             fifo.unlink(missing_ok=True)
-            unlink_directory(hd / folder)
+            if not args.hide:
+                unlink_directory(hd / folder)
     if avi.is_file() and write_avi_sound(avi, case / "output.wav"):
         avi.unlink()   # its frames, about a megabyte a second, are of no use here
 
@@ -316,6 +334,7 @@ def main():
     result = {
         "date": date.today().isoformat(),
         "gate": f"{args.gameid} with the DSP OPL build on the emulated Falcon: transport and recorded audio",
+        "hidden_game_files": args.hide,
         "binary_sha256": hashlib.sha256(args.binary.read_bytes()).hexdigest(),
         "requested_seconds": args.seconds,
         "wall_seconds": round(time.monotonic() - started, 1),

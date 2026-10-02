@@ -32,7 +32,7 @@ plan. Quality work goes into the OPL2 path; see
 | A host stall is counted: a 0.995 s silence reads 62 late periods, not 0 | [rt-stream-starved-results.json](rt-stream-starved-results.json) | `rt-stream-gate.py --starve 50` |
 | Atlantis on the emulated Falcon with the DSP build, 32-frame blocks (2026-10-02) | [game-results.json](game-results.json) | `game-gate.py` |
 | Day of the Tentacle on the same build | [game-results-tentacle.json](game-results-tentacle.json) | `game-gate.py --gameid tentacle` |
-| The Secret of Monkey Island (Ultimate Talkie) on the same build | [game-results-monkey.json](game-results-monkey.json) | `game-gate.py --gameid monkey` |
+| The Secret of Monkey Island (Ultimate Talkie) on the same build | [game-results-monkey.json](game-results-monkey.json) | `game-gate.py --gameid monkey --hide 'track*.wav'` |
 | Monkey Island 2 (Ultimate Talkie) on the same build | [game-results-monkey2.json](game-results-monkey2.json) | `game-gate.py --gameid monkey2 --click` |
 | Cruise for a Corpse, whose drums are the chip's rhythm mode | [game-results-cruise.json](game-results-cruise.json) | `game-gate.py --gameid cruise --engine cruise` |
 
@@ -884,24 +884,25 @@ game got to.
 | Game | Periods | Extension periods | Music peak | Results |
 | --- | ---: | ---: | ---: | --- |
 | Day of the Tentacle, CD | 6,208 in 90 s | 43 | -23.5 dBFS | [game-results-tentacle.json](game-results-tentacle.json) |
-| The Secret of Monkey Island, Ultimate Talkie | 6,258 in 90 s | 8 | -17.5 dBFS | [game-results-monkey.json](game-results-monkey.json) |
+| The Secret of Monkey Island, Ultimate Talkie | 6,229 in 90 s | 13 | -23.6 dBFS | [game-results-monkey.json](game-results-monkey.json) |
 | Monkey Island 2, Ultimate Talkie | 7,769 in 120 s | 47 | -19.4 dBFS | [game-results-monkey2.json](game-results-monkey2.json) |
 
 So a v6 game and the two Monkey Islands fit in the 14 MB beside the DSP
 transport at least through their openings. The transport's audible-gap
-counter reads 0 for Tentacle and Monkey Island 2 and 89 for Monkey Island 1
-(a repeat run gave the same 89 and the same 2,444 underruns). Those 89 are the
-game's CD audio, not the kernel: `assets/monkey-se` holds `trackN.wav` rips
-that ScummVM plays as a music-type mixer stream next to the DSP's FM, they
-were added on 2026-09-21, after the 2026-09-17 record, and the stream is also
-why the music peak reads -17.5 dBFS here against -24 in the earlier record.
-With the track files hidden the same binary reads 0 audible gaps and -23.9
-dBFS. The ring runs dry in the title sequence (about periods 2,500 to 3,900,
-351 underruns in 549 periods) with or without the tracks, 2,444 underruns
-against 2,419; the main loop is starved by the engine's own decoding there, as
-in the Atlantis note above, and the track makes it audible. The FM music, on
-the DSP, is not touched: no late period. The gap is one 15.6 ms period each, so
-the 89 are about 1.4 s of dropouts in the CD track over some 22 s.
+counter reads 0 in all of the records. Monkey Island 1's is made with
+`--hide 'track*.wav'`, with a rebuild of the same sources as the other four
+(its whole-file hash differs only by the loader's padding): `assets/monkey-se`
+holds `trackN.wav` CD audio rips that ScummVM plays as a music-type mixer
+stream next to the DSP's FM, added on 2026-09-21, after the 2026-09-17 record.
+With them in place the same binary reads 89 audible gaps (a repeat run gave
+the same 89 and the same 2,444 underruns) and a -17.5 dBFS peak against -23.6
+without. They are not the kernel: the ring runs dry in the title sequence
+(about periods 2,500 to 3,900, 351 underruns in 549 periods) with or without
+the tracks, 2,444 underruns against 2,419 to 2,436, because the engine's own
+decoding starves the main loop there, as in the Atlantis note above, and the
+track makes it audible. The FM music, on the DSP, is not touched: no late
+period. Each gap is one 15.6 ms period, so the 89 are about 1.4 s of dropouts
+in the CD track over some 22 s.
 
 Cruise for a Corpse ([game-results-cruise.json](game-results-cruise.json),
 `--gameid cruise --engine cruise --extra "" --seconds 1200`) is there for
