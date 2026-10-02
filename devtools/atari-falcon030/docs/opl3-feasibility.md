@@ -14,8 +14,9 @@ of the budget on the Atlantis excerpt and 76% in the nine-channel stress
 fixture, excluding production transport and SSI overhead. The current 32-frame
 DSP and stream gates remain word-exact and on time in Hatari, but the modeled
 rhythm margin is only 0.142 ms. It preserves the AdLib arrangement and live
-iMUSE behavior; nothing here has run on physical hardware. Existing game
-records are 48/64-frame baselines; full-game 32-frame coverage is still open.
+iMUSE behavior; nothing here has run on physical hardware. The game records
+were re-recorded with 32-frame blocks on 2026-10-02: all five pass with no late
+period and no protocol error.
 
 An approximate OPL3 layered prototype now renders both banks and stereo,
 but its full eighteen-channel load misses the current sample-rate deadline.
@@ -444,7 +445,7 @@ each with a gate and a committed result file:
 | DSP cost at 49.17 kHz, Atlantis first 4 s | 189.7 cycles per frame, 58% of budget, word exact (175.7 with 64-frame blocks) |
 | DSP cost at 49.17 kHz, nine feedback FM channels with LFO held | 248.4 cycles per frame, 76% of budget, word exact (232.9 with 64-frame blocks) |
 | Stream mode through the SSI | Atlantis 20 s: 1,280 periods; nine-channel stress fixture 10 s: 640 periods; none late, checksums equal; the tightest period left 3.29 ms (Atlantis) and 2.17 ms (stress) of its 15.62 ms |
-| Atlantis, Tentacle, Monkey Island 1 and 2, Cruise on the emulated Falcon | opening music present, no late periods or protocol errors; Atlantis and Cruise with 48-frame blocks, the others with 64; per-game counters and limitations in the [integration notes](../tools/foa-opl3/README.md#in-the-game) |
+| Atlantis, Tentacle, Monkey Island 1 and 2, Cruise on the emulated Falcon | opening music present, no late periods or protocol errors, all with 32-frame blocks (2026-10-02); per-game counters and limitations in the [integration notes](../tools/foa-opl3/README.md#in-the-game) |
 
 The practical kernel and integration pass their bounded emulation gates;
 listening, wider gameplay coverage, the worst-period margin inside a game
@@ -527,12 +528,11 @@ worst case and 3.29 ms in the Atlantis stream. Neither length meets the
 at 48). An older 48-frame implementation overran after transport overhead,
 before the boundary-pass rewrite, at 88% of the budget in the stress case.
 
-In the game, Atlantis's opening streams 5,823 periods with 48-frame blocks,
-twice with the same counters: no late period, no protocol error, 14
-extension periods. Cruise for a Corpse's 1,200 s run, redone with them, has
-none late either. The Tentacle and Monkey Island runs in the integration
-notes were made with 64-frame blocks, and the tightest in-game deadline is
-not measured at all.
+In the game, Atlantis's opening streams 6,262 periods with 32-frame blocks:
+no late period, no protocol error, 31 extension periods. Tentacle, both Monkey
+Islands and Cruise for a Corpse's 1,200 s run are likewise none late. (With
+48-frame blocks Atlantis streamed 5,823 periods, twice with the same counters:
+14 extension periods.) The tightest in-game deadline is not measured at all.
 
 Event-aligned splits are a later alternative: carry sample offsets, render
 up to a write, apply it, then render the remainder in order. This requires

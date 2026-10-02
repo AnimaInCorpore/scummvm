@@ -30,7 +30,7 @@ plan. Quality work goes into the OPL2 path; see
 | Stream mode through the SSI: word exact, no late period, also under the worst-case load, whose tightest period leaves 2.17 ms | [rt-stream-results.json](rt-stream-results.json), [rt-stream-stress-results.json](rt-stream-stress-results.json) | `rt-stream-gate.py` |
 | The same with rhythm mode: every shape of it, and Cruise for a Corpse's drums | [rt-stream-rhythm-results.json](rt-stream-rhythm-results.json), [rt-stream-cruise-results.json](rt-stream-cruise-results.json) | `rt-stream-gate.py --scenario rhythm`, `--trace <cruise> --from 153` |
 | A host stall is counted: a 0.995 s silence reads 62 late periods, not 0 | [rt-stream-starved-results.json](rt-stream-starved-results.json) | `rt-stream-gate.py --starve 50` |
-| Atlantis on the emulated Falcon with the DSP build, 48-frame blocks; Tentacle and the Monkey Islands with 64 | [game-results.json](game-results.json) | `game-gate.py` |
+| Atlantis on the emulated Falcon with the DSP build, 32-frame blocks (2026-10-02) | [game-results.json](game-results.json) | `game-gate.py` |
 | Day of the Tentacle on the same build | [game-results-tentacle.json](game-results-tentacle.json) | `game-gate.py --gameid tentacle` |
 | The Secret of Monkey Island (Ultimate Talkie) on the same build | [game-results-monkey.json](game-results-monkey.json) | `game-gate.py --gameid monkey` |
 | Monkey Island 2 (Ultimate Talkie) on the same build | [game-results-monkey2.json](game-results-monkey2.json) | `game-gate.py --gameid monkey2 --click` |
@@ -47,9 +47,9 @@ synthesis with resampling, more accurate rhythm noise, and a separate
 eighteen-channel experiment. The current Falcon path now uses 32-frame
 blocks (0.65 ms), reducing the block-boundary write lead from the earlier
 48-frame baseline (0.98 ms). Native-rate synthesis, rhythm-noise changes,
-and event-aligned splits remain proposals. The game records and linked
-quality result files are historical 48/64-frame baselines; full-game
-32-frame runs still need to be recorded.
+and event-aligned splits remain proposals. The game records were
+re-recorded with the 32-frame build on 2026-10-02; the linked quality result
+files are still historical 48/64-frame baselines.
 
 ## How the capture works
 
@@ -845,10 +845,12 @@ heavy PCM load; a scene change during speech is the test still to run.
 
 [game-gate.py](game-gate.py) runs Atlantis on the emulated Falcon with that
 build, records Hatari's DAC output and reads the transport's counters from
-the log. [game-results.json](game-results.json) is the 48-frame kernel's
-run, made on Windows with the gate's AVI recording; Cruise for a Corpse's
-below is a 48-frame run too, made on a Mac, and the other three game
-records were made with 64-frame blocks. The kernel boots, the game starts,
+the log. [game-results.json](game-results.json) is the 32-frame kernel's
+run, and so are the other four game records, all made on a Mac on 2026-10-02.
+Atlantis streams 6,262 periods through its opening with no protocol error,
+no late period, 31 extension periods and no audible PCM gap, the music
+peaking at -12.2 dBFS. The 48-frame record it replaced, made on Windows with
+the gate's AVI recording, read as follows: the kernel boots, the game starts,
 5,823 periods stream through 91 s of its opening with no protocol error
 and no late period, and no tick found the queue empty once the stream was
 running. The loop stalled for 1,528 periods of PCM (23.9 s, nearly all of
@@ -869,7 +871,7 @@ PCM ring. The recording carries the opening music at -12.2 dBFS peak
 (-12.4 in the 64-frame record).
 
 The build's profile admits three more DOS games on the same AdLib driver,
-and each ran the same gate on the 64-frame binary with the same shape of
+and each ran the same gate on the 32-frame binary with the same shape of
 result: no late period; no tick with an empty queue once the stream runs;
 no protocol error; its opening music in the recording. Speech is off in all
 of them (the gate mutes it, and these editions ship theirs as FLAC, which
@@ -881,22 +883,27 @@ game got to.
 
 | Game | Periods | Extension periods | Music peak | Results |
 | --- | ---: | ---: | ---: | --- |
-| Day of the Tentacle, CD | 6,152 in 90 s | 44 | -24 dBFS | [game-results-tentacle.json](game-results-tentacle.json) |
-| The Secret of Monkey Island, Ultimate Talkie | 6,203 in 90 s | 102 | -24 dBFS | [game-results-monkey.json](game-results-monkey.json) |
-| Monkey Island 2, Ultimate Talkie | 7,718 in 120 s | 53 | -17 dBFS | [game-results-monkey2.json](game-results-monkey2.json) |
+| Day of the Tentacle, CD | 6,208 in 90 s | 43 | -23.5 dBFS | [game-results-tentacle.json](game-results-tentacle.json) |
+| The Secret of Monkey Island, Ultimate Talkie | 6,258 in 90 s | 8 | -17.5 dBFS | [game-results-monkey.json](game-results-monkey.json) |
+| Monkey Island 2, Ultimate Talkie | 7,769 in 120 s | 47 | -19.4 dBFS | [game-results-monkey2.json](game-results-monkey2.json) |
 
 So a v6 game and the two Monkey Islands fit in the 14 MB beside the DSP
-transport at least through their openings.
+transport at least through their openings. The transport's audible-gap
+counter reads 0 for Tentacle and Monkey Island 2 and 89 for Monkey Island 1
+(a repeat run gave the same 89 and the same 2,444 underruns); the earlier
+records predate the counter, so there is no 48- or 64-frame figure to compare
+it with, and the 89 are not investigated.
 
 Cruise for a Corpse ([game-results-cruise.json](game-results-cruise.json),
 `--gameid cruise --engine cruise --extra "" --seconds 1200`) is there for
 rhythm mode, on the build that takes in the SCI, Sky and Cruise engines.
 The 16 MHz machine spends the first four minutes on the Delphine logo and
 the load behind it, so a 200 s run records silence; over 1,200 s with
-48-frame blocks the music starts at 248 s and 521 of the seconds are loud,
-peaking at -15.6 dBFS, with 77,069 periods submitted, none late, no
-protocol error and 15 extension periods (252 s, 519, -15.9 dBFS and 77,150
-periods with 64-frame blocks). The recording was checked for presence and level like
+32-frame blocks the music starts at 251 s and 530 of the seconds are loud,
+peaking at -16.0 dBFS, with 77,146 periods submitted, none late, no
+protocol error, no audible PCM gap and 16 extension periods (48-frame blocks:
+248 s, 521, -15.6 dBFS, 77,069 periods and 15; 64-frame blocks: 252 s, 519,
+-15.9 dBFS and 77,150). The recording was checked for presence and level like
 the others; that its drums are in it rests on the host and DSP gates above,
 which render the same driver's captured writes, not on anything measured in
 the recording.
@@ -930,8 +937,8 @@ presence and level, not auditioned.
   The lower-rate aliasing prompted an earlier listening observation; current
   quality claims rest on the perceptual gate's numbers. The game recording
   was checked for presence and level, not auditioned.
-- Of the games only Atlantis has run with 48-frame blocks, twice, on its
-  opening. With the stream gate's own host the stress load's tightest
+- All five game gates have run with 32-frame blocks on their openings (Monkey
+  Island 1 twice). With the stream gate's own host the stress load's tightest
   period leaves 2.17 ms, of which the game's transport may need up to a
   millisecond for its READY tick; the slack inside a game is not measured,
   and nobody has listened for the change.
