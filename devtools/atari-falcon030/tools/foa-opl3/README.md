@@ -890,9 +890,18 @@ game got to.
 So a v6 game and the two Monkey Islands fit in the 14 MB beside the DSP
 transport at least through their openings. The transport's audible-gap
 counter reads 0 for Tentacle and Monkey Island 2 and 89 for Monkey Island 1
-(a repeat run gave the same 89 and the same 2,444 underruns); the earlier
-records predate the counter, so there is no 48- or 64-frame figure to compare
-it with, and the 89 are not investigated.
+(a repeat run gave the same 89 and the same 2,444 underruns). Those 89 are the
+game's CD audio, not the kernel: `assets/monkey-se` holds `trackN.wav` rips
+that ScummVM plays as a music-type mixer stream next to the DSP's FM, they
+were added on 2026-09-21, after the 2026-09-17 record, and the stream is also
+why the music peak reads -17.5 dBFS here against -24 in the earlier record.
+With the track files hidden the same binary reads 0 audible gaps and -23.9
+dBFS. The ring runs dry in the title sequence (about periods 2,500 to 3,900,
+351 underruns in 549 periods) with or without the tracks, 2,444 underruns
+against 2,419; the main loop is starved by the engine's own decoding there, as
+in the Atlantis note above, and the track makes it audible. The FM music, on
+the DSP, is not touched: no late period. The gap is one 15.6 ms period each, so
+the 89 are about 1.4 s of dropouts in the CD track over some 22 s.
 
 Cruise for a Corpse ([game-results-cruise.json](game-results-cruise.json),
 `--gameid cruise --engine cruise --extra "" --seconds 1200`) is there for
