@@ -18,6 +18,7 @@ machine, then retimed to the codec rate and folded into one step per block.
 """
 import argparse
 import math
+import os
 from pathlib import Path
 
 LOGSIN = [int(round(-math.log2(math.sin((i + 0.5) * math.pi / 512)) * 256)) for i in range(256)]
@@ -25,6 +26,9 @@ EXP = [2 * (int(round((2 ** ((255 - i) / 256.0) - 1) * 1024)) + 1024) for i in r
 
 NATIVE_RATE = 49716.0
 CODEC_RATE = 25175000.0 / 256.0 / 2.0   # the codec's 49,170 Hz: within 1.1% of the chip's native rate
+# ablation-study.py regenerates the tables for other block lengths and rates
+# through these; the committed tables never set them.
+CODEC_RATE = float(os.environ.get("FOA_CODEC_RATE", CODEC_RATE))
 RATIO = NATIVE_RATE / CODEC_RATE
 # 0.65 ms: a write takes effect at the start of its block, so up to a block
 # early, and envelopes and LFOs step once a block. Every per-block cost on the
@@ -32,7 +36,7 @@ RATIO = NATIVE_RATE / CODEC_RATE
 # takes 71% of the budget at 64 frames, 76% at 48 and 86% at 32, where the
 # tightest stream period leaves half a millisecond, less than the game's
 # transport needs. The rt-bench and rt-stream gates measure both.
-BLOCK_FRAMES = 32
+BLOCK_FRAMES = int(os.environ.get("FOA_BLOCK_FRAMES", 32))
 NATIVE_PER_BLOCK = BLOCK_FRAMES * RATIO
 PERIOD_FRAMES = 768  # the stream transport's period, 15.62 ms, whatever the block
 if PERIOD_FRAMES % BLOCK_FRAMES:

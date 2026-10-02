@@ -1078,3 +1078,68 @@ The game needs Falcon TOS 4.04 under Hatari (TOS 4.02, which the kernel
 benches boot, dies in the game's video mode switch); `--fpu 68882` is
 required by the build. `--wav` on the practical gate keeps WAV files of
 both kernels for auditioning, and the game gate keeps Hatari's recording.
+
+## Which approximation costs how much: the ablation study
+
+[`ablation-study.py`](ablation-study.py) builds the host practical kernel once
+per variant (block length, synthesis rate, write timing) from tables generated
+for that variant in a scratch directory, renders the synthetic scenarios and
+any captured traces through it and the exact kernel, and scores each with
+[`ablation-test.cpp`](ablation-test.cpp): third-octave band error (triangular
+band weights, a Blackman-Harris window, bands within 25 dB of the loudest),
+and the 20 ms and 2 ms RMS envelopes. It takes about a minute. The committed
+[record](ablation-results.json) adds two captures made on 2026-10-02, kept in
+[`traces/`](traces/README.md) (virtual
+clock, byte-identical across two runs each): 60 s of Atlantis (12,247 writes)
+and the Cruise for a Corpse window from 66 s, where its drums start (68.6 s;
+8,754 writes in the 300 s capture, 654 to the rhythm register). Run it as
+`python3 ablation-study.py --output ablation-results.json --seconds 60 --trace
+traces/atlantis-adlib-60s.ev --rhythm-trace traces/cruise-adlib-300s.ev
+--rhythm-from 66`. The captures need two build trees, described under the kernel
+gate; a saved configuration naming an SDK path the machine lacks needs `CXXFLAGS`
+with `-isysroot` pointed at one that exists.
+
+Mean |band error| in dB, 60 s, against the exact kernel at 49,716 Hz:
+
+| variant | single voice | feedback | high pitch (aliases) | 9 voices | rhythm (synthetic, Cruise) | Atlantis |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| shipped: 32 frames, 49,170 Hz, sample-timed writes | 0.25 | 0.33 | 2.52 | 0.24 | 0.75 | 0.39 |
+| 256-frame blocks (control) | 0.36 | 0.33 | 2.53 | 0.26 | 0.86 | 0.54 |
+| 8-frame blocks | 0.31 | 0.33 | 2.53 | 0.23 | 0.80 | 0.38 |
+| 49,716 Hz, 32 frames | 0.24 | 0.34 | 0.01 | 0.21 | 0.44 | 0.35 |
+| 49,716 Hz, 8 frames | 0.24 | 0.34 | 0.01 | 0.21 | 0.42 | 0.34 |
+
+The real music agrees with the synthetic scenarios: Atlantis scores 0.39 dB
+shipped and 0.34 at the native rate, Cruise 0.35 and 0.26 (its own row in the
+record), so the whole rate-and-block gap is 0.05 to 0.09 dB on game material.
+Cruise keeps a high-band excess of +0.7 to +0.9 dB (8 kHz up) at every rate and
+block length. It is not the sweep and, as first suspected, not the drums: with
+every rhythm key masked out of the trace (`ABL_DRUM_MASK=0`) it is unchanged, and
+masking any single drum changes nothing either. It is 29 band readings (of 240
+windows) in feedback-heavy melodic patches, at -45 to -55 dBFS and at most 2.4
+dB off, so it is small and quiet, not a defect worth a DSP change.
+
+- **Block length does not register.** From 64 frames down to 8 the band error
+  does not move; only the 256-frame control (5 ms) does. Blocks of 4 frames and
+  below score worse, and that is the model, not the sound: the envelope word's
+  12-bit fraction cannot hold a per-frame decay step.
+- **The synthesis rate costs nothing audible on melodic material** (0.25 against
+  0.24). It costs on content that aliases, where the chip folds a partial to a
+  different frequency at each rate (the high-pitch scenario), and on the hi-hat
+  and cymbal tunings, whose phase-bit squares fold the same way. Neither can be
+  fixed by a finer block.
+- **What the kernel still does differently from the chip is small:** the
+  synthetic rhythm scenario stays at 0.42 to 0.45 dB at the native rate and one
+  frame, mostly the two folded hi-hat and cymbal tunings, and Cruise's quiet 8 kHz
+  bands run about 0.8 dB hot. Testing the one structural difference found in the
+  rhythm path, that the chip's hi-hat reads the cymbal's phase bits of the
+  *previous* sample (slot 13 before slot 17), changed the rhythm score from 0.75
+  to 0.76 dB: real, not audible, not worth the 32-entry drum table it would need.
+- **Writes at a block's start** (the earlier behaviour, not the current one) are
+  worse on 2 ms envelopes (0.10 to 1.01 dB, nine voices; 0.20 to 0.88 on Atlantis): a key-on up to a
+  block early starts that voice's phase early and changes how the voices beat.
+
+Two traps in the scorer cost time here and are worth knowing: hard third-octave
+band edges flip a partial that sits on one between bands when the two
+renderings' FFT bins differ (a 1 dB "error" that was no error), and a 5 ms
+envelope of detuned voices measures their beating, not their envelopes.
