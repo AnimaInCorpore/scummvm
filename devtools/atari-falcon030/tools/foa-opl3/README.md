@@ -8,6 +8,17 @@ kernel that does, the same kernel streaming through the Falcon codec, and
 the ScummVM build that plays the game with it. Each step has its own gate
 and its own committed result file.
 
+**OPL3 is out of scope here (2026-10-02).** Production plays OPL2 only, and
+further OPL3 work was dropped as not worth pursuing in this tree. The layered
+two-operator experiment (both register banks, stereo routing, waveforms 4-7)
+stays in the kernel and the DSP image as committed, with its
+[bench](rt-layered-bench-results.json) and [stream](rt-layered-stream-results.json)
+records, but it is unmaintained: its eighteen-channel load measured 155.6% of the
+49.17 kHz budget and no scheduling work was found to close that, and hardware
+four-operator pairing was never built. Do not treat the OPL3 sections below as a
+plan. Quality work goes into the OPL2 path; see
+[the ablation study](#which-approximation-costs-how-much-the-ablation-study).
+
 | Step | Result | Gate |
 | --- | --- | --- |
 | Register capture | [results.json](results.json) | `capture-gate.py` |
