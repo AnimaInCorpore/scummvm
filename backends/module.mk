@@ -443,6 +443,9 @@ MODULE_OBJS += \
 	graphics/atari/atari-supervidel.o \
 	graphics/atari/atari-surface.o \
 	mixer/atari/atari-mixer.o
+ifdef USE_FALCON_DSP_OPL
+MODULE_OBJS += mixer/atari/atari-dsp-opl.o mixer/atari/atari-dsp-opl-irq.o
+endif
 ifdef USE_ELF_LOADER
 MODULE_OBJS += \
 	plugins/atari/atari-provider.o

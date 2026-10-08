@@ -25,6 +25,10 @@
 #include "backends/mixer/mixer.h"
 #include "common/events.h"
 
+#ifdef USE_FALCON_DSP_OPL
+namespace OPL { namespace FalconDsp { class OPL; } }
+#endif
+
 /**
  *  Atari XBIOS based audio mixer.
  */
@@ -42,7 +46,19 @@ public:
 
 	bool notifyEvent(const Common::Event &event) override;
 
+#ifdef USE_FALCON_DSP_OPL
+	static AtariMixerManager *instance() { return _instance; }
+	bool startDspOpl(OPL::FalconDsp::OPL *opl);
+	void stopDspOpl(OPL::FalconDsp::OPL *opl);
+	void shutdownDspOpl();
+#endif
+
 private:
+#ifdef USE_FALCON_DSP_OPL
+	static AtariMixerManager *_instance;
+	OPL::FalconDsp::OPL *_dspOpl = nullptr;
+	bool restoreDmaAudio();
+#endif
 	int _outputRate = 0;
 	int _outputChannels = 0;
 	bool _emulated16bitMono = false;

@@ -161,6 +161,7 @@ _mad=auto
 _opl2lpt=no
 _retrowave=auto
 _nfm=auto
+_falcon_dsp_opl=no
 _alsa=auto
 _seq_midi=auto
 _sndio=auto
@@ -1181,6 +1182,7 @@ Optional Libraries:
 
   --with-retrowave-prefix=DIR prefix where libretrowave is installed (optional)
   --enable-retrowave          enable RetroWave OPL3 support
+  --enable-falcon-dsp-opl     enable experimental Falcon DSP OPL2 (Atari backend)
 
   --with-nfm-prefix=DIR  prefix where nFM is installed (optional)
   --enable-nfm           enable OPL2/3 support via nFM
@@ -1325,6 +1327,8 @@ for ac_option in $@; do
 	--disable-opl2lpt)            _opl2lpt=no            ;;
 	--enable-retrowave)           _retrowave=yes         ;;
 	--disable-retrowave)          _retrowave=no          ;;
+	--enable-falcon-dsp-opl)      _falcon_dsp_opl=yes     ;;
+	--disable-falcon-dsp-opl)     _falcon_dsp_opl=no      ;;
 	--enable-nfm)                 _nfm=yes               ;;
 	--disable-nfm)                _nfm=no                ;;
 	--enable-flac)                _flac=yes              ;;
@@ -5639,6 +5643,14 @@ echo "$_retrowave"
 #
 # Check for nFM OPL2/3 library
 #
+if test "$_falcon_dsp_opl" = yes; then
+	case "$_host_os:$_backend" in
+	mint*:atari) ;;
+	*) echo "Falcon DSP OPL requires the native Atari backend and MiNT target"; exit 1 ;;
+	esac
+fi
+define_in_config_if_yes "$_falcon_dsp_opl" 'USE_FALCON_DSP_OPL'
+
 echocheck "nFM OPL2 / OPL3"
 case $_host_os in
 mint*)

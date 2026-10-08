@@ -39,6 +39,12 @@
 
 namespace OPL {
 
+#ifdef USE_FALCON_DSP_OPL
+namespace FalconDsp {
+OPL *create(Config::OplType type);
+}
+#endif
+
 // Factory functions
 
 #ifdef USE_ALSA
@@ -70,7 +76,8 @@ enum OplEmulator {
 	kNuked = 5,
 	kOPL2LPT = 6,
 	kOPL3LPT = 7,
-	kRWOPL3 = 8
+	kRWOPL3 = 8,
+	kFalconDsp = 17
 #ifdef USE_NFM
 	,kNfmNokturnFM2 = 9,
 	kNfmNokturnFM3 = 10,
@@ -124,6 +131,9 @@ const Config::EmulatorDescription Config::_drivers[] = {
 	{"nfm_ce_opl3duo", _s("[nFM] Cheerful Electronics OPL3 Duo! (2xOPL3)"), kNfmCeOPL3Duo, kFlagOpl2 | kFlagDualOpl2 | kFlagOpl3},
 	{"nfm_ce_stbus_isa_vme", _s("[nFM] ST Bus ISA / VME SoundBlaster"), kNfmStBusIsaVmeSb, kFlagOpl2 | kFlagDualOpl2 | kFlagOpl3},
 	{"nfm_natfeats_null", _s("[nFM] NatFeats / NULL"), kNfmNatfeatsNull, kFlagOpl2 | kFlagDualOpl2 | kFlagOpl3},
+#endif
+#ifdef USE_FALCON_DSP_OPL
+	{ "falcon_dsp", _s("Falcon DSP OPL2 (experimental)"), kFalconDsp, kFlagOpl2 },
 #endif
 	{ nullptr, nullptr, 0, 0 }
 };
@@ -228,6 +238,10 @@ OPL *Config::create(DriverId driver, OplType type) {
 	}
 
 	switch (driver) {
+#ifdef USE_FALCON_DSP_OPL
+	case kFalconDsp:
+		return FalconDsp::create(type);
+#endif
 #ifndef DISABLE_MAME_OPL
 	case kMame:
 		if (type == kOpl2)

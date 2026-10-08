@@ -22,6 +22,10 @@
 #define FORCE_TEXT_CONSOLE
 
 #include "backends/mixer/atari/atari-mixer.h"
+#ifdef USE_FALCON_DSP_OPL
+#include "backends/mixer/atari/atari-dsp-opl.h"
+AtariMixerManager *AtariMixerManager::_instance = nullptr;
+#endif
 
 #include <mint/falcon.h>
 #include <mint/osbind.h>
@@ -45,6 +49,10 @@
 static USoundContext usoundContext;
 
 void AtariAudioShutdown() {
+#ifdef USE_FALCON_DSP_OPL
+	if (AtariMixerManager::instance())
+		AtariMixerManager::instance()->shutdownDspOpl();
+#endif
 	Jdisint(MFP_TIMERA);
 	USoundDeinitXbios(&usoundContext);
 }
@@ -76,6 +84,9 @@ static void __attribute__((interrupt)) timerA(void) {
 }
 
 AtariMixerManager::AtariMixerManager() : MixerManager() {
+#ifdef USE_FALCON_DSP_OPL
+	_instance = this;
+#endif
 	debug("AtariMixerManager()");
 
 	suspendAudio();
@@ -102,6 +113,10 @@ AtariMixerManager::~AtariMixerManager() {
 	debug("~AtariMixerManager()");
 
 	g_system->getEventManager()->getEventDispatcher()->unregisterObserver(this);
+#ifdef USE_FALCON_DSP_OPL
+	shutdownDspOpl();
+	_instance = nullptr;
+#endif
 
 	AtariAudioShutdown();
 
@@ -177,6 +192,13 @@ void AtariMixerManager::init() {
 
 void AtariMixerManager::suspendAudio() {
 	debug("suspendAudio");
+#ifdef USE_FALCON_DSP_OPL
+	if (_dspOpl) {
+		_dspOpl->suspend(true);
+		_audioSuspended = true;
+		return;
+	}
+#endif
 
 	Buffoper(0x00);
 	s_playbackState = kPlaybackStopped;
@@ -187,6 +209,10 @@ int AtariMixerManager::resumeAudio() {
 	debug("resumeAudio");
 
 	_audioSuspended = false;
+#ifdef USE_FALCON_DSP_OPL
+	if (_dspOpl)
+		_dspOpl->suspend(false);
+#endif
 	update();
 	return 0;
 }
@@ -211,6 +237,15 @@ bool AtariMixerManager::notifyEvent(const Common::Event &event) {
 }
 
 void AtariMixerManager::update() {
+#ifdef USE_FALCON_DSP_OPL
+	if (_dspOpl) {
+		if (!_dspOpl->update(_mixer)) {
+			warning("Falcon DSP OPL transport failed; restoring DMA speech/effects output");
+			stopDspOpl(_dspOpl);
+		}
+		return;
+	}
+#endif
 	if (_audioSuspended) {
 		return;
 	}
@@ -363,3 +398,58 @@ void AtariMixerManager::update() {
 		warning("processed: %d, _samples: %d", processed, _samples);
 	}
 }
+
+#ifdef USE_FALCON_DSP_OPL
+void AtariMixerManager::shutdownDspOpl() {
+	if (_dspOpl) {
+		_dspOpl->close(false); // critical termination: no port waits or allocations
+		_dspOpl = nullptr;
+	}
+}
+
+bool AtariMixerManager::restoreDmaAudio() {
+	USoundSpec desired, obtained;
+	desired.frequency = _outputRate;
+	desired.channels = _outputChannels;
+	desired.format = _downsample ? USoundFormatSigned8 : USoundFormatSigned16MSB;
+	desired.samples = _samples;
+	if (!USoundInitXbios(&desired, &obtained, &usoundContext))
+		return false;
+	if (obtained.frequency != _outputRate)
+		warning("Restored DMA sample rate differs from the mixer rate");
+	Setinterrupt(SI_TIMERA, SI_PLAY);
+	Xbtimer(XB_TIMERA, 1 << 3, 1, timerA);
+	Jenabint(MFP_TIMERA);
+	Soundcmd(ADDERIN, MATIN);
+	s_dmaWrapped = s_isrStoppedDma = false;
+	s_playbackState = kPlaybackStopped;
+	return true;
+}
+
+bool AtariMixerManager::startDspOpl(OPL::FalconDsp::OPL *opl) {
+	if (_dspOpl || !_mixer)
+		return false;
+	Buffoper(0);
+	AtariAudioShutdown();
+	s_playbackState = kPlaybackStopped;
+	if (!opl->open(_outputRate, _outputChannels == 2)) {
+		opl->close();
+		if (!restoreDmaAudio())
+			error("Could not restore Atari audio after DSP initialization failure");
+		warning("Falcon DSP OPL initialization failed");
+		return false;
+	}
+	_dspOpl = opl;
+	_dspOpl->suspend(_audioSuspended);
+	return true;
+}
+
+void AtariMixerManager::stopDspOpl(OPL::FalconDsp::OPL *opl) {
+	if (_dspOpl != opl)
+		return;
+	_dspOpl = nullptr;
+	opl->close();
+	if (!restoreDmaAudio())
+		error("Could not restore Atari DMA audio");
+}
+#endif
