@@ -61,16 +61,6 @@ real Falcon disk/audio tests are still outstanding. The older size/config
 measurements below describe earlier builds; see the checkpoint for current
 in-game memory and performance measurements.
 
-## Prerequisite carried over from master
-
-The branch point (`37ad7bf53df`) does not build against this machine's
-sysroot: `backends/mixer/atari/usound_compat.h` deliberately `#error`s when
-the installed `usound.h` is version 2 or newer, which it is here. The same
-one-line change that is currently uncommitted in the master worktree —
-`#include "usound_compat.h"` becomes `#include <usound.h>` — is applied on
-this branch so the target compiles. It is not a Falcon-specific change and
-belongs upstream.
-
 ## What already exists, and what this target adds
 
 The mainline Atari backend (`backends/platform/atari/`) already supports the
