@@ -43,12 +43,32 @@ AudioPlayer::AudioPlayer(EEMEngine *vm) :
 	_isMacintosh(vm && vm->isMacintosh()) {
 }
 
+static Audio::SeekableAudioStream *makeMacSoundStream(Common::SeekableReadStream *stream) {
+	Audio::SeekableAudioStream *audio = Audio::makeMacSndStream(stream, DisposeAfterUse::YES);
+	if (!audio || audio->isStereo() || audio->getLength().totalNumberOfFrames() == 0)
+		return audio;
+
+	// The original Mac speech/SFX resources include a trailing 0x00 sample
+	// in their PCM length. In unsigned 8-bit audio this is full negative
+	// amplitude, not silence, and causes a pop at the end (bug #17223).
+	// Trim it here so both snd and decoded csnd are handled, without
+	// changing the shared decoder or the music instrument resources.
+	const Audio::Timestamp end = audio->getLength().addFrames(-1);
+	int16 lastSample;
+	if (audio->seek(end) && audio->readBuffer(&lastSample, 1) == 1 && lastSample == -32768)
+		return new Audio::SubSeekableAudioStream(audio, Audio::Timestamp(0, audio->getRate()), end);
+
+	audio->rewind();
+	return audio;
+}
+
 struct MacSndResource {
 	const char *name;
 	uint16 id;
 };
 
 const MacSndResource kMacSndResources[] = {
+	{ "JAKE",     8001 }, { "JEN",      8002 },
 	{ "B-0003SL", 7022 }, { "B-0004SL", 7023 }, { "B-0006SL", 7021 },
 	{ "DING",     7000 }, { "F-0013SL", 8018 }, { "F-0016SL", 8017 },
 	{ "F-0061SL", 8015 }, { "F-0067SL", 8016 }, { "F-0140SL", 8020 },
@@ -63,6 +83,7 @@ const MacSndResource kMacSndResources[] = {
 	{ "M-0107SL", 7011 }, { "M-0113SL", 7013 }, { "M-0115SL", 7014 },
 	{ "M-0163SL", 7024 }, { "NEWSCAN",  7003 }, { "NEWSSHRT", 7007 },
 	{ "PHONESL",  7012 }, { "SQUAK2SL", 7019 }, { "THUNDER",  7025 },
+	{ "PHONE1",   1399 },
 };
 
 Common::String macSndNameFromPath(const Common::Path &path) {
@@ -225,8 +246,10 @@ void AudioPlayer::cleanMysterySounds() {
 
 bool AudioPlayer::initMacMysterySounds(uint mysteryNum) {
 	const uint16 firstResourceId = 1001;
-	const Common::Path candidates[2] = {
+	const Common::Path candidates[] = {
+		Common::Path(Common::String::format("M%u.DBD", mysteryNum)),
 		Common::Path(Common::String::format("M%02u.DBD", mysteryNum)),
+		Common::Path(Common::String::format("M%u.CPD", mysteryNum)),
 		Common::Path(Common::String::format("M%02u.CPD", mysteryNum))
 	};
 
@@ -259,13 +282,19 @@ void AudioPlayer::playMacSnd(uint16 resourceId, Audio::SoundHandle &handle,
 	Common::SeekableReadStream *stream =
 		openMacResource(Common::Path("EEM Sound&Music"),
 						MKTAG('s', 'n', 'd', ' '), resourceId);
+	if (!stream)
+		stream = openMacResource(Common::Path("Eagle Eye Mysteries CD"),
+								 MKTAG('s', 'n', 'd', ' '), resourceId);
+	if (!stream && _vm->isLondon())
+		stream = openMacResource(Common::Path("EEM London CD"),
+			MKTAG('s', 'n', 'd', ' '), resourceId);
 	if (!stream) {
 		warning("AudioPlayer: Mac snd resource %u missing", resourceId);
 		return;
 	}
 
 	Audio::SeekableAudioStream *audioStream =
-		Audio::makeMacSndStream(stream, DisposeAfterUse::YES);
+		makeMacSoundStream(stream);
 	if (!audioStream) {
 		delete stream;
 		warning("AudioPlayer: Mac snd resource %u is not playable", resourceId);
@@ -465,11 +494,16 @@ bool AudioPlayer::playMacMysterySound(uint num) {
 	}
 
 	Audio::SeekableAudioStream *audioStream = stream
-		? Audio::makeMacSndStream(stream, DisposeAfterUse::YES) : nullptr;
+		? makeMacSoundStream(stream) : nullptr;
 	if (!audioStream) {
 		delete stream;
 		warning("AudioPlayer: Mac mystery sound resource %u is not playable",
 				resourceId);
+		return false;
+	}
+	// Some unused speech resources contain only a two-sample placeholder.
+	if (audioStream->getLength().msecs() == 0) {
+		delete audioStream;
 		return false;
 	}
 

@@ -957,6 +957,7 @@ PlainGameDescriptor AdvancedMetaEngineDetectionBase::findGame(const char *gameId
 }
 
 static const char *const grayList[] = {
+	"bonus.exe",
 	"game.exe",
 	"demo.exe",
 	"game",

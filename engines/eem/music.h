@@ -29,6 +29,10 @@
 #include "common/path.h"
 #include "common/scummsys.h"
 
+namespace Common {
+class MacResManager;
+}
+
 namespace EEM {
 
 /**
@@ -52,7 +56,8 @@ namespace EEM {
  */
 class MusicPlayer : public Audio::MidiPlayer, private Audio::HalestormLoader {
 public:
-	explicit MusicPlayer(bool isFloppy = false, bool isMacintosh = false, bool isLondon = false);
+	explicit MusicPlayer(bool isFloppy = false, bool isMacintosh = false,
+						 bool isLondon = false, bool isMacCD = false);
 	~MusicPlayer() override;
 
 	/// _MIDIPlayFile @ 20a2:024c. loop=true mirrors
@@ -64,6 +69,8 @@ public:
 
 	void stop() override;
 	bool isPlaying() const;
+	void fadeOut();
+	bool isFading() const;
 	void setVolume(int volume) override;
 
 	// WORKAROUND: Miles drivers handle source-channel routing themselves;
@@ -71,6 +78,8 @@ public:
 	void send(uint32 b) override;
 
 private:
+	void openMacMusicResources();
+	Common::SeekableReadStream *getMacMusicResource(uint file, uint16 id, uint32 type);
 	void playMacSongResource(uint16 resourceId, bool loop);
 	void startLoadedMusic(const Common::String &name, bool loop);
 	Common::SeekableReadStream *getResource(uint16 id, uint32 type) override;
@@ -79,7 +88,10 @@ private:
 	const bool _isFloppy;
 	const bool _isMacintosh;
 	const bool _isLondon;
+	const bool _isMacCD;
 	Common::Array<byte> _xmiData;
+	Common::Array<Common::Path> _macResourcePaths;
+	Common::MacResManager *_macResources = nullptr;
 	Audio::HalestormDriver *_macDriver = nullptr;
 };
 

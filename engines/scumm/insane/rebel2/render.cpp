@@ -374,6 +374,17 @@ void InsaneRebel2::loadEmbeddedSan(int userId, byte *animData, int32 size, byte 
 					}
 
 					EmbeddedSanFrame &frame = _rebelEmbeddedHud[userId];
+					// Transparent background patches update the existing scene in place.
+					if (_rebelHandler == 25 && userId == 4 && codec == SMUSH_CODEC_RLE &&
+							isValidEmbeddedFrame(frame) && left >= 0 && top >= 0 &&
+							width > 0 && height > 0 && left + width <= frame.width &&
+							top + height <= frame.height && stream.pos() < subDataEnd) {
+						smushDecodeRLE(frame.pixels, animData + stream.pos(), left, top,
+							width, height, frame.width);
+						renderEmbeddedFrame(renderBitmap, frame, userId);
+						return;
+					}
+
 					frame.valid = false;
 
 					if (width > 0 && height > 0 && width <= 800 && height <= 480) {
@@ -2696,7 +2707,8 @@ void InsaneRebel2::renderLevelEndStatsOverlay(byte *renderBitmap, int pitch, int
 	if (!titleFmt || !titleFmt[0])
 		titleFmt = getRebel2LevelEndFallbackString(190);
 
-	Common::String password = getChapterPassword(_levelEndStats.levelId, _difficulty);
+	const int passwordChapter = _release.getCompletionPasswordChapter(_levelEndStats.levelId);
+	Common::String password = getChapterPassword(passwordChapter, _difficulty);
 	Common::String titleText = Common::String::format(titleFmt, password.c_str());
 	int visibleChars = curFrame + 10 - titleStart;
 	if (visibleChars > 0xbe)
@@ -3504,9 +3516,12 @@ void InsaneRebel2::renderHandler25ShipPre(byte *renderBitmap, int pitch, int wid
 			int overlayDrawX = renderHiRes ? (nativeOverlayX - nativeViewX) * renderScale : nativeOverlayX;
 			int overlayDrawY = renderHiRes ? (nativeOverlayY - nativeViewY) * renderScale : nativeOverlayY;
 
-			renderNutSpriteScaledClipped(renderBitmap, pitch, width, renderHeight,
-				0, 0, width, renderHeight,
-				overlayDrawX, overlayDrawY, _grd005Sprite, overlayIdx, false, renderScale, false);
+			if (!drawRebel2Codec45Sprite(_grd005Sprite, renderBitmap, pitch, width, height,
+					Common::Rect(0, 0, width, renderHeight), overlayDrawX, overlayDrawY, overlayIdx, renderScale)) {
+				renderNutSpriteScaledClipped(renderBitmap, pitch, width, renderHeight,
+					0, 0, width, renderHeight,
+					overlayDrawX, overlayDrawY, _grd005Sprite, overlayIdx, false, renderScale, false);
+			}
 
 			debugC(DEBUG_INSANE, "Handler25 PRE: GRD005 at (%d,%d) nutOff(%d,%d) viewOff(%d,%d) size(%d,%d) mode=%d scale=%d",
 				overlayDrawX, overlayDrawY, overlayXOffset, overlayYOffset,

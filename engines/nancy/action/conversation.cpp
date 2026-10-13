@@ -172,6 +172,13 @@ void ConversationSound::readTerseData(Common::SeekableReadStream &stream) {
 	}
 }
 
+// Conversation captions live in the CONVO text chunk, but Nancy14 keeps a few of
+// them in AUTOTEXT instead. A key that CONVO does have, but maps to no text, is a
+// deliberately silent line, so only fall back when the key is missing altogether.
+static Common::String resolveConversationText(const Common::String &key) {
+	return resolveSubtitleText(key, resolveSubtitleText(key), "CONVO");
+}
+
 void ConversationSound::readDataNancy13(Common::SeekableReadStream &stream) {
 	readFilename(stream, _sound.name);
 	_sound.channelID = 12;	// hardcoded, as in the terse variants
@@ -200,16 +207,14 @@ void ConversationSound::readDataNancy13(Common::SeekableReadStream &stream) {
 	_sceneChange.frameID = stream.readUint16LE();
 	_sceneChange.continueSceneSound = kContinueSceneSound;
 
-	// Caption and response texts are external, keyed by sound name in CONVO.
+	// Caption and response texts are external, keyed by sound name.
 	// Each part of a concatenated line has its own caption; they make up one
 	// exchange, so they are shown together.
-	const CVTX *convo = (const CVTX *)g_nancy->getEngineData("CONVO");
-	assert(convo);
 	if (_concatSounds.empty()) {
-		_text = convo->texts.getValOrDefault(_sound.name, "");
+		_text = resolveConversationText(_sound.name);
 	} else {
 		for (uint i = 0; i < _concatSounds.size(); ++i) {
-			_text += convo->texts.getValOrDefault(_concatSounds[i], "");
+			_text += resolveConversationText(_concatSounds[i]);
 		}
 	}
 
@@ -221,7 +226,7 @@ void ConversationSound::readDataNancy13(Common::SeekableReadStream &stream) {
 		response.sceneChange.sceneID = stream.readUint16LE();
 		response.sceneChange.continueSceneSound = kContinueSceneSound;
 		response.conditionFlags.read(stream);
-		response.text = convo->texts.getValOrDefault(response.soundName, "");
+		response.text = resolveConversationText(response.soundName);
 	}
 
 	uint16 numFlagsStructs = stream.readUint16LE();
@@ -1039,6 +1044,34 @@ void ConversationCel::init() {
 		} else break;
 	}
 
+	// A Nancy15 tree that isn't a loaded cel archive names a movie - the character's
+	// talking head, which is played into the tree's rect while the body keeps
+	// animating from cels.
+	_treeMovies.resize(_celRObjects.size());
+	for (uint i = 0; i < _celRObjects.size(); ++i) {
+		// _treeRects is only filled in from Nancy15 on, so earlier games always
+		// take the cel path here
+		if (i >= _treeRects.size() || g_nancy->_resource->hasCifTree(_treeNames[i])) {
+			continue;
+		}
+
+		if (_treeRects[i].isEmpty()) {
+			warning("Cel tree '%s' is neither a loaded .cal nor a movie with a destination rect",
+				_treeNames[i].c_str());
+			continue;
+		}
+
+		Common::SharedPtr<MoviePlayer> movie(new MoviePlayer());
+		if (!movie->loadFile(Common::Path(_treeNames[i]))) {
+			warning("Couldn't load conversation movie '%s'", _treeNames[i].c_str());
+			continue;
+		}
+
+		movie->start();
+		_treeMovies[i] = movie;
+		_celRObjects[i].moveTo(_treeRects[i]);
+	}
+
 	registerGraphics();
 }
 
@@ -1046,7 +1079,9 @@ void ConversationCel::registerGraphics() {
 	for (uint i = 0; i < _celRObjects.size(); ++i) {
 		_celRObjects[i].setZOrder(9 + _drawingOrder[i]);
 		_celRObjects[i].setVisible(true);
-		_celRObjects[i].setTransparent(true);
+		// Head movies carry an alpha plane, so they are composited by it rather
+		// than by the transparent color key the cels use.
+		_celRObjects[i].setTransparent(i >= _treeMovies.size() || !_treeMovies[i]);
 		_celRObjects[i].registerGraphics();
 	}
 
@@ -1056,8 +1091,22 @@ void ConversationCel::registerGraphics() {
 void ConversationCel::updateGraphics() {
 	uint32 currentTime = g_nancy->getTotalPlayTime();
 
+	for (uint i = 0; i < _treeMovies.size(); ++i) {
+		if (_treeMovies[i] && _treeMovies[i]->needsUpdate()) {
+			const Graphics::Surface *frame = _treeMovies[i]->decodeNextFrame();
+			if (frame) {
+				_celRObjects[i].setMovieFrame(*frame);
+			}
+		}
+	}
+
 	if (_state == kRun && currentTime > _nextFrameTime && _curFrame < MIN<uint>(_lastFrame + 1, _celNames[0].size())) {
 		for (uint i = 0; i < _celRObjects.size(); ++i) {
+			if (i < _treeMovies.size() && _treeMovies[i]) {
+				// Movie trees run on the movie's own clock
+				continue;
+			}
+
 			Cel &cel = loadCel(_celNames[i][_curFrame], _treeNames[i]);
 			if (_overrideTreeRects[i] == kCelOverrideTreeRectsOn) {
 				_celRObjects[i]._drawSurface.create(cel.surf, _overrideRectSrcs[i]);
@@ -1071,6 +1120,21 @@ void ConversationCel::updateGraphics() {
 		_nextFrameTime += _frameTime;
 		++_curFrame;
 	}
+}
+
+void ConversationCel::RenderedCel::setMovieFrame(const Graphics::Surface &frame) {
+	GraphicsManager::copyToManaged(frame, _drawSurface);
+	_needsRedraw = true;
+}
+
+void ConversationCel::onPause(bool pause) {
+	for (uint i = 0; i < _treeMovies.size(); ++i) {
+		if (_treeMovies[i]) {
+			_treeMovies[i]->pauseVideo(pause);
+		}
+	}
+
+	RenderActionRecord::onPause(pause);
 }
 
 void ConversationCel::readData(Common::SeekableReadStream &stream) {
@@ -1164,6 +1228,13 @@ void ConversationCel::readXSheet(Common::SeekableReadStream &stream, const Commo
 		// Skip any unused tree-name slots so the frame time is read from its fixed
 		// offset regardless of numTrees.
 		xsheet->skip((kMaxTrees - numTrees) * kNameSize);
+
+		// Nancy15 inserted a destination rect per tree slot ahead of the frame time.
+		// It is only filled in for trees that name a movie instead of a cel archive.
+		if (g_nancy->getGameType() >= kGameTypeNancy15) {
+			readRectArray(*xsheet, _treeRects, kMaxTrees);
+		}
+
 		_frameTime = xsheet->readUint32LE();
 	} else {
 		xsheet->skip(2);
@@ -1200,6 +1271,10 @@ ConversationCel::Cel &ConversationCel::loadCel(const Common::Path &name, const C
 bool ConversationCel::load() {
 	for (uint i = _curFrame; i < _celNames[0].size(); ++i) {
 		for (uint j = 0; j < _celRObjects.size(); ++j) {
+			if (j < _treeMovies.size() && _treeMovies[j]) {
+				continue;
+			}
+
 			if (!_celCache.contains(_celNames[j][i])) {
 				loadCel(_celNames[j][i], _treeNames[j]);
 				return false;

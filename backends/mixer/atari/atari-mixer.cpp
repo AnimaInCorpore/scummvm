@@ -27,9 +27,6 @@
 #include <mint/osbind.h>
 #include <mint/ostruct.h>
 #ifndef ATARI_STE_GAME_ONLY
-// https://github.com/mikrosk/usound
-// This build image ships usound.h >= 2, against which usound_compat.h #errors
-// by design. The shim stays in the tree for images still on uSound v1.
 #include <usound.h>
 #endif
 
@@ -525,10 +522,7 @@ void AtariMixerManager::init() {
 	Xbtimer(XB_TIMERA, 1<<3, 1, timerA);	// event count mode, count to '1'
 	Jenabint(MFP_TIMERA);
 
-	// route both mic channels to the ADC
-	Soundcmd(ADCINPUT, 0);
-	// enable and mix both sources (ADC and connection matrix) to the output
-	Soundcmd(ADDERIN, MATIN|ADCIN);
+	Soundcmd(ADDERIN, MATIN);
 
 	_sampleBufferSize = _samples * _outputChannels * 4;	// always 32-bit
 	_sampleBuffer = new uint8[_sampleBufferSize];
@@ -593,7 +587,10 @@ bool AtariMixerManager::notifyEvent(const Common::Event &event) {
 	case Common::EVENT_RETURN_TO_LAUNCHER:
 		if (s_playbackState != kPlaybackStopped) {
 			debug("silencing the mixer");
-			suspendAudio();
+			// Stop the DMA but don't suspend the mixer: nothing would
+			// resume it, update() restarts the playback when needed.
+			Buffoper(0x00);
+			s_playbackState = kPlaybackStopped;
 		}
 		return false;
 	default:

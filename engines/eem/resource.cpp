@@ -21,6 +21,7 @@
 
 #include "common/compression/dcl.h"
 #include "common/array.h"
+#include "common/crc.h"
 #include "common/debug.h"
 #include "common/endian.h"
 #include "common/file.h"
@@ -31,9 +32,14 @@
 #include "graphics/pixelformat.h"
 
 #include "eem/detection.h"
+#include "eem/mac_sound_patches.h"
 #include "eem/resource.h"
 
 namespace EEM {
+
+bool openDataFile(Common::File &file, const Common::Path &path) {
+	return file.open(Common::MacResManager::openFileOrDataFork(path), path.toString());
+}
 
 DBDArchive::DBDArchive() {
 }
@@ -214,6 +220,19 @@ Common::SeekableReadStream *decompressMacSound(Common::SeekableReadStream &strea
 		}
 	}
 
+	for (const MacSoundPatch &patch : kMacSoundPatches) {
+		if (patch.decodedSize != decodedSize)
+			continue;
+		const Common::CRC32 crc;
+		if (crc.crcFast(decoded, decodedSize) != patch.crc)
+			continue;
+		for (uint i = 0; i < patch.offsetCount; i++)
+			decoded[kMacSoundPatchOffsets[patch.offsetIndex + i]] |= 0x80;
+		debugC(1, kDebugSound, "decompressMacSound: repaired %u damaged samples",
+			   patch.offsetCount);
+		break;
+	}
+
 	return new Common::MemoryReadStream(decoded, decodedSize, DisposeAfterUse::YES);
 }
 
@@ -221,13 +240,13 @@ bool DBDArchive::open(const Common::Path &dbdName, const Common::Path &dbxName, 
 	close();
 	_bigEndian = bigEndian;
 
-	if (!_dbd.open(dbdName)) {
+	if (!openDataFile(_dbd, dbdName)) {
 		warning("DBDArchive: cannot open %s", dbdName.toString().c_str());
 		return false;
 	}
 
 	Common::File dbx;
-	if (!dbx.open(dbxName)) {
+	if (!openDataFile(dbx, dbxName)) {
 		warning("DBDArchive: cannot open %s", dbxName.toString().c_str());
 		_dbd.close();
 		return false;

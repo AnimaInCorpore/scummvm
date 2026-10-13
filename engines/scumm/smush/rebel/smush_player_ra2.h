@@ -30,6 +30,7 @@ class SmushPlayerRebel2 : public SmushPlayer {
 public:
 	SmushPlayerRebel2(ScummEngine_v7 *scumm, IMuseDigital *imuseDigital, Insane *insane);
 	~SmushPlayerRebel2() override;
+	void unpause() override;
 	bool ra2PromoteCurrentFrameToHiRes(int scrollX, int scrollY);
 	bool ra2PromoteHandler7PerspectiveToHiRes(int perspectiveX, int perspectiveY, int viewShift);
 	bool isPlayingLoadBuffer() const { return _loadContinuationStream != nullptr; }
@@ -106,6 +107,8 @@ private:
 	int _ra2FrameObjectOriginalHeight;
 	int _ra2FrameObjectSurfaceWidth;
 	int _ra2FrameObjectSurfaceHeight;
+	int _ra2SpecialBufferWidth;
+	int _ra2SpecialBufferHeight;
 	int _ra2DeltaBlocksWidth;
 	int _ra2DeltaBlocksHeight;
 	int _ra2DeltaGlyphsWidth;

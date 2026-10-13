@@ -27,6 +27,7 @@
 #include "common/debug.h"
 #include "common/endian.h"
 #include "common/file.h"
+#include "common/macresman.h"
 #include "common/memstream.h"
 #include "common/stream.h"
 #include "common/system.h"
@@ -82,7 +83,7 @@ static Common::SeekableReadStream *expandMacMidiRunningStatus(Common::SeekableRe
 		output.writeUint32BE(size);
 
 		if (tag != MKTAG('M', 'T', 'r', 'k')) {
-			if (output.writeStream(&stream, size) != size)
+			if (size && output.writeStream(&stream, size) != size)
 				return nullptr;
 			continue;
 		}
@@ -120,7 +121,8 @@ static Common::SeekableReadStream *expandMacMidiRunningStatus(Common::SeekableRe
 				return nullptr;
 			}
 
-			if (dataSize > end - stream.pos() || output.writeStream(&stream, dataSize) != dataSize)
+			if (dataSize > end - stream.pos() ||
+				(dataSize && output.writeStream(&stream, dataSize) != dataSize))
 				return nullptr;
 		}
 		WRITE_BE_UINT32(output.getData() + sizeOffset, output.size() - sizeOffset - 4);
@@ -132,25 +134,46 @@ static Common::SeekableReadStream *expandMacMidiRunningStatus(Common::SeekableRe
 	return expanded.readStream(expanded.size());
 }
 
-Common::SeekableReadStream *MusicPlayer::getResource(uint16 id, uint32 type) {
+void MusicPlayer::openMacMusicResources() {
 	static const char *const kMacMusicForks[] = {
 		"EEM Sound&Music",
 		"rsrc/EEM Sound&Music",
+		"Eagle Eye Mysteries CD",
+		"rsrc/Eagle Eye Mysteries CD",
+		nullptr
+	};
+	static const char *const kMacLondonMusicForks[] = {
 		"EEM London CD",
 		"rsrc/EEM London CD",
+		nullptr
 	};
+	const char *const *forks = _isLondon ? kMacLondonMusicForks : kMacMusicForks;
+	for (uint i = 0; forks[i]; i++)
+		_macResourcePaths.push_back(Common::Path(forks[i]));
+
+	// Keep installer forks open; reopening them decompresses the whole application.
+	_macResources = new Common::MacResManager[_macResourcePaths.size()];
+	for (uint i = 0; i < _macResourcePaths.size(); i++)
+		_macResources[i].open(_macResourcePaths[i]);
+}
+
+Common::SeekableReadStream *MusicPlayer::getMacMusicResource(uint file, uint16 id, uint32 type) {
+	if (_macResources[file].hasResFork())
+		return _macResources[file].getResource(type, id);
+	return openMacResource(_macResourcePaths[file], type, id);
+}
+
+Common::SeekableReadStream *MusicPlayer::getResource(uint16 id, uint32 type) {
 	static const uint32 kMacMidiTypes[] = {
 		MKTAG('c', 'm', 'i', 'd'),
 		MKTAG('M', 'I', 'D', 'I'),
 		MKTAG('M', 'i', 'd', 'i'),
 	};
 
-	const uint firstFork = _isLondon ? 2 : 0;
-	for (uint i = firstFork; i < firstFork + 2; i++) {
-		const Common::Path path(kMacMusicForks[i]);
+	for (uint i = 0; i < _macResourcePaths.size(); i++) {
 		if (type == MKTAG('M', 'I', 'D', 'I') || type == MKTAG('M', 'i', 'd', 'i')) {
 			for (uint j = 0; j < ARRAYSIZE(kMacMidiTypes); j++) {
-				Common::SeekableReadStream *stream = openMacResource(path, kMacMidiTypes[j], id);
+				Common::SeekableReadStream *stream = getMacMusicResource(i, id, kMacMidiTypes[j]);
 				if (stream) {
 					Common::SeekableReadStream *expanded = expandMacMidiRunningStatus(*stream);
 					delete stream;
@@ -162,7 +185,7 @@ Common::SeekableReadStream *MusicPlayer::getResource(uint16 id, uint32 type) {
 			continue;
 		} else if (type == MKTAG('s', 'n', 'd', ' ')) {
 			// London stores most instrument samples as delta-compressed csnd.
-			Common::SeekableReadStream *packed = openMacResource(path, MKTAG('c', 's', 'n', 'd'), id);
+			Common::SeekableReadStream *packed = getMacMusicResource(i, id, MKTAG('c', 's', 'n', 'd'));
 			if (packed) {
 				Common::SeekableReadStream *stream = decompressMacSound(*packed);
 				delete packed;
@@ -170,7 +193,7 @@ Common::SeekableReadStream *MusicPlayer::getResource(uint16 id, uint32 type) {
 			}
 		}
 
-		Common::SeekableReadStream *stream = openMacResource(path, type, id);
+		Common::SeekableReadStream *stream = getMacMusicResource(i, id, type);
 		if (stream)
 			return stream;
 	}
@@ -205,7 +228,9 @@ uint16 macSongResourceIdForFile(const Common::Path &path) {
 	return kInvalidMacSongResource;
 }
 
-uint16 macSongResourceIdForMus(uint num) {
+uint16 macSongResourceIdForMus(uint num, bool macCD) {
+	if (macCD && num < 5)
+		return 1002 + num;
 	static const uint16 kTravelTracks[5] = {
 		1004, 1002, 1003, 1006, 1005 // Travel-6/4/7/1/8
 	};
@@ -218,10 +243,13 @@ uint16 macSongResourceIdForMus(uint num) {
 	return kInvalidMacSongResource;
 }
 
-MusicPlayer::MusicPlayer(bool isFloppy, bool isMacintosh, bool isLondon) :
-	_isFloppy(isFloppy), _isMacintosh(isMacintosh), _isLondon(isLondon) {
-	if (_isMacintosh)
+MusicPlayer::MusicPlayer(bool isFloppy, bool isMacintosh, bool isLondon, bool isMacCD) :
+	_isFloppy(isFloppy), _isMacintosh(isMacintosh), _isLondon(isLondon),
+	_isMacCD(isMacCD) {
+	if (_isMacintosh) {
+		openMacMusicResources();
 		return;
+	}
 
 	// _InitMIDI @ 20a2:013a — `_AIL_register_driver` against
 	// ADLIB.ADV / SBFM.ADV / MT32MPU.ADV. We honour the launcher's
@@ -275,6 +303,7 @@ MusicPlayer::MusicPlayer(bool isFloppy, bool isMacintosh, bool isLondon) :
 
 MusicPlayer::~MusicPlayer() {
 	stop();
+	delete[] _macResources;
 }
 
 void MusicPlayer::stop() {
@@ -292,6 +321,17 @@ bool MusicPlayer::isPlaying() const {
 	if (_isMacintosh)
 		return _macDriver && _macDriver->doCommand(Audio::HalestormDriver::kSongIsPlaying);
 	return Audio::MidiPlayer::isPlaying();
+}
+
+void MusicPlayer::fadeOut() {
+	// Mac CD CODE 6:2358 uses Halestorm fade speed 30.
+	if (_macDriver)
+		_macDriver->doCommand(Audio::HalestormDriver::kSongFadeOut, 30);
+}
+
+bool MusicPlayer::isFading() const {
+	return _macDriver && isPlaying() &&
+		_macDriver->doCommand(Audio::HalestormDriver::kSongFadeGetState) > 2;
 }
 
 void MusicPlayer::setVolume(int volume) {
@@ -407,10 +447,9 @@ void MusicPlayer::playFile(const Common::Path &xmiPath, bool loop) {
 
 void MusicPlayer::playMus(uint num, bool loop) {
 	if (_isMacintosh) {
-		// London SONG ids are 1000 + the MUS number; EEM1 uses named tracks.
 		const uint16 resourceId = _isLondon
 			? (num < kInvalidMacSongResource - 1000 ? 1000 + num : kInvalidMacSongResource)
-			: macSongResourceIdForMus(num);
+			: macSongResourceIdForMus(num, _isMacCD);
 		playMacSongResource(resourceId, loop);
 		return;
 	}

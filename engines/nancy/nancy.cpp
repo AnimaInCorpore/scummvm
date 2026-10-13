@@ -350,6 +350,12 @@ static const GenericEventFlagCategory kGenericEventFlagCategories[] = {
 	{ 1559, 1658, "Empty" }
 };
 
+// Nancy15 widened the Generic and Timer blocks and dropped the other categories
+static const GenericEventFlagCategory kGenericEventFlagCategoriesNancy15[] = {
+	{ 1010, 1060, "Generic" },
+	{ 1100, 1120, "Timer" }
+};
+
 const Common::String NancyEngine::getEventFlagName(uint flagID) const {
 	if (getGameType() <= kGameTypeNancy11) {
 		// All flag names are stored in the executable
@@ -370,8 +376,15 @@ const Common::String NancyEngine::getEventFlagName(uint flagID) const {
 		return (flagID < flagNames.size()) ? flagNames[flagID] : "";
 	}
 
-	for (uint i = 0; i < ARRAYSIZE(kGenericEventFlagCategories); ++i) {
-		const GenericEventFlagCategory &category = kGenericEventFlagCategories[i];
+	const GenericEventFlagCategory *categories = kGenericEventFlagCategories;
+	uint numCategories = ARRAYSIZE(kGenericEventFlagCategories);
+	if (getGameType() >= kGameTypeNancy15) {
+		categories = kGenericEventFlagCategoriesNancy15;
+		numCategories = ARRAYSIZE(kGenericEventFlagCategoriesNancy15);
+	}
+
+	for (uint i = 0; i < numCategories; ++i) {
+		const GenericEventFlagCategory &category = categories[i];
 		if (flagID >= category.firstLabel && flagID <= category.lastLabel) {
 			return Common::String::format("%s%u", category.name, flagID - category.firstLabel);
 		}
@@ -579,11 +592,9 @@ void NancyEngine::bootGameEngine() {
 	SearchMan.addSubDirectoryMatching(gameDataDir, "font");
 
 	// Load archive if running a compressed variant
-	if (isCompressed()) {
-		Common::Archive *cabinet = Common::makeInstallShieldArchive("data");
-		if (cabinet) {
-			SearchMan.add("data1.cab", cabinet);
-		}
+	Common::Archive *cabinet = Common::makeInstallShieldArchive("data");
+	if (cabinet) {
+		SearchMan.add("data1.cab", cabinet);
 	}
 
 	_resource->readCifTree("ciftree", "dat", 1);
@@ -653,6 +664,16 @@ void NancyEngine::bootGameEngine() {
 	LOAD_BOOT(VIEW)
 	LOAD_BOOT(PCAL)
 	LOAD_BOOT(INV)
+
+	if (getGameType() >= kGameTypeNancy15) {
+		// Nancy15 stores the number of inventory items in the INV chunk, so the
+		// hardcoded count is only a fallback for the chunks read before this one
+		const INV *invData = (const INV *)getEngineData("INV");
+		if (invData && invData->itemDescriptions.size()) {
+			_staticData.numItems = invData->itemDescriptions.size();
+		}
+	}
+
 	LOAD_BOOT(TBOX)
 	LOAD_BOOT(HELP)
 	LOAD_BOOT(CRED)
@@ -927,8 +948,8 @@ void NancyEngine::populateStaticData() {
 		break;
 	case kGameTypeNancy14:
 	case kGameTypeNancy15:
-		_staticData.numItems = 50;
-		_staticData.numCursorTypes = 44;
+		_staticData.numItems = 49;
+		_staticData.numCursorTypes = 45;
 		break;
 	default:
 		_staticData.numItems = 50;
@@ -936,11 +957,12 @@ void NancyEngine::populateStaticData() {
 		break;
 	}
 
-	// Generic event flags occupy labels 1010-1040 (indices 10-40), and the
+	// Generic event flags occupy labels 1010-1040 (indices 10-40), or 1010-1060
+	// (indices 10-60) in Nancy15, and are cleared on every scene change. The
 	// won-game flag is label 1042 (index 42). numEventFlags is computed from the
 	// EVNT chunk later in bootGameEngine; this is just a fallback if it is absent.
 	_staticData.numEventFlags = kNumGenericEventFlags;
-	_staticData.genericEventFlags.resize(31);
+	_staticData.genericEventFlags.resize(getGameType() >= kGameTypeNancy15 ? 51 : 31);
 	for (uint i = 0; i < _staticData.genericEventFlags.size(); ++i) {
 		_staticData.genericEventFlags[i] = 10 + i;
 	}
@@ -976,10 +998,6 @@ Common::Error NancyEngine::synchronize(Common::Serializer &ser) {
 	NancySceneState.getActionManager().synchronize(ser);
 
 	return Common::kNoError;
-}
-
-bool NancyEngine::isCompressed() {
-	return getGameFlags() & GF_COMPRESSED;
 }
 
 } // End of namespace Nancy

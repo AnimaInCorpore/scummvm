@@ -131,6 +131,13 @@ SmushPlayerRebel2::~SmushPlayerRebel2() {
 	destroyGamePlayerFields();
 }
 
+void SmushPlayerRebel2::unpause() {
+	// A modal dialog or focus change must not dismiss the in-game pause.
+	if (_insane && static_cast<InsaneRebel2 *>(_insane)->_pauseOverlayActive)
+		return;
+	SmushPlayer::unpause();
+}
+
 void SmushPlayerRebel2::initGamePlayerFields() {
 	_multiFont = nullptr;
 	_storedFobjData = nullptr;
@@ -169,6 +176,8 @@ void SmushPlayerRebel2::initGamePlayerFields() {
 	_ra2FrameObjectOriginalHeight = 0;
 	_ra2FrameObjectSurfaceWidth = 0;
 	_ra2FrameObjectSurfaceHeight = 0;
+	_ra2SpecialBufferWidth = 0;
+	_ra2SpecialBufferHeight = 0;
 	_ra2DeltaBlocksWidth = 0;
 	_ra2DeltaBlocksHeight = 0;
 	_ra2DeltaGlyphsWidth = 0;
@@ -223,6 +232,8 @@ void SmushPlayerRebel2::initGameVideoState() {
 	_loadPlaybackPending = (_curVideoFlags & 0x40) != 0;
 	_ra2PendingAnimHeaderPalette = false;
 	_ra2UsingGameplaySurface = false;
+	_ra2SpecialBufferWidth = 0;
+	_ra2SpecialBufferHeight = 0;
 	_smushAudioTable[100] = 0;
 
 	// Some menu videos inherit the previous SMUSH palette.
@@ -240,6 +251,10 @@ void SmushPlayerRebel2::initGameVideoState() {
 }
 
 void SmushPlayerRebel2::releaseGameVideoState() {
+	if (_insane && static_cast<InsaneRebel2 *>(_insane)->_pauseOverlayActive) {
+		static_cast<InsaneRebel2 *>(_insane)->hidePauseOverlay();
+		unpause();
+	}
 	delete _loadContinuationStream;
 	_loadContinuationStream = nullptr;
 	_loadPlaybackPending = false;
@@ -462,7 +477,7 @@ bool SmushPlayerRebel2::handleGameTextResource(uint32 subType, int32 subSize, Co
 	}
 
 	TextStyleFlags flg = (TextStyleFlags)(flags & 7);
-	if (ConfMan.getBool("subtitles"))
+	if (static_cast<InsaneRebel2 *>(_insane)->_release.nonInteractiveVideos || ConfMan.getBool("subtitles"))
 		ra2HandleTextResource(str, fontId, color, posX, posY, left, top, width, height, flg);
 
 	free(text);
@@ -478,27 +493,9 @@ bool SmushPlayerRebel2::handleGameTextRendering(const char *str, int fontId, int
 }
 
 SmushFont *SmushPlayerRebel2::getGameFont(int font) {
-	const char *ra2FontsLo[] = {
-		"SYSTM/TALKFONT.NUT",
-		"SYSTM/SMALFONT.NUT",
-		"SYSTM/TITLFONT.NUT",
-		"SYSTM/POVFONT.NUT"
-	};
-	const char *ra2FontsHi[] = {
-		"SYSTM/TKHIFONT.NUT",
-		"SYSTM/SMHIFONT.NUT",
-		"SYSTM/TIHIFONT.NUT",
-		"SYSTM/POHIFONT.NUT"
-	};
+	const Rebel2Release &release = static_cast<InsaneRebel2 *>(_insane)->_release;
 	const bool highRes = _vm->_screenWidth >= 640 && _vm->_screenHeight >= 400;
-	const char **ra2Fonts = highRes ? ra2FontsHi : ra2FontsLo;
-	int numFonts = ARRAYSIZE(ra2FontsLo);
-	if (font >= 0 && font < numFonts) {
-		_sf[font] = new SmushFont(_vm, ra2Fonts[font], true);
-	} else {
-		debugC(DEBUG_SMUSH, "SmushPlayerRebel2::getGameFont: RA2 unknown font %d, using TALKFONT", font);
-		_sf[font] = new SmushFont(_vm, ra2Fonts[0], true);
-	}
+	_sf[font] = new SmushFont(_vm, release.getFontFile(font, highRes), true);
 	return _sf[font];
 }
 
@@ -515,9 +512,11 @@ class StringResourceRA2 : public StringResource {
 	int _ra2NbStrings;
 	int _ra2LastId;
 	const char *_ra2LastString;
+	bool _ignoreMissingStrings;
 
 public:
-	StringResourceRA2() : _ra2NbStrings(0), _ra2LastId(-1), _ra2LastString(nullptr) {
+	StringResourceRA2(bool ignoreMissingStrings) :
+			_ra2NbStrings(0), _ra2LastId(-1), _ra2LastString(nullptr), _ignoreMissingStrings(ignoreMissingStrings) {
 		for (int i = 0; i < RA2_MAX_STRINGS; i++) {
 			_ra2Strings[i].id = 0;
 			_ra2Strings[i].string = nullptr;
@@ -608,6 +607,10 @@ public:
 				return _ra2LastString;
 			}
 		}
+		// Preview TRS files can omit dialogue subtitles still referenced by
+		// the movies. LUCASDMO.EXE's 0x40e790/0x4016d0 skips those entries.
+		if (_ignoreMissingStrings)
+			return "";
 		warning("StringResourceRA2: invalid string id : %d", id);
 		_ra2LastId = -1;
 		_ra2LastString = "unknown string";
@@ -617,7 +620,7 @@ public:
 
 bool SmushPlayerRebel2::handleGameSetupStrings() {
 	ScummFile *theFile = _vm->instantiateScummFile();
-	_vm->openFile(*theFile, "SYSTM/GAME.TRS");
+	_vm->openFile(*theFile, static_cast<InsaneRebel2 *>(_insane)->_release.strings);
 	if (!theFile->isOpen()) {
 		delete theFile;
 		return true; // handled (no strings available)
@@ -637,7 +640,8 @@ bool SmushPlayerRebel2::handleGameSetupStrings() {
 		filebuffer[length] = '\0';
 	}
 
-	StringResourceRA2 *sr = new StringResourceRA2;
+	StringResourceRA2 *sr = new StringResourceRA2(
+		static_cast<InsaneRebel2 *>(_insane)->_release.nonInteractiveVideos != nullptr);
 	sr->init(filebuffer, length);
 	delete[] filebuffer;
 	_strings = sr;
@@ -1025,6 +1029,8 @@ bool SmushPlayerRebel2::ra2SelectFrameBuffer(int codec, int width, int height) {
 		}
 		_width = surfaceWidth;
 		_height = surfaceHeight;
+		_ra2SpecialBufferWidth = surfaceWidth;
+		_ra2SpecialBufferHeight = surfaceHeight;
 	}
 
 	if (needsSpecialBuffer &&
@@ -1382,7 +1388,8 @@ bool SmushPlayerRebel2::handleGameAdjustCoords(int codec, int &left, int &top, i
 	}
 
 	if (codec == SMUSH_CODEC_LINE_UPDATE || codec == SMUSH_CODEC_LINE_UPDATE2 ||
-			codec == SMUSH_CODEC_SKIP_RLE || codec == SMUSH_CODEC_UNCOMPRESSED) {
+			codec == SMUSH_CODEC_SKIP_RLE || codec == SMUSH_CODEC_UNCOMPRESSED ||
+			(_ra2FrameSourceSkipX > 0 && (codec == SMUSH_CODEC_RLE || codec == SMUSH_CODEC_RLE_ALT))) {
 		_ra2FrameSourceSkipY = sourceSkipY;
 		if (srcSkipY)
 			*srcSkipY = 0;
@@ -1399,6 +1406,13 @@ bool SmushPlayerRebel2::handleGameAdjustCoords(int codec, int &left, int &top, i
 bool SmushPlayerRebel2::handleGameCodecDecode(int codec, const uint8 *src, int left, int top, int width, int height, int pitch, int dataSize, uint8 param, uint16 parm2) {
 	if (isRebel2FullFrameDeltaCodec(codec))
 		return ra2DecodePlacedDeltaCodec(codec, src, left, top, width, height, pitch, dataSize);
+
+	if (_ra2FrameSourceSkipX > 0 && (codec == SMUSH_CODEC_RLE || codec == SMUSH_CODEC_RLE_ALT)) {
+		const bool opaque = codec == SMUSH_CODEC_RLE_ALT || (_curVideoFlags & 0x100) != 0;
+		src = smushSkipRLELines(src, dataSize, _ra2FrameSourceSkipY);
+		smushDecodeRA2RLE(_dst, src, left, top, width, height, pitch, dataSize, _ra2FrameSourceSkipX, opaque);
+		return true;
+	}
 
 	if (codec == SMUSH_CODEC_SKIP_RLE && parm2 >= 0x100) {
 		if (parm2 == 0x100 && dataSize >= 256) {
@@ -1472,11 +1486,12 @@ void SmushPlayerRebel2::handleGameFrameStart() {
 
 	if (ra2IsHighResMode()) {
 		if (isRebel2GameplayActive(_insane)) {
-			if (_ra2UsingGameplaySurface && _specialBuffer != nullptr &&
-					_specialBufferSize >= kRebel2GameplaySurfaceWidth * kRebel2GameplaySurfaceHeight) {
+			// Restore the decode surface's pitch before drawing the background.
+			if (_specialBuffer != nullptr && _ra2SpecialBufferWidth > 0 && _ra2SpecialBufferHeight > 0 &&
+					(int64)_ra2SpecialBufferWidth * _ra2SpecialBufferHeight <= _specialBufferSize) {
 				_dst = _specialBuffer;
-				_width = kRebel2GameplaySurfaceWidth;
-				_height = kRebel2GameplaySurfaceHeight;
+				_width = _ra2SpecialBufferWidth;
+				_height = _ra2SpecialBufferHeight;
 			} else if (ra2EnsureLowResVideoBuffer()) {
 				_dst = _ra2LowResVideoBuffer;
 				_width = 320;

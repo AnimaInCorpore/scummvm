@@ -55,6 +55,7 @@ MODULE_OBJS := \
 	games/3dck/3dck.o \
 	games/3dck/8bit.o \
 	games/3dck/8bitUI.o \
+	games/3dck/atari.o \
 	games/3dck/c64.o \
 	games/3dck/ui.o \
 	games/3dck/zx.o \
@@ -132,5 +133,5 @@ DETECT_OBJS += $(MODULE)/detection.o
 # module is enabled, because it already has the contents.
 ifneq ($(ENABLE_FREESCAPE), STATIC_PLUGIN)
 # External dependencies for detection.
-DETECT_OBJS += $(MODULE)/zx_tape.o
+DETECT_OBJS += $(MODULE)/detection_zx_tape.o
 endif

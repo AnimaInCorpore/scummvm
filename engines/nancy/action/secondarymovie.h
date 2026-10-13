@@ -60,11 +60,25 @@ public:
 		FlagDescription flagDesc;
 	};
 
+	// What makes a next-sequence entry the one picked once the current sequence
+	// finishes. Entries carry a percent weight, unless the chunk tags them with
+	// one of the negative "special flag" values below; a tagged entry is picked
+	// whenever its condition holds, ahead of the weighted roll.
+	enum NextCondition {
+		kNextWeighted		= 0,	// ordinary percent weight
+		kNextEqualChance,			// -1: uniform share among the entries
+		kNextIfHovered,				// -2: the mouse is over the movie
+		kNextIfNotHovered,			// -3: it isn't
+		kNextIfChannel13Playing,	// -4
+		kNextIfChannel12Playing		// -5
+	};
+
 	// Name of the next sequence to chain to once the current one finishes,
-	// plus its selection weight in the weighted random pick.
+	// plus what makes it the one picked.
 	struct NextSequenceRef {
 		Common::Path name;
 		uint16 weight = 0;
+		NextCondition condition = kNextWeighted;
 	};
 
 	// `name` is both the sequence id and the movie filename.
@@ -76,9 +90,11 @@ public:
 		int32 maxPauseMs = 0;
 		// Weight assigned to "stay on this sequence" in the weighted random
 		// pick. A roll inside [0, stayWeight) means "don't transition";
-		// instead pause for [minPauseMs, maxPauseMs] and re-roll.
+		// instead pause for [minPauseMs, maxPauseMs] before moving on.
 		uint16 stayWeight = 0;
 		Common::Array<NextSequenceRef> nextSequences;
+		// Every weighted entry takes an equal share of the pick.
+		bool equalChanceNext = false;
 	};
 
 	// Which of the action record types sharing this class is being played.
@@ -95,6 +111,8 @@ public:
 
 	void init() override;
 	void onPause(bool pause) override;
+	void registerGraphics() override;
+	void updateGraphics() override;
 
 	void readData(Common::SeekableReadStream &stream) override;
 	void execute() override;
@@ -102,8 +120,8 @@ public:
 	bool getIsFinished() const { return _isFinished; }
 
 	// Enhancement: jump a cinematic straight to its end, as if it had finished
-	// playing on its own. Only movies that hide the player cursor are skipped;
-	// the rest are background animations the player isn't waiting on.
+	// playing on its own. Only cinematics are skipped; background animations
+	// the player isn't waiting on keep playing.
 	void skip();
 
 	Common::Path _videoName;
@@ -166,6 +184,10 @@ public:
 
 	bool isRandom() const { return _movieType == kRandomMovie; }
 
+	// Whether skip() applies: a movie the player is waiting through, either
+	// because it hides the cursor or because it covers the whole viewport.
+	bool isSkippable();
+
 	// Random-movie state (only populated for kRandomMovie).
 	// "RandomMovie" picks any sequence; otherwise it names the starting one.
 	Common::String _startingSequenceName;
@@ -176,24 +198,43 @@ public:
 	// character's recognition animation, played while the mouse hovers it.
 	RandomSequence _secondaryMovie;
 
-	// Nancy13 talkable characters: the scene to open when the character is
+	// Nancy14 replaced that slot with a foreground mask: a still image blitted
+	// over the movie, so scenery standing in front of the character (a table,
+	// a counter) covers the lower part of it.
+	class ForegroundMask : public RenderObject {
+	public:
+		ForegroundMask() : RenderObject(9) {}
+		bool isViewportRelative() const override { return true; }
+	};
+
+	Common::Path _maskName;
+	Common::Array<SecondaryVideoDescription> _maskDescs;
+
+	// Talkable characters (Nancy13+): the scene to open when the character is
 	// clicked (its conversation). kNoScene means the character isn't clickable.
 	uint16 _talkSceneID = kNoScene;
-	// Hover cursor for the character (a raw Nancy13 cursor id from the chunk).
-	uint16 _talkCursorType = 0;
+	// Hover cursor for the character (a raw cursor id from the chunk), or -1
+	// when the record doesn't name one.
+	int16 _talkCursorType = -1;
 
 	// Chain state. After a sequence's movie finishes the engine rolls a
 	// weighted pick: "stay" -> enter pause for a random duration and
 	// re-roll; valid next-sequence -> swap to that sequence's movie.
 	enum RandomChainState { kRandomPlaying, kRandomPaused };
+	// What ends the pause: its duration running out, or the mouse entering or
+	// leaving the movie (minPauseMs -2 / -3). A sequence waiting on the mouse
+	// holds its last frame on screen instead of hiding.
+	enum RandomPauseMode { kPauseTimed, kPauseUntilHovered, kPauseUntilNotHovered };
 	int _activeSequenceIndex = -1;
 	RandomChainState _randomChainState = kRandomPlaying;
+	RandomPauseMode _randomPauseMode = kPauseTimed;
 	uint32 _randomPauseEndTime = 0;
 	bool _randomStopRequested = false;
 	bool _randomPaused = false;
 
-	// Talkable-character hover state: whether the mouse is over the character,
-	// and whether the recognition (secondary) movie is currently playing.
+	// Whether the mouse is over the movie (which drives both the hover-based
+	// sequence chain and the click that opens a character's conversation), and
+	// whether the recognition (secondary) movie is currently playing.
 	bool _isHovered = false;
 	bool _playingSecondary = false;
 
@@ -227,7 +268,7 @@ public:
 	// hovering plays the recognition ("turn around") movie.
 	void handleInput(NancyInput &input) override;
 	CursorManager::CursorType getHoverCursor() const override;
-	bool cursorSetFromScript() const override { return isRandom() && _talkSceneID != kNoScene; }
+	bool cursorSetFromScript() const override { return isRandom() && _talkSceneID != kNoScene && _talkCursorType >= 0; }
 
 	Common::String getRecordExtraInfo() const override {
 		return Common::String::format("Scene %d, file %s", _sceneChange.sceneID, _videoName.baseName().c_str());
@@ -294,9 +335,18 @@ protected:
 	// or the chosen sequence index otherwise.
 	int rollNextSequence();
 
+	// Pick the sequence to chain to, without rolling for "stay" first: the
+	// special-flag entries take priority over the weighted random pick.
+	// Returns the chosen sequence index, or -1 if nothing was picked.
+	int pickNextSequence();
+
 	// Enter the paused chain state for a random duration in the sequence's
-	// [minPauseMs, maxPauseMs] range. Always returns -1.
+	// [minPauseMs, maxPauseMs] range, or until the mouse enters or leaves the
+	// movie. Always returns -1.
 	int beginRandomPause(const RandomSequence &seq);
+
+	// Whether whatever the current pause is waiting for has happened.
+	bool randomPauseElapsed() const;
 
 	// Find a sequence by name, warning and returning -1 if it isn't present.
 	int lookupSequence(const Common::Path &name) const;
@@ -305,14 +355,30 @@ protected:
 	// against the loaded decoder's frame count. Random sequences only.
 	void resolveSentinelFrames();
 
+	// Show the foreground mask blit belonging to the given background frame,
+	// or hide it when the record doesn't describe one for that frame.
+	void updateMask(int viewportFrame);
+
+	// Place and show the movie for the current background frame, or hide it
+	// when the record doesn't describe one for that frame.
+	void updateViewportFrame();
+
+	// Crop the last decoded frame with the given video description and move
+	// the movie to its destination. -1 uses the whole frame at its current spot.
+	void applyVideoDesc(int descID);
+
 	Graphics::ManagedSurface _fullFrame;
+	Graphics::ManagedSurface _maskImage;
+	ForegroundMask _mask;
 	int _curViewportFrame = -1;
 	bool _isFinished = false;
 };
 
 // Companion AR for the random-movie variant of PlaySecondaryMovie. When
 // executed it stops the currently-active random PlaySecondaryMovie and
-// optionally performs a scene change / event-flag set.
+// optionally performs a scene change / event-flag set. From Nancy15 on the
+// record names the movie it controls, so it can also address an already-loaded
+// movie by filename.
 class PlayRandomMovieControl : public ActionRecord {
 public:
 	PlayRandomMovieControl() {}
@@ -323,7 +389,9 @@ public:
 	enum RandomMovieControlMode : byte {
 		kStopNow = 0,
 		kPauseMovie = 1,
-		kResumeMovie = 2
+		kResumeMovie = 2,
+		kStopAtEnd = 3,
+		kPauseAtEnd = 4
 	};
 
 protected:
@@ -334,6 +402,9 @@ protected:
 	// Nancy13's record is the mode byte alone; earlier games append a scene
 	// change to it.
 	bool _hasSceneChange = true;
+	// Nancy15 prefixes the mode with the name of the movie to control.
+	Common::Path _movieName;
+	bool _isRandomMovie = true;
 };
 
 } // End of namespace Action

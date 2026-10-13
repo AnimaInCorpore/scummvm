@@ -64,7 +64,13 @@ namespace Nancy {
 // - 7: Nancy10 unnamed notebook task event flags added
 // - 8: Nancy12 DrivingPuzzle fuel state persisted
 // - 9: RippedLetterPuzzle stores its scene ID and tried flag
-static const int kSavegameVersion = 9;
+// - 10: Nancy14/15 inventory arrays hold 49 items instead of 50
+// - 11: Nancy12+ TableData holds 100 single values instead of 30, and
+//       the Nancy14/15 player clock only holds the time of the current
+//       day, with the day itself stored separately
+// - 12: QuizPuzzle slots are keyed by a 32-bit id, and the Nancy15
+//       protagonists each carry their own cell phone
+static const int kSavegameVersion = 12;
 
 struct NancyGameDescription;
 
@@ -180,8 +186,6 @@ private:
 	void populateStaticData();
 
 	Common::Error synchronize(Common::Serializer &serializer);
-
-	bool isCompressed();
 
 	StaticData _staticData;
 	Common::HashMap<Common::String, EngineData *> _engineData;
