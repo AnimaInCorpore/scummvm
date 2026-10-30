@@ -30,6 +30,11 @@ PosixIoStream::PosixIoStream(void *handle) :
 }
 
 int64 PosixIoStream::size() const {
+#ifdef ATARI_STE_GAME_ONLY
+	// On plain TOS, fstat() converts the file's DOS time stamp with mktime(),
+	// which is far slower on an 8 MHz 68000 than seeking to the end.
+	return StdioStream::size();
+#endif
 	int fd = fileno((FILE *)_handle);
 	if (fd == -1) {
 		return StdioStream::size();

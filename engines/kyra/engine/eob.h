@@ -203,7 +203,10 @@ private:
 	void gui_drawWeaponSlotStatus(int x, int y, int status) override;
 	void gui_printInventoryDigits(int x, int y, int val) override;
 	void gui_drawCharacterStatsPage() override;
+#ifndef ATARI_STE_GAME_ONLY
+	// The Sega CD map; the Atari STE build runs the DOS version only.
 	void gui_displayMap() override;
+#endif
 	void gui_drawSpellbook() override;
 	void gui_updateAnimations() override;
 	void gui_resetAnimations();
@@ -212,9 +215,11 @@ private:
 	void makeFaceShapes(int charId = -1) override;
 	void printStatsString(const char *str, int x, int y);
 	void printSpellbookString(uint16 *dst, const char *str, uint16 ntbl);
+#ifndef ATARI_STE_GAME_ONLY
 	void drawMapButton(const char *str, int x, int y);
 	void drawMapPage(int level);
 	void drawMapSpots(int level, int animState);
+#endif
 	void drawDialogueButtons() override;
 
 	const KyraRpgGUISettings *guiSettings() const override;

@@ -95,8 +95,11 @@ EoBEngine::~EoBEngine() {
 	delete[] _shakeBackBuffer2;
 	delete[] _compassData;
 
+#ifndef ATARI_STE_GAME_ONLY
+	// Sega CD only; never created in the Atari STE build.
 	delete _seqPlayer;
 	delete _sres;
+#endif
 }
 
 Common::Error EoBEngine::init() {

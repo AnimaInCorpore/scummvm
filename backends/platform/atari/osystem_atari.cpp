@@ -45,7 +45,11 @@
 
 #include "backends/platform/atari/osystem_atari.h"
 
+#ifdef DISABLE_DEFAULT_AUDIOCD_MANAGER
+#include "backends/audiocd/audiocd.h"
+#else
 #include "backends/audiocd/atari/atari-audiocd.h"
+#endif
 #include "backends/events/atari/atari-events.h"
 #include "backends/events/default/default-events.h"
 #include "backends/graphics/atari/atari-graphics.h"
@@ -70,6 +74,41 @@
  * Include header files needed for the getFilesystemFactory() method.
  */
 #include "backends/fs/atari/atari-fs-factory.h"
+
+#ifdef ATARI_STE_GAME_ONLY
+// libstdc++'s default terminate handler demangles the exception's type name,
+// which links its 50 KiB demangler. The 4 MiB STE builds abort instead.
+namespace __gnu_cxx {
+void __verbose_terminate_handler() {
+	fprintf(stdout, "terminate called\n");
+	exit(1);
+}
+}
+
+// The same for the two allocation failures the backend's containers can
+// raise: libstdc++'s versions throw, which links its exception unwinder.
+namespace std {
+void __throw_bad_alloc() {
+	fprintf(stdout, "out of memory\n");
+	exit(1);
+}
+void __throw_bad_array_new_length() {
+	fprintf(stdout, "bad array new length\n");
+	exit(1);
+}
+}
+
+// libstdc++'s operator new throws std::bad_alloc, which links the unwinder
+// as well; ending the program is what an uncaught bad_alloc does anyway.
+void *operator new(size_t size) {
+	void *ptr = malloc(size ? size : 1);
+	if (!ptr) {
+		fprintf(stdout, "out of memory (%lu bytes)\n", (unsigned long)size);
+		exit(1);
+	}
+	return ptr;
+}
+#endif
 
 bool g_gameEngineActive = false;
 
@@ -391,7 +430,30 @@ void OSystem_Atari::initBackend() {
 	// Setup and start mixer
 	_mixerManager->init();
 
+#ifdef DISABLE_DEFAULT_AUDIOCD_MANAGER
+	// A game that plays no CD audio (build-ste-eob.sh): a silent manager keeps
+	// the file-based CD audio decoders out of the link.
+	class NullAudioCDManager final : public AudioCDManager {
+	public:
+		bool open() override { return false; }
+		void close() override {}
+		bool play(int track, int numLoops, int startFrame, int duration, bool onlyEmulate,
+			Audio::Mixer::SoundType soundType) override { return false; }
+		bool playAbsolute(int startFrame, int numLoops, int duration, bool onlyEmulate,
+			Audio::Mixer::SoundType soundType, const char *cuesheet) override { return false; }
+		bool isPlaying() const override { return false; }
+		void setVolume(byte volume) override {}
+		void setBalance(int8 balance) override {}
+		void stop() override {}
+		void update() override {}
+		Status getStatus() const override { return Status(); }
+		bool existExtractedCDAudioFiles(uint track) override { return false; }
+		bool isDataAndCDAudioReadFromSameCD() override { return false; }
+	};
+	_audiocdManager = new NullAudioCDManager();
+#else
 	_audiocdManager = new AtariAudioCDManager();
+#endif
 
 	BaseBackend::initBackend();
 }

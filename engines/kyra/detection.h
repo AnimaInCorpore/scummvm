@@ -45,7 +45,15 @@ struct GameFlags {
 	Common::Language fanLang;
 	Common::Language replacedLang;
 
+#ifdef ATARI_STE_GAME_ONLY
+	// The Atari STE build runs the DOS versions only. A constant lets the
+	// compiler drop every other platform's code; the placeholder keeps the
+	// layout the FLAGS initializers in detection_tables.h expect.
+	static constexpr Common::Platform platform = Common::kPlatformDOS;
+	Common::Platform platformPlaceholder;
+#else
 	Common::Platform platform;
+#endif
 
 	bool isDemo               : 1;
 	bool useAltShapeHeader    : 1;    // alternative shape header (uses 2 bytes more, those are unused though)

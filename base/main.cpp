@@ -1041,7 +1041,11 @@ extern "C" int scummvm_main(int argc, const char * const argv[]) {
 #endif
 	MusicManager::destroy();
 	Graphics::CursorManager::destroy();
+#ifndef ATARI_STE_GAME_ONLY
+	// The STE game-only builds use no ScummVM fonts; destroying the manager
+	// would link its built-in fonts and their BDF parser.
 	Graphics::FontManager::destroy();
+#endif
 #ifdef USE_FREETYPE2
 	Graphics::shutdownTTF();
 #endif

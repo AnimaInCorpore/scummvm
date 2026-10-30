@@ -44,6 +44,10 @@ Common::String PrintingManager::getDefaultPrinterName() const {
 }
 
 void PrintingManager::saveAsImage(const Graphics::ManagedSurface &surf, const Common::String &fileName) {
+#ifdef ATARI_STE_GAME_ONLY
+	// No printing in the 4 MiB Atari STE build, and no image encoder linked.
+	warning("PrintingManager::saveAsImage: Printing is not available");
+#else
 	Common::String saveName = fileName;
 	Common::String currentTarget = ConfMan.getActiveDomainName();
 
@@ -82,6 +86,7 @@ void PrintingManager::saveAsImage(const Graphics::ManagedSurface &surf, const Co
 
 	saveFile->finalize();
 	delete saveFile;
+#endif
 }
 
 void PrintingManager::doPrint(const Graphics::ManagedSurface &surf, const Common::Rect &destRect) {

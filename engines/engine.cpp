@@ -314,6 +314,12 @@ static bool guiWasLaunched() {
 #include "logo_data.h"
 
 void splashScreen() {
+#ifdef ATARI_STE_GAME_ONLY
+	// Dithering the logo into the 16-colour overlay takes about 50 seconds
+	// on an 8 MHz 68000, so the STE build starts the game without it.
+	splash = true;
+	return;
+#else
 	Common::MemoryReadStream stream(logo_data, ARRAYSIZE(logo_data));
 
 	Image::BitmapDecoder bitmap;
@@ -385,6 +391,7 @@ void splashScreen() {
 	g_system->hideOverlay();
 
 	splash = true;
+#endif
 }
 
 void initGraphicsModes(const Graphics::ModeList &modes) {
@@ -792,6 +799,11 @@ bool Engine::hotspotDirty() const {
 }
 
 void Engine::drawHotspots() {
+#ifdef ATARI_STE_GAME_ONLY
+	// The hotspot overlay draws with the GUI fonts, which the 4 MiB STE
+	// builds do not link.
+	return;
+#else
 	if (!_showHotspots)
 		return;
 
@@ -833,6 +845,7 @@ void Engine::drawHotspots() {
 
 	g_system->copyRectToOverlay(overlayBuffer.getPixels(), overlayBuffer.pitch, 0, 0, overlayWidth, overlayHeight);
 	overlayBuffer.free();
+#endif
 }
 
 void Engine::openMainMenuDialog() {

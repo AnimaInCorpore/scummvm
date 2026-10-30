@@ -257,7 +257,12 @@ protected:
 	uint8 _configVoice;
 	bool _configNullSound;
 
+#ifdef ATARI_STE_GAME_ONLY
+	// The Atari STE build runs the games' VGA mode only.
+	static constexpr Common::RenderMode _configRenderMode = Common::kRenderVGA;
+#else
 	Common::RenderMode _configRenderMode;
+#endif
 
 	// game speed
 	virtual bool skipFlag() const;

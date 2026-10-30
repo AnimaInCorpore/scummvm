@@ -246,8 +246,23 @@ Common::String readString(Common::SeekableReadStream &stream) {
 	Common::String result;
 	char c = 0;
 
+#ifdef ATARI_STE_GAME_ONLY
+	// Growing the string a character at a time cost about 20,000 cycles per
+	// archive entry name on an 8 MHz 68000; collect the name first.
+	char buffer[64];
+	uint length = 0;
+	while ((c = stream.readByte()) != 0) {
+		if (length == sizeof(buffer)) {
+			result += Common::String(buffer, length);
+			length = 0;
+		}
+		buffer[length++] = c;
+	}
+	result += Common::String(buffer, length);
+#else
 	while ((c = stream.readByte()) != 0)
 		result += c;
+#endif
 
 	return result;
 }
@@ -1225,7 +1240,12 @@ Common::Archive *InstallerLoader::load(Resource *owner, const Common::Path &file
 }
 
 Common::Archive *StuffItLoader::load(Resource *owner, const Common::Path &filename) {
+#ifdef ATARI_STE_GAME_ONLY
+	// Only the Macintosh Kyrandia 1 installer is a StuffIt archive.
+	return load(owner, nullptr, filename.toString('/'));
+#else
 	return load(owner, Common::MacResManager::openFileOrDataFork(filename), filename.toString('/'));
+#endif
 }
 
 Common::Archive *StuffItLoader::load(Resource *owner, Common::SeekableReadStream *stream, const Common::String &debugName) {

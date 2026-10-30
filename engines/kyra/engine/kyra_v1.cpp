@@ -31,6 +31,13 @@
 
 namespace Kyra {
 
+#ifdef ATARI_STE_GAME_ONLY
+// Definitions of the Atari STE build's constants (needed in C++11 when they
+// are bound to references).
+constexpr Common::Platform GameFlags::platform;
+constexpr Common::RenderMode KyraEngine_v1::_configRenderMode;
+#endif
+
 KyraEngine_v1::KyraEngine_v1(OSystem *system, const GameFlags &flags)
 	: Engine(system), _flags(flags), _rnd("kyra") {
 	_res = nullptr;
@@ -40,7 +47,9 @@ KyraEngine_v1::KyraEngine_v1(OSystem *system, const GameFlags &flags)
 	_timer = nullptr;
 	_emc = nullptr;
 
+#ifndef ATARI_STE_GAME_ONLY
 	_configRenderMode = Common::kRenderDefault;
+#endif
 	_configNullSound = false;
 
 	if (_flags.platform == Common::kPlatformAmiga)
@@ -163,8 +172,10 @@ Common::Error KyraEngine_v1::init() {
 	if (_sound)
 		_sound->updateVolumeSettings();
 
+#ifndef ATARI_STE_GAME_ONLY
 	if (ConfMan.hasKey("render_mode"))
 		_configRenderMode = Common::parseRenderMode(ConfMan.get("render_mode"));
+#endif
 
 	_res = new Resource(this);
 	assert(_res);

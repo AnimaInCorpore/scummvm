@@ -40,6 +40,14 @@
 
 namespace Kyra {
 
+#ifdef ATARI_STE_GAME_ONLY
+// Definitions of the Atari STE build's constants (see screen.h).
+constexpr bool Screen::_use16ColorMode;
+constexpr bool Screen::_isAmiga;
+constexpr bool Screen::_isSegaCD;
+constexpr Common::RenderMode Screen::_renderMode;
+#endif
+
 Screen::Screen(KyraEngine_v1 *vm, OSystem *system, const ScreenDim *dimTable, const int dimTableSize)
 	: _system(system), _vm(vm), _sjisInvisibleColor(0), _dimTable(dimTable), _dimTableCount(dimTableSize),
 	_cursorColorKey((vm->game() == GI_KYRA1 || vm->game() == GI_EOB1 || vm->game() == GI_EOB2) ? 0xFF : 0),
@@ -72,7 +80,9 @@ Screen::Screen(KyraEngine_v1 *vm, OSystem *system, const ScreenDim *dimTable, co
 	_getPagePixelProc = nullptr;
 	_setPagePixelProc = nullptr;
 
+#ifndef ATARI_STE_GAME_ONLY
 	_renderMode = Common::kRenderDefault;
+#endif
 	_sjisMixedFontMode = false;
 
 	_screenPalette = _internFadePalette = nullptr;
@@ -85,7 +95,11 @@ Screen::Screen(KyraEngine_v1 *vm, OSystem *system, const ScreenDim *dimTable, co
 	_hiColorConversionPalette = nullptr;
 	_hiColorShadingLevel = 0;
 	_internalBytesPerPixel = 1;
+#ifdef ATARI_STE_GAME_ONLY
+	_4bitPixelPacking = _useAmigaExtraColors = false;
+#else
 	_4bitPixelPacking = _useAmigaExtraColors = _isAmiga = _isSegaCD = _use16ColorMode = false;
+#endif
 	_useSJIS = _useOverlays = _useHiResEGADithering = false;
 
 	_currentFont = FID_8_FNT;
@@ -178,10 +192,12 @@ bool Screen::init() {
 	_debugEnabled = false;
 	_useOverlays = false;
 	_useSJIS = false;
+#ifndef ATARI_STE_GAME_ONLY
 	_use16ColorMode = _vm->gameFlags().use16ColorMode;
-	_4bitPixelPacking = (_use16ColorMode && _vm->game() == GI_LOL);
 	_isAmiga = (_vm->gameFlags().platform == Common::kPlatformAmiga);
 	_isSegaCD = (_vm->gameFlags().platform == Common::kPlatformSegaCD);
+#endif
+	_4bitPixelPacking = (_use16ColorMode && _vm->game() == GI_LOL);
 	// Amiga copper palette magic requires the use of more than 32 colors for some purposes.
 	_useAmigaExtraColors = (_isAmiga && _vm->game() == GI_EOB2);
 
@@ -198,13 +214,15 @@ bool Screen::init() {
 	// to the engines. We already limit the selection via our GUIO flags in
 	// the game specific settings, but this is not enough due to global
 	// settings allowing everything.
+#ifndef ATARI_STE_GAME_ONLY
 	if (_vm->gameFlags().platform == Common::kPlatformDOS && (_vm->game() == GI_EOB1 || _vm->game() == GI_EOB2)) {
 		if (ConfMan.hasKey("render_mode"))
 			_renderMode = Common::parseRenderMode(ConfMan.get("render_mode"));
 		if ((_vm->game() == GI_EOB1 && _renderMode != Common::kRenderVGA && _renderMode != Common::kRenderCGA && _renderMode != Common::kRenderEGA) ||
 			(_vm->game() == GI_EOB2 && _renderMode != Common::kRenderVGA && _renderMode != Common::kRenderEGA))
 				_renderMode = Common::kRenderDefault;
-	} 
+	}
+#endif
 
 	// In VGA mode the odd and even page pointers point to the same buffers.
 	for (int i = 0; i < SCREEN_PAGE_NUM; i++)

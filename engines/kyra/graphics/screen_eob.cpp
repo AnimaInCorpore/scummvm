@@ -124,8 +124,11 @@ Screen_EoB::~Screen_EoB() {
 	delete[] _segaCustomPalettes;
 	delete[] _palFaders;
 	delete[] _defaultRenderBuffer;
+#ifndef ATARI_STE_GAME_ONLY
+	// Sega CD only; never created in the Atari STE build.
 	delete _segaRenderer;
 	delete _segaAnimator;
+#endif
 }
 
 template void Screen_EoB::drawShapeSetPixel<uint8, false>(uint8 *dst, uint8 col);

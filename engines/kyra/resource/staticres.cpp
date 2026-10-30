@@ -34,7 +34,9 @@
 #include "kyra/sound/sound_intern.h"
 
 #include "common/endian.h"
+#ifndef ATARI_STE_GAME_ONLY
 #include "common/md5.h"
+#endif
 
 namespace Kyra {
 
@@ -45,6 +47,12 @@ bool checkKyraDat(Common::SeekableReadStream *file) {
 	if (!file)
 		return false;
 
+#ifdef ATARI_STE_GAME_ONLY
+	// No MD5 check in the STE build: hashing the 2 MB kyra.dat takes most of
+	// a minute on an 8 MHz 68000. Loading and indexing the file still fail
+	// on a broken one.
+	return file->size() > 16;
+#else
 	uint32 size = file->size() - 16;
 	uint8 digest[16];
 	file->seek(size, SEEK_SET);
@@ -60,6 +68,7 @@ bool checkKyraDat(Common::SeekableReadStream *file) {
 		if (digest[i] != digestCalc[i])
 			return false;
 	return true;
+#endif
 }
 
 struct IndexTable {

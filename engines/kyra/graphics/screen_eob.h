@@ -28,6 +28,10 @@
 
 #include "kyra/graphics/screen.h"
 
+#ifdef ATARI_STE_GAME_ONLY
+#include "common/textconsole.h"
+#endif
+
 namespace Kyra {
 
 class EoBCoreEngine;
@@ -112,28 +116,61 @@ public:
 	bool loadFont(FontId fontId, const char *filename) override;
 
 	// FM-Towns specific
+#ifdef ATARI_STE_GAME_ONLY
+	// The Atari STE build links no FM-Towns, PC-98 or Amiga graphics code;
+	// the DOS files never reach these.
+	void decodeSHP(const uint8 *data, int dstPage) { error("Screen_EoB::decodeSHP(): FM-Towns graphics are not supported"); }
+#else
 	void decodeSHP(const uint8 *data, int dstPage);
+#endif
+#ifdef ATARI_STE_GAME_ONLY
+	// The Atari STE build runs the DOS versions only, where these do nothing
+	// (no hi-colour palettes); their FM-Towns code is not linked.
+	void convertToHiColor(int page) {}
+	void shadeRect(int x1, int y1, int x2, int y2, int shadingLevel) {}
+#else
 	void convertToHiColor(int page);
 	void shadeRect(int x1, int y1, int x2, int y2, int shadingLevel);
+#endif
 
 	// PC-98 specific
+#ifdef ATARI_STE_GAME_ONLY
+	// No 16-colour mode in the DOS versions: a no-op there.
+	void selectPC98Palette(int palID, Palette &dest, int brightness = 0, bool set = false) {}
+#else
 	void selectPC98Palette(int palID, Palette &dest, int brightness = 0, bool set = false);
+#endif
+#ifdef ATARI_STE_GAME_ONLY
+	void decodeBIN(const uint8 *src, uint8 *dst, uint16 inSize) { error("Screen_EoB::decodeBIN(): PC-98 graphics are not supported"); }
+	void decodePC98PlanarBitmap(uint8 *srcDstBuffer, uint8 *tmpBuffer, uint16 size = 64000) { error("Screen_EoB::decodePC98PlanarBitmap(): PC-98 graphics are not supported"); }
+#else
 	void decodeBIN(const uint8 *src, uint8 *dst, uint16 inSize);
 	void decodePC98PlanarBitmap(uint8 *srcDstBuffer, uint8 *tmpBuffer, uint16 size = 64000);
+#endif
 
 	struct PalCycleData {
 		const int8 *data;
 		uint8 delay;
 	};
 
+#ifdef ATARI_STE_GAME_ONLY
+	// No 16-colour mode, so no palette cycle is ever started.
+	void initPC98PaletteCycle(int palID, PalCycleData *data) {}
+	void updatePC98PaletteCycle(int brightness) {}
+#else
 	void initPC98PaletteCycle(int palID, PalCycleData *data);
 	void updatePC98PaletteCycle(int brightness);
+#endif
 
 	PalCycleData *_activePalCycle;
 	uint8 *_cyclePalette;
 
 	// Amiga specific
+#ifdef ATARI_STE_GAME_ONLY
+	void loadSpecialAmigaCPS(const char *fileName, int destPage, bool isGraphics) { error("Screen_EoB::loadSpecialAmigaCPS(): Amiga graphics are not supported"); }
+#else
 	void loadSpecialAmigaCPS(const char *fileName, int destPage, bool isGraphics);
+#endif
 	// This is a simple way of emulating the Amiga copper list palette magic for more than 32 colors.
 	// I use colors 32 to 63 for these extra colors (which the Amiga copper sends to the color
 	// registers on the fly at vertical beam position 120).

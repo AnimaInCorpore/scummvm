@@ -580,6 +580,11 @@ bool AdvancedMetaEngineBase::getFilePropertiesExtern(uint md5Bytes, const FileMa
 }
 
 static bool getFilePropertiesIntern(uint md5Bytes, const AdvancedMetaEngineBase::FileMap &allFiles, MD5Properties md5prop, const Common::Path &fname, FileProperties &fileProps) {
+#ifdef ATARI_STE_GAME_ONLY
+	// The STE game-only builds detect no Macintosh releases.
+	if (md5prop & (kMD5MacResFork | kMD5MacDataFork))
+		return false;
+#else
 	if (md5prop & (kMD5MacResFork | kMD5MacDataFork)) {
 		FileMapArchive fileMapArchive(allFiles);
 
@@ -613,6 +618,7 @@ static bool getFilePropertiesIntern(uint md5Bytes, const AdvancedMetaEngineBase:
 		// We have no forks
 		return false;
 	}
+#endif
 
 	Common::ScopedPtr<Common::SeekableReadStream> testFile;
 
@@ -649,12 +655,14 @@ static bool getFilePropertiesIntern(uint md5Bytes, const AdvancedMetaEngineBase:
 					delete archive;
 					return false;
 				}
+#ifndef ATARI_STE_GAME_ONLY
 			} else if (archiveType.equals("clk")) {
 				// Clickteam
 				archive = Common::ClickteamInstaller::open(allFiles[archiveName]);
 				ADCacheMan.addArchive(allFiles[archiveName], archive);
 				if (!archive)
 					return false;
+#endif
 			} else {
 				debugC(3, kDebugGlobalDetection, "WARNING: Archive type string '%s' not recognized", archiveType.c_str());
 				return false;

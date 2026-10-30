@@ -890,14 +890,29 @@ protected:
 	bool _sjisMixedFontMode;
 
 	// colors/palette specific
+#ifdef ATARI_STE_GAME_ONLY
+	// The Atari STE build runs the DOS versions of Eye of the Beholder in VGA
+	// mode only; constants let the compiler drop the other modes' code.
+	static constexpr bool _use16ColorMode = false;
+#else
 	bool _use16ColorMode;
+#endif
 	bool _4bitPixelPacking;
 	bool _useHiResEGADithering;
 	Graphics::PixelFormat _outputPixelFormat;
+#ifdef ATARI_STE_GAME_ONLY
+	static constexpr bool _isAmiga = false;
+#else
 	bool _isAmiga;
+#endif
 	bool _useAmigaExtraColors;
+#ifdef ATARI_STE_GAME_ONLY
+	static constexpr bool _isSegaCD = false;
+	static constexpr Common::RenderMode _renderMode = Common::kRenderVGA;
+#else
 	bool _isSegaCD;
 	Common::RenderMode _renderMode;
+#endif
 	int _internalBytesPerPixel;
 	int _screenPageSize;
 	const int _screenHeight;

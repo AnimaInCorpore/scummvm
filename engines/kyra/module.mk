@@ -122,20 +122,25 @@ MODULE_OBJS += \
 	engine/sprites_eob.o \
 	engine/timer_eob.o \
 	graphics/screen_eob.o \
-	graphics/screen_eob_amiga.o \
-	graphics/screen_eob_pc98.o \
-	graphics/screen_eob_segacd.o \
-	graphics/screen_eob_towns.o \
 	gui/automap_eob.o \
 	gui/gui_eob.o \
 	gui/gui_eob_segacd.o \
 	gui/saveload_eob.o \
-	resource/resource_segacd.o \
 	resource/staticres_eob.o \
 	script/script_eob.o \
-	sequence/seqplayer_eob_segacd.o \
 	sequence/sequences_eob.o \
-	sequence/sequences_darkmoon.o \
+	sequence/sequences_darkmoon.o
+
+# The Atari STE build runs the DOS versions only (ATARI_STE_GAME_ONLY), so it
+# leaves out the other platforms' screen, GUI and sound code.
+ifeq (,$(findstring -DATARI_STE_GAME_ONLY,$(SAVED_CXXFLAGS)))
+MODULE_OBJS += \
+	graphics/screen_eob_amiga.o \
+	graphics/screen_eob_pc98.o \
+	graphics/screen_eob_segacd.o \
+	graphics/screen_eob_towns.o \
+	resource/resource_segacd.o \
+	sequence/seqplayer_eob_segacd.o \
 	sound/sound_amiga_eob.o \
 	sound/sound_pc98_eob.o \
 	sound/sound_pc98_darkmoon.o \
@@ -147,6 +152,7 @@ MODULE_OBJS += \
 	sound/drivers/pcspeaker_v1.o \
 	sound/drivers/segacd.o \
 	text/text_eob_segacd.o
+endif
 endif
 
 # This module can be built as a plugin

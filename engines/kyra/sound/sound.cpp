@@ -331,6 +331,7 @@ bool KyraEngine_v1::snd_voiceIsPlaying() {
 
 // static res
 
+#ifndef ATARI_STE_GAME_ONLY
 namespace {
 
 // A simple wrapper to create VOC streams the way like creating MP3, OGG/Vorbis and FLAC streams.
@@ -341,8 +342,13 @@ Audio::SeekableAudioStream *makeVOCStream(Common::SeekableReadStream *stream, Di
 }
 
 } // end of anonymous namespace
+#endif
 
 const Sound::SpeechCodecs Sound::_supportedCodecs[] = {
+#ifndef ATARI_STE_GAME_ONLY
+	// The Atari STE build runs the DOS floppy versions of Eye of the Beholder,
+	// which have no speech; leaving the codecs out keeps the audio decoders
+	// out of its link.
 	{ ".VOC", makeVOCStream },
 	{ "", makeVOCStream },
 
@@ -360,6 +366,7 @@ const Sound::SpeechCodecs Sound::_supportedCodecs[] = {
 	{ ".VOF", Audio::makeFLACStream },
 	{ ".FLA", Audio::makeFLACStream },
 #endif // USE_FLAC
+#endif // ATARI_STE_GAME_ONLY
 
 	{ nullptr, nullptr }
 };

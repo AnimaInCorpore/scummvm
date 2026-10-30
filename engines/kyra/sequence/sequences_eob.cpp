@@ -2455,6 +2455,9 @@ void EoBEngine::seq_xdeath() {
 	gui_drawAllCharPortraitsWithStats();
 }
 
+#ifndef ATARI_STE_GAME_ONLY
+// The Sega CD sequences; the Atari STE build runs the DOS version only and
+// never calls them (their callers test for the Sega CD platform).
 #define updateScrollState(scrollTable, step) \
 	for (int iii = 0; iii < 228; ++iii) \
 		((int16*)scrollTable)[iii << 1] = ((int16*)scrollTable)[(iii << 1) + 1] = (iii & 1) ? -step : step;
@@ -2839,16 +2842,27 @@ bool EoBEngine::seq_segaPlaySequence(int sequenceId, bool setupScreen) {
 	return res;
 }
 
+#else
+// The NPC dialogue calls these on every platform; they return at once
+// unless the platform is Sega CD.
+void EoBEngine::seq_segaSetupSequence(int sequenceId) {}
+void EoBEngine::seq_segaRestoreAfterSequence() {}
+#endif // ATARI_STE_GAME_ONLY
+
 void EoBEngine::seq_segaPausePlayer(bool pause) {
+#ifndef ATARI_STE_GAME_ONLY
 	if (_flags.platform != Common::kPlatformSegaCD)
 		return;
 	if (_seqPlayer)
 		_seqPlayer->pause(pause);
+#endif
 }
 
+#ifndef ATARI_STE_GAME_ONLY
 #undef updateScrollState
 #undef displaySubtitle
 #undef printSub
+#endif
 
 } // End of namespace Kyra
 

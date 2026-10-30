@@ -24,6 +24,9 @@
 #include "kyra/resource/resource_intern.h"
 
 #include "common/macresman.h"
+#ifdef ATARI_STE_GAME_ONLY
+#include "common/bufferedstream.h"
+#endif
 #include "common/compression/stuffit.h"
 #include "common/concatstream.h"
 #include "common/config-manager.h"
@@ -33,6 +36,10 @@
 namespace Kyra {
 
 Common::Archive *Resource::loadKyra1MacInstaller() {
+#ifdef ATARI_STE_GAME_ONLY
+	// The Atari STE build runs Eye of the Beholder only.
+	return nullptr;
+#else
 	Common::Path kyraInstaller = Util::findMacResourceFile("Install Legend of Kyrandia");
 
 	if (!kyraInstaller.empty()) {
@@ -59,6 +66,7 @@ Common::Archive *Resource::loadKyra1MacInstaller() {
 	}
 
 	return nullptr;
+#endif
 }
 
 Resource::Resource(KyraEngine_v1 *vm) : _archiveCache(), _files(), _archiveFiles(), _protectedFiles(), _loaders(), _vm(vm), _bigEndianPlatForm(vm->gameFlags().platform == Common::kPlatformAmiga || vm->gameFlags().platform == Common::kPlatformSegaCD) {
@@ -406,6 +414,12 @@ Common::Archive *Resource::loadArchive(const Common::String &name, Common::Archi
 
 	if (!stream)
 		return nullptr;
+
+#ifdef ATARI_STE_GAME_ONLY
+	// The loaders read archive indexes a byte at a time; through the C library
+	// that took most of a minute of EOB's start on an 8 MHz 68000.
+	stream = Common::wrapBufferedSeekableReadStream(stream, 4096, DisposeAfterUse::YES);
+#endif
 
 	Common::Archive *archive = nullptr;
 	for (LoaderList::const_iterator i = _loaders.begin(); i != _loaders.end(); ++i) {

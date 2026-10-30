@@ -266,11 +266,20 @@ Common::Error KyraMetaEngine::createInstance(OSystem *syst, Engine **engine, con
 	Kyra::GameFlags flags = gd->flags;
 
 	flags.lang = gd->desc.language;
+#ifdef ATARI_STE_GAME_ONLY
+	// GameFlags::platform is fixed to DOS here; refuse anything else.
+	Common::Platform platform = Common::parsePlatform(ConfMan.get("platform"));
+	if (platform == Common::kPlatformUnknown)
+		platform = gd->desc.platform;
+	if (platform != Common::kPlatformDOS)
+		return Common::kUnsupportedGameidError;
+#else
 	flags.platform = gd->desc.platform;
 
 	Common::Platform platform = Common::parsePlatform(ConfMan.get("platform"));
 	if (platform != Common::kPlatformUnknown)
 		flags.platform = platform;
+#endif
 
 	if (flags.lang == Common::UNK_LANG) {
 		Common::Language lang = Common::parseLanguage(ConfMan.get("language"));
@@ -284,8 +293,6 @@ Common::Error KyraMetaEngine::createInstance(OSystem *syst, Engine **engine, con
 	// The Atari STE build is a profile of the DOS versions of Eye of the
 	// Beholder 1 and 2. Creating no other engine keeps Kyrandia 1-3 and the
 	// other platforms' screen and sound code out of the link.
-	if (flags.platform != Common::kPlatformDOS)
-		return Common::kUnsupportedGameidError;
 	if (flags.gameID == Kyra::GI_EOB1) {
 		*engine = new Kyra::EoBEngine(syst, flags);
 	} else if (flags.gameID == Kyra::GI_EOB2) {

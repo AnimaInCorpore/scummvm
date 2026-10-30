@@ -228,6 +228,8 @@ void EoBEngine::gui_drawCharacterStatsPage() {
 	r->render(2, 22, 5, 18, 16);
 }
 
+#ifndef ATARI_STE_GAME_ONLY
+// Sega CD only; the Atari STE build runs the DOS version (see eob.h).
 void EoBEngine::gui_displayMap() {
 	disableSysTimer(2);
 
@@ -320,6 +322,8 @@ void EoBEngine::gui_displayMap() {
 
 	enableSysTimer(2);
 }
+
+#endif // ATARI_STE_GAME_ONLY
 
 void EoBEngine::gui_drawSpellbook() {
 	if (_flags.platform != Common::kPlatformSegaCD) {
@@ -596,6 +600,7 @@ void EoBEngine::printSpellbookString(uint16 *dst, const char *str, uint16 ntbl) 
 	}
 }
 
+#ifndef ATARI_STE_GAME_ONLY
 void EoBEngine::drawMapButton(const char *str, int x, int y) {
 	_screen->sega_drawClippedLine(8, 9, x, y, 64, 14, 0x99);
 	_screen->sega_drawClippedLine(8, 9, x, y + 1, 63, 13, 0xBB);
@@ -642,6 +647,8 @@ void EoBEngine::drawMapSpots(int level, int animState) {
 	a->update();
 }
 
+#endif // ATARI_STE_GAME_ONLY
+
 void EoBEngine::drawDialogueButtons() {
 	if (_flags.platform != Common::kPlatformSegaCD) {
 		KyraRpgEngine::drawDialogueButtons();
@@ -666,6 +673,8 @@ void EoBEngine::drawDialogueButtons() {
 	_screen->sega_getRenderer()->render(0);
 }
 
+#ifndef ATARI_STE_GAME_ONLY
+// The Sega CD GUI; the Atari STE build runs the DOS version only.
 GUI_EoB_SegaCD::GUI_EoB_SegaCD(EoBEngine *vm) : GUI_EoB(vm), _vm(vm), _clickableCharactersNumPages(vm->_textInputCharacterLinesSize) {
 	_vm->_sres->loadContainer("ITEM");
 	uint8 *cm = _vm->_sres->resData(8, 0);
@@ -1090,6 +1099,8 @@ const GUI_EoB_SegaCD::MenuButtonTiles GUI_EoB_SegaCD::_menuButtonTiles[40] = {
 	{ 0x020b, 0x0294 },	{ 0x0217, 0x02A0 },	{ 0x024d, 0x030c },	{ 0x0000, 0x0000 },
 	{ 0x0000, 0x0000 }, { 0x0000, 0x0000 }, { 0x01CF, 0x01C8 }, { 0x0000, 0x0000 }
 };
+
+#endif // ATARI_STE_GAME_ONLY
 
 } // End of namespace Kyra
 

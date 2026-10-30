@@ -16,7 +16,11 @@ BUILD_DIR=${BUILD_DIR:-build-ste-eob}
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 PLATFORM=m68k-atari-mintelf
-export CXXFLAGS="-m68000 -fomit-frame-pointer -ffunction-sections -fdata-sections -DDISABLE_FANCY_THEMES -DDISABLE_DOSBOX_OPL -DATARI_STE_GAME_ONLY -fno-exceptions -ffast-math -fno-unsafe-math-optimizations -Os -fno-unwind-tables -fno-asynchronous-unwind-tables"
+# DISABLE_COMMAND_LINE and DISABLE_DEFAULT_AUDIOCD_MANAGER go further than
+# build-ste.sh: the game starts from the INI file and plays no CD audio.
+# -fno-threadsafe-statics: the single-tasking STE needs no locks around local
+# statics, and libstdc++'s lock pulls in its exception unwinder.
+export CXXFLAGS="-m68000 -fomit-frame-pointer -ffunction-sections -fdata-sections -DDISABLE_FANCY_THEMES -DDISABLE_DOSBOX_OPL -DATARI_STE_GAME_ONLY -DDISABLE_COMMAND_LINE -DDISABLE_DEFAULT_AUDIOCD_MANAGER -fno-exceptions -fno-threadsafe-statics -ffast-math -fno-unsafe-math-optimizations -Os -fno-unwind-tables -fno-asynchronous-unwind-tables"
 if [ ! -f config.log ]
 then
 ../configure \

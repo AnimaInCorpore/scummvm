@@ -297,6 +297,10 @@ Common::Path Util::findMacResourceFile(const char *baseName, const char *suffix)
 	// case where the user might have just removed the last character by
 	// renaming the file.
 
+#ifdef ATARI_STE_GAME_ONLY
+	// Only the Macintosh Kyrandia 1 looks for these files.
+	return Common::Path();
+#else
 	const Common::CodePage tryCodePages[] = {
 		Common::kMacRoman,
 		Common::kISO8859_1
@@ -321,6 +325,7 @@ Common::Path Util::findMacResourceFile(const char *baseName, const char *suffix)
 
 	fileName.clear();
 	return fileName;
+#endif
 }
 
 const Util::DOS2JOHABEntry Util::_johabConvTable[52] = {
