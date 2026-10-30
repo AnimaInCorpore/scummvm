@@ -32,7 +32,9 @@
 #include "common/config-manager.h"
 #include "common/translation.h"
 
+#ifndef ATARI_STE_GAME_ONLY
 #include "gui/message.h"
+#endif
 
 namespace Kyra {
 
@@ -630,9 +632,14 @@ bool EoBCoreEngine::importOriginalSaveFile(int destSlot, const Common::Path &sou
 				}
 
 				delete fs;
+#ifdef ATARI_STE_GAME_ONLY
+				// No GUI to ask with in the Atari STE build: leave the file alone.
+				warning("Not importing original saved game file '%s'", temp.toString().c_str());
+#else
 				::GUI::MessageDialog dialog(Common::U32String::format(_("The following original saved game file has been found in your game path:\n\n%s %S\n\nDo you wish to use this saved game file with ScummVM?\n\n"), temp.toString(Common::Path::kNativeSeparator).c_str(), dsc.c_str()), _("Yes"), _("No"));
 				if (dialog.runModal() == ::GUI::kMessageOK)
 					origFiles.push_back(temp);
+#endif
 			}
 		}
 	}
@@ -663,9 +670,14 @@ bool EoBCoreEngine::importOriginalSaveFile(int destSlot, const Common::Path &sou
 
 	if (destSlot != -1) {
 		if (Common::find(_gui->_saveSlots.begin(), _gui->_saveSlots.end(), destSlot) != _gui->_saveSlots.end()) {
+#ifdef ATARI_STE_GAME_ONLY
+			warning("Not overwriting the saved game in slot %d", destSlot);
+			return false;
+#else
 			::GUI::MessageDialog dialog(Common::U32String::format(_("A saved game file was found in the specified slot %d. Overwrite?\n\n"), destSlot), _("Yes"), _("No"));
 			if (dialog.runModal() != ::GUI::kMessageOK)
 				return false;
+#endif
 		}
 	}
 
@@ -696,8 +708,12 @@ bool EoBCoreEngine::importOriginalSaveFile(int destSlot, const Common::Path &sou
 	_inf->reset();
 
 	if (destSlot == -1 && importedCount) {
+#ifdef ATARI_STE_GAME_ONLY
+		warning("%d original saved games have been imported", importedCount);
+#else
 		::GUI::MessageDialog dialog(Common::U32String::format(_("%d original saved games have been successfully imported into\nScummVM. If you want to manually import original saved game later you will\nneed to open the ScummVM debug console and use the command 'import_savefile'.\n\n"), importedCount));
 		dialog.runModal();
+#endif
 	}
 
 	return true;

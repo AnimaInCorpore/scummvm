@@ -1444,9 +1444,14 @@ bool Screen::loadFont(FontId fontId, const char *filename) {
 	}
 
 	Font *&fnt = _fonts[fontId];
-	int temp = 0;
 
 	if (!fnt) {
+#ifdef ATARI_STE_GAME_ONLY
+		// The Atari STE build runs the DOS versions of Eye of the Beholder in
+		// Western languages only; the other fonts belong to Kyrandia 1-3.
+		fnt = new DOSFont();
+#else
+		int temp = 0;
 		if (_vm->game() == GI_KYRA1 && _isAmiga) {
 			fnt = new AMIGAFont();
 		} else if (fontId == FID_CHINESE_FNT) {
@@ -1502,6 +1507,7 @@ bool Screen::loadFont(FontId fontId, const char *filename) {
 		} else {
 			fnt = new DOSFont();
 		}
+#endif
 		assert(fnt);
 	}
 

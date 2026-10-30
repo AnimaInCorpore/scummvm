@@ -21,6 +21,25 @@
 
 #ifdef ENABLE_EOB
 
+#ifdef ATARI_STE_GAME_ONLY
+
+// The automap is a ScummVM feature that draws on the overlay with the GUI
+// fonts. The Atari STE build leaves it out (_automap stays null and the
+// automap button is never set up); only the button callback that the static
+// button table refers to remains.
+
+#include "kyra/engine/eobcommon.h"
+
+namespace Kyra {
+
+int EoBCoreEngine::clickedAutomap(Button *button) {
+	return button->arg;
+}
+
+} // End of namespace Kyra
+
+#else
+
 #include "graphics/font.h"
 #include "graphics/fontman.h"
 #include "graphics/surface.h"
@@ -1471,5 +1490,7 @@ int EoBCoreEngine::clickedAutomap(Button *button) {
 }
 
 } // End of namespace Kyra
+
+#endif // ATARI_STE_GAME_ONLY
 
 #endif // ENABLE_EOB

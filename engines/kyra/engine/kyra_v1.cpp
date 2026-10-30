@@ -87,6 +87,10 @@ Common::Error KyraEngine_v1::init() {
 	// Setup mixer
 	syncSoundSettings();
 
+#ifndef ATARI_STE_GAME_ONLY
+	// The Atari STE build creates only the Eye of the Beholder engines, which
+	// set up their own (silent) sound in EoBCoreEngine::init(), so none of
+	// these drivers are linked there.
 	if (!_flags.useDigSound) {
 		if (_flags.platform == Common::kPlatformFMTowns) {
 			if (_flags.gameID == GI_KYRA1)
@@ -154,6 +158,7 @@ Common::Error KyraEngine_v1::init() {
 
 		assert(_sound);
 	}
+#endif
 
 	if (_sound)
 		_sound->updateVolumeSettings();

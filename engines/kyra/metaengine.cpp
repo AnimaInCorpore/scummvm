@@ -280,6 +280,23 @@ Common::Error KyraMetaEngine::createInstance(OSystem *syst, Engine **engine, con
 			flags.lang = Common::EN_ANY;
 	}
 
+#ifdef ATARI_STE_GAME_ONLY
+	// The Atari STE build is a profile of the DOS versions of Eye of the
+	// Beholder 1 and 2. Creating no other engine keeps Kyrandia 1-3 and the
+	// other platforms' screen and sound code out of the link.
+	if (flags.platform != Common::kPlatformDOS)
+		return Common::kUnsupportedGameidError;
+	if (flags.gameID == Kyra::GI_EOB1) {
+		*engine = new Kyra::EoBEngine(syst, flags);
+	} else if (flags.gameID == Kyra::GI_EOB2) {
+		if (Common::parseRenderMode(ConfMan.get("render_mode")) == Common::kRenderEGA)
+			flags.useHiRes = true;
+		*engine = new Kyra::DarkMoonEngine(syst, flags);
+	} else {
+		return Common::kUnsupportedGameidError;
+	}
+	return Common::kNoError;
+#else
 	switch (flags.gameID) {
 	case Kyra::GI_KYRA1:
 		*engine = new Kyra::KyraEngine_LoK(syst, flags);
@@ -317,6 +334,7 @@ Common::Error KyraMetaEngine::createInstance(OSystem *syst, Engine **engine, con
 	}
 
 	return Common::kNoError;
+#endif
 }
 
 SaveStateList KyraMetaEngine::listSaves(const char *target) const {

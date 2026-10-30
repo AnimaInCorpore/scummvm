@@ -152,7 +152,9 @@ Common::Error EoBEngine::init() {
 	} else if (_configRenderMode == Common::kRenderEGA || _configRenderMode == Common::kRenderCGA) {
 		_vcnFilePattern = "%s.ECN";
 		_vmpFilePattern = "%s.EMP";
-	} else if (_flags.platform == Common::kPlatformSegaCD) {
+	}
+#ifndef ATARI_STE_GAME_ONLY
+	else if (_flags.platform == Common::kPlatformSegaCD) {
 		_sres = new SegaCDResource(_res);
 		assert(_sres);
 		_seqPlayer = new SegaSequencePlayer(this, _screen, _sres);
@@ -168,6 +170,7 @@ Common::Error EoBEngine::init() {
 		_compassData = new uint8[0x5000]();
 		_closeSpellbookAfterUse = false;
 	}
+#endif
 
 	return Common::kNoError;
 }

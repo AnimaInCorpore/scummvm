@@ -90,6 +90,9 @@ static const char msg_fanTrans_unsupportiveTranslator[]	= _s("The fan translator
 static const char msg_nonEngineDemo[]					= _s("Demo plays simple animations without using Westwood's Engine.");
 
 const KYRAGameDescription adGameDescs[] = {
+#ifndef ATARI_STE_GAME_ONLY
+	// The Atari STE build runs the DOS versions of Eye of the Beholder 1
+	// and 2 only (see KyraMetaEngine::createInstance()).
 	/* disable these targets until they get supported
 	// Each DISK*.EXE file contains an embedded ZIP archive
 	{
@@ -1994,6 +1997,7 @@ const KYRAGameDescription adGameDescs[] = {
 		LOL_CD_DEMO_FLAGS
 	},
 
+#endif // ATARI_STE_GAME_ONLY
 	{
 		{
 			"eob",
@@ -2046,6 +2050,7 @@ const KYRAGameDescription adGameDescs[] = {
 		EOB_SPANISH_FLAGS
 	},
 
+#ifndef ATARI_STE_GAME_ONLY
 	{
 		{
 			"eob",
@@ -2113,6 +2118,7 @@ const KYRAGameDescription adGameDescs[] = {
 		EOB_FLAGS
 	},
 
+#endif // ATARI_STE_GAME_ONLY
 	{
 		{
 			"eob2",
@@ -2152,6 +2158,7 @@ const KYRAGameDescription adGameDescs[] = {
 		EOB2_FLAGS
 	},
 
+#ifndef ATARI_STE_GAME_ONLY
 	{ // Autodesk (Flic) demo
 		{
 			"eob2",
@@ -2232,6 +2239,7 @@ const KYRAGameDescription adGameDescs[] = {
 		},
 		EOB2_PC98_FLAGS
 	},
+#endif // ATARI_STE_GAME_ONLY
 
 	{ AD_TABLE_END_MARKER, FLAGS(0, 0, 0, 0, 0, 0, 0, 0, 0, 0) }
 };

@@ -272,6 +272,11 @@ void AmigaDOSFont::errorDialog(int index) {
 		return;
 	_errorDialogDisplayed |= (1 << index);
 
+#ifdef ATARI_STE_GAME_ONLY
+	// The Atari STE build runs no Amiga version and links no GUI.
+	if (index == 0)
+		error("Failed to load font files.");
+#else
 	// I've made rather elaborate dialogs here, since the Amiga font file handling is quite prone to cause problems for users.
 	// This will hopefully prevent unnecessary forum posts and bug reports.
 	if (index == 0) {
@@ -292,6 +297,7 @@ void AmigaDOSFont::errorDialog(int index) {
 			"Please copy the correct font files into your EOB II game data directory.\n\n"
 		));
 	}
+#endif
 }
 
 void AmigaDOSFont::unload() {

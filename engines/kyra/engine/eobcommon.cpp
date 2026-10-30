@@ -367,7 +367,9 @@ EoBCoreEngine::~EoBCoreEngine() {
 	delete _txt;
 	_txt = 0;
 
+#ifndef ATARI_STE_GAME_ONLY
 	delete _automap;
+#endif
 	_automap = nullptr;
 }
 
@@ -430,6 +432,10 @@ Common::Error EoBCoreEngine::init() {
 
 	// We start the respective sound driver even if "No Music" has been selected, because we
 	// don't have a null driver class (and don't really need one). We just disable the sound here.
+#ifdef ATARI_STE_GAME_ONLY
+	// The Atari STE build runs the DOS versions only and has no sound.
+	_sound = new SoundNull(this, _mixer);
+#else
 	MidiDriver::DeviceHandle dev = 0;
 	switch (_flags.platform) {
 	case Common::kPlatformDOS: {
@@ -463,6 +469,7 @@ Common::Error EoBCoreEngine::init() {
 		// Dummy error message. Unsupported platforms don't have detection entries.
 		error("Unsupported platform '%d'", _flags.platform);
 	}
+#endif
 
 	assert(_sound);
 	if (!_sound->init())
@@ -472,7 +479,11 @@ Common::Error EoBCoreEngine::init() {
 		_sound->loadSfxFile("EFECT.OBJ");
 
 	// Setup volume settings (and read in all ConfigManager settings)
+#ifdef ATARI_STE_GAME_ONLY
+	_configNullSound = true;
+#else
 	_configNullSound = (MidiDriver::getMusicType(dev) == MT_NULL);
+#endif
 	syncSoundSettings();
 
 	if (!_screen->init())
@@ -501,7 +512,10 @@ Common::Error EoBCoreEngine::init() {
 
 	_inf = new EoBInfProcessor(this, _screen);
 	assert(_inf);
+#ifndef ATARI_STE_GAME_ONLY
+	// The Atari STE build has no debug console (and no ScummVM GUI to show it).
 	setDebugger(new Debugger_EoB(this));
+#endif
 
 	loadFonts();
 
@@ -579,8 +593,10 @@ Common::Error EoBCoreEngine::init() {
 
 	// Always create this, regardless of whether the launcher option is enabled or not. Otherwise the map would
 	// be incomplete if the option is enabled later on in the game.
+#ifndef ATARI_STE_GAME_ONLY
 	_automap = new Automap_EoB(_system, &_levelBlockProperties, _wllWallFlags, _specialWallTypes, _wllShapeMap, /* _wllVmpMap, */_flags.gameID, _flags.lang, _configAutomap);
 	assert(_automap);
+#endif
 
 	return Common::kNoError;
 }
@@ -635,7 +651,9 @@ void EoBCoreEngine::loadFonts() {
 }
 
 Common::Error EoBCoreEngine::go() {
+#ifndef ATARI_STE_GAME_ONLY
 	static_cast<Debugger_EoB *>(getDebugger())->initialize();
+#endif
 	_txt->removePageBreakFlag();
 	_screen->setFont(_titleFont);
 
@@ -721,7 +739,12 @@ void EoBCoreEngine::readSettings() {
 	_configADDRuleEnhancements = ConfMan.getBool("addrules");
 	_configEnhancedReload = ConfMan.getBool("mreload");
 	_configNPCPatch = (_flags.gameID == GI_EOB1) ? ConfMan.getBool("npcpatch") : false;
+#ifdef ATARI_STE_GAME_ONLY
+	// The Atari STE build has no automap; see Automap_EoB.
+	_configAutomap = false;
+#else
 	_configAutomap = ConfMan.getBool("automap");
+#endif
 	_configSounds = ConfMan.getBool("sfx_mute") ? 0 : 1;
 	_configMusic = (_flags.platform == Common::kPlatformPC98 || _flags.platform == Common::kPlatformSegaCD) ? (ConfMan.getBool("music_mute") ? 0 : 1) : (_configSounds ? 1 : 0);
 
@@ -790,7 +813,9 @@ void EoBCoreEngine::runLoop() {
 		updateWallOfForceTimers();
 
 		if (_sceneUpdateRequired && !_sceneShakeCountdown) {
+#ifndef ATARI_STE_GAME_ONLY
 			_automap->markSeen(_currentBlock, _currentDirection);
+#endif
 			drawScene(1);
 		}
 

@@ -360,6 +360,31 @@ private:
 	Sound *_music, *_sfx;
 };
 
+#ifdef ATARI_STE_GAME_ONLY
+/**
+ * Silent driver for the Atari STE build, which links no music or sound
+ * effect drivers. It reports PC speaker so that the games keep the timing
+ * and distance rules of their DOS sound path.
+ */
+class SoundNull : public Sound {
+public:
+	SoundNull(KyraEngine_v1 *vm, Audio::Mixer *mixer) : Sound(vm, mixer) {}
+
+	kType getMusicType() const override { return kPCSpkr; }
+	bool init() override { return true; }
+	void initAudioResourceInfo(int set, void *info) override {}
+	void selectAudioResourceSet(int set) override {}
+	bool hasSoundFile(uint file) const override { return false; }
+	void loadSoundFile(uint file) override {}
+	void loadSoundFile(const Common::Path &file) override {}
+	void playTrack(uint8 track) override {}
+	void haltTrack() override {}
+	bool isPlaying() const override { return false; }
+	void playSoundEffect(uint16 track, uint8 volume = 0xFF) override {}
+	void beginFadeOut() override {}
+};
+#endif
+
 } // End of namespace Kyra
 
 #endif

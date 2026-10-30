@@ -753,7 +753,9 @@ void EoBCoreEngine::moveParty(uint16 block) {
 	uint16 old = _currentBlock;
 	_currentBlock = block;
 
+#ifndef ATARI_STE_GAME_ONLY
 	_automap->markVisited(block);
+#endif
 
 	runLevelScript(old, 2);
 

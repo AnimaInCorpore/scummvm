@@ -751,6 +751,9 @@ void StaticResource::freeRawDataBe16(void *&ptr, int &size) {
 
 #pragma mark -
 
+// The Atari STE build creates only the Eye of the Beholder engines; the
+// Kyrandia 1-3 tables below would pull those engines into its link.
+#ifndef ATARI_STE_GAME_ONLY
 void KyraEngine_LoK::initStaticResource() {
 	int temp = 0;
 	_seq_Forest = _staticres->loadRawData(k1ForestSeq, temp);
@@ -1125,6 +1128,8 @@ const ScreenDim Screen_MR::_screenDimTable[] = {
 
 const int Screen_MR::_screenDimTableCount = ARRAYSIZE(Screen_MR::_screenDimTable);
 
+#endif // ATARI_STE_GAME_ONLY
+
 const int8 KyraEngine_v1::_addXPosTable[] = {
 	 4,  4,  0, -4, -4, -4,  0,  4
 };
@@ -1141,6 +1146,7 @@ const int8 KyraEngine_v1::_charAddYPosTable[] = {
 	-2, -2,  0,  2,  2,  2,  0, -2
 };
 
+#ifndef ATARI_STE_GAME_ONLY
 const uint16 KyraEngine_LoK::_itemPosX[] = {
 	95, 115, 135, 155, 175, 95, 115, 135, 155, 175
 };
@@ -2234,5 +2240,7 @@ const int8 KyraEngine_MR::_albumWSAY[] = {
 	 0, -1, 3, 0, -1,  0, -2, 0,
 	-1, -2, 2, 2, -6, -6, -6, 0
 };
+
+#endif // ATARI_STE_GAME_ONLY
 
 } // End of namespace Kyra

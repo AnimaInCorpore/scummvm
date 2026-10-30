@@ -139,8 +139,19 @@ const uint32 *TlkArchive::findFile(const Common::Path &path) const {
 		return nullptr;
 
 	uint32 id;
+#ifdef ATARI_STE_GAME_ONLY
+	// Parsed by hand: sscanf() would link the C library's scanf family and
+	// its floating-point parsers into the 4 MiB Atari STE build.
+	id = 0;
+	int digits = 0;
+	for (const char *c = uppercaseName.c_str(); digits < 8 && Common::isDigit(*c); ++c, ++digits)
+		id = id * 10 + (*c - '0');
+	if (!digits)
+		return nullptr;
+#else
 	if (sscanf(uppercaseName.c_str(), "%08u.AUD", &id) != 1)
 		return nullptr;
+#endif
 
 	// Binary search for the file entry
 	int leftIndex = 0;
@@ -1218,10 +1229,15 @@ Common::Archive *StuffItLoader::load(Resource *owner, const Common::Path &filena
 }
 
 Common::Archive *StuffItLoader::load(Resource *owner, Common::SeekableReadStream *stream, const Common::String &debugName) {
+#ifdef ATARI_STE_GAME_ONLY
+	// Only the Macintosh Kyrandia 1 installer is a StuffIt archive.
+	delete stream;
+#else
 	if (stream) {
 		Common::Archive *archive = Common::createStuffItArchive(stream, true);
 		return archive;
 	}
+#endif
 
 	error("StuffItLoader::load: Could not load %s", debugName.c_str());
 }
