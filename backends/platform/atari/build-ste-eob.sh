@@ -6,10 +6,9 @@
 # Stock Atari STE target: 8 MHz 68000, 4 MiB RAM. Game-only build
 # (ATARI_STE_GAME_ONLY) of the Kyra engine reduced to the DOS versions of
 # Eye of the Beholder 1 and 2, statically linked, no sound and no ScummVM
-# menus. Run the game in EGA mode (render_mode=ega): it then draws with 16
-# colours, which one STE palette shows exactly, so no colour-mixing table is
-# needed (ste_mix_lut= and ste_raster=false in [scummvm]). kyra.dat must be
-# next to the program or in the game directory.
+# menus. The games run in their VGA mode (render_mode=vga, 256 colours);
+# how the STE shows those colours is up to the display path. kyra.dat must
+# be next to the program or in the game directory.
 #
 # Compiler flags as in build-ste.sh, which explains why the code is built
 # for size and why configure's optimizations are disabled.
