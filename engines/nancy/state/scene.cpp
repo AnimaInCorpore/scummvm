@@ -41,12 +41,19 @@
 
 #include "engines/nancy/ui/button.h"
 #include "engines/nancy/ui/ornaments.h"
-#include "engines/nancy/ui/camera.h"
+#include "engines/nancy/ui/taskbar/camera.h"
 #include "engines/nancy/ui/clock.h"
-#include "engines/nancy/ui/taskbar.h"
+#include "engines/nancy/ui/taskbar/taskbar.h"
 
 #include "engines/nancy/misc/lightning.h"
 #include "engines/nancy/misc/specialeffect.h"
+#include "engines/nancy/misc/viewportfader.h"
+#include "engines/nancy/ui/ndui/manager.h"
+#ifdef ENABLE_NANCY_V4
+#include "engines/nancy/script/api.h"
+#include "engines/nancy/script/records.h"
+#include "engines/nancy/script/scenecontext.h"
+#endif
 
 namespace Common {
 DECLARE_SINGLETON(Nancy::State::Scene);
@@ -138,6 +145,8 @@ Scene::Scene() :
 		_activeMovie(nullptr),
 		_activeConversation(nullptr),
 		_lightning(nullptr),
+		_viewportFader(nullptr),
+		_ndui(nullptr),
 		_destroyOnExit(false),
 		_isRunningAd(false),
 		_hotspotDebug(50) {}
@@ -152,7 +161,18 @@ Scene::~Scene() {
 	delete _clock;
 	delete _camera;
 	delete _lightning;
+	delete _viewportFader;
 
+	// The records, which go away after this, can't reach the UI anymore
+	delete _ndui;
+	_ndui = nullptr;
+
+#ifdef ENABLE_NANCY_V4
+	delete _scriptScene;
+	_scriptScene = nullptr;
+#endif
+
+	_streams.clear();
 	clearPuzzleData();
 }
 
@@ -167,13 +187,35 @@ void Scene::process() {
 
 		// fall through
 	case kLoad:
+		// The current scene keeps running under the fade that covers the change
+		if (_viewportFader && _viewportFader->holdsSceneChange()) {
+			run();
+			break;
+		}
+
 		load();
 		// fall through
 	case kStartSound:
 		_state = kRun;
-		if (_sceneState.currentScene.continueSceneSound == kLoadSceneSound) {
+		// From Nancy16 on, scene changes have no say about the sounds: they keep playing
+		// into the new scene (e.g. Nancy's closing monologue, Nancy16 scenes 6514-6532).
+		// Only loading a game stops them.
+		if (_sceneState.currentScene.continueSceneSound == kLoadSceneSound && g_nancy->getGameType() <= kGameTypeNancy15) {
 			g_nancy->_sound->stopAndUnloadSceneSpecificSounds();
-			g_nancy->_sound->loadSound(_sceneState.summary.sound);
+
+			if (g_nancy->getGameType() <= kGameTypeNancy12) {
+				g_nancy->_sound->loadSound(_sceneState.summary.sound);
+				g_nancy->_sound->playSound(_sceneState.summary.sound);
+			}
+		}
+
+		// From Nancy13 on, the sound of a scene can name the music mix of its area (its
+		// environment, from Nancy17 on). A track of it, picked at random, starts whenever
+		// a scene finds the channel of its sound silent, so the tracks follow one another
+		// with no regard to scene changes.
+		if (g_nancy->getGameType() >= kGameTypeNancy13 && g_nancy->getGameType() <= kGameTypeNancy18 &&
+				!g_nancy->_sound->isSoundPlaying(_sceneState.summary.sound)) {
+			g_nancy->_sound->loadSound(_sceneState.summary.sound, nullptr, true);
 			g_nancy->_sound->playSound(_sceneState.summary.sound);
 		}
 		// fall through
@@ -243,12 +285,69 @@ bool Scene::onStateExit(const NancyState::NancyState nextState) {
 }
 
 void Scene::changeScene(const SceneChangeDescription &sceneDescription) {
-	if (sceneDescription.sceneID == kNoScene || _state == kLoad) {
+	if (sceneDescription.sceneID == kNoScene ||
+			(sceneDescription.sceneID == kNoSceneNancy17 && g_nancy->getGameType() >= kGameTypeNancy17)) {
+		return;
+	}
+
+	// A stream's records change the scene of their own stream
+	SceneStream *runningStream = _streams.getRunning();
+	if (runningStream) {
+		runningStream->changeScene(Common::String::format("s%u", sceneDescription.sceneID), sceneDescription.frameID);
+		return;
+	}
+
+	if (_state == kLoad) {
 		return;
 	}
 
 	_sceneState.nextScene = sceneDescription;
 	_state = kLoad;
+
+#ifdef ENABLE_NANCY_V4
+	// A numbered scene, which no name of an earlier change may stand in for
+	_nextScriptSceneName.clear();
+#endif
+
+	if (_viewportFader) {
+		_viewportFader->onSceneChange();
+	}
+}
+
+#ifdef ENABLE_NANCY_V4
+void Scene::changeScene(const Common::String &sceneName, uint16 frameID) {
+	SceneChangeDescription scene;
+	scene.frameID = frameID;
+	scene.continueSceneSound = kContinueSceneSound;
+
+	if (parseSceneName(sceneName, scene.sceneID)) {
+		changeScene(scene);
+		return;
+	}
+
+	if (_state == kLoad) {
+		return;
+	}
+
+	// The name stands for the scene; its number stays kNoScene
+	_sceneState.nextScene = scene;
+	_nextScriptSceneName = sceneName;
+	_state = kLoad;
+
+	if (_viewportFader) {
+		_viewportFader->onSceneChange();
+	}
+}
+#endif
+
+Common::String Scene::getMainSceneName() const {
+#ifdef ENABLE_NANCY_V4
+	if (!_scriptSceneName.empty()) {
+		return _scriptSceneName;
+	}
+#endif
+
+	return Common::String::format("s%u", _sceneState.currentScene.sceneID);
 }
 
 void Scene::pushScene(int16 itemID) {
@@ -348,7 +447,14 @@ void Scene::setPlayerTime(Time time, byte relative) {
 			return;
 		}
 
+		uint16 day = _timers.playerTime.getDays();
 		_timers.playerTime += time;
+
+		// Moving the clock past midnight starts the next day, like the clock getting
+		// there on its own, e.g. when the alarm clock wakes Nancy up in the morning
+		if (g_nancy->getGameType() >= kGameTypeNancy16 && _timers.playerTime.getDays() != day) {
+			advanceDayValue();
+		}
 	} else if (bootSummary->endOfDayFlag != kEvNoEvent) {
 		// Absolute, the clock only holds the time of the current day
 		_timers.playerTime = time;
@@ -358,6 +464,18 @@ void Scene::setPlayerTime(Time time, byte relative) {
 	}
 
 	_timers.playerTimeNextMinute = g_nancy->getTotalPlayTime() + bootSummary->playerTimeMinuteLength;
+
+	if (_ndui) {
+		_ndui->updatePlayerTime();
+	}
+}
+
+void Scene::setPlayerClock(Time time) {
+	_timers.playerTime = time;
+
+	if (_ndui) {
+		_ndui->updatePlayerTime();
+	}
 }
 
 uint Scene::getPlayerTimeMinutes() const {
@@ -417,6 +535,10 @@ void Scene::addItemToInventory(int16 id) {
 
 		g_nancy->_sound->playSound("BUOK");
 
+		if (_ndui) {
+			_ndui->showInventoryItem(id, true);
+		}
+
 		if (g_nancy->getGameType() <= kGameTypeNancy9) {
 			_inventoryBox.addItem(id);
 		} else {
@@ -461,12 +583,16 @@ void Scene::removeItemFromInventory(int16 id, bool pickUp) {
 	if (_flags.items[id] == g_nancy->_true || getHeldItem() == id) {
 		_flags.items[id] = g_nancy->_false;
 
+		// Unlike adding an item, this is silent: the inventory UI plays the
+		// click itself when the player takes an item out
 		if (pickUp) {
 			setHeldItem(id);
-			g_nancy->_sound->playSound("BUOK");
 		} else if (getHeldItem() == id) {
 			setHeldItem(-1);
-			g_nancy->_sound->playSound("BUOK");
+		}
+
+		if (_ndui) {
+			_ndui->showInventoryItem(id, false);
 		}
 
 		if (g_nancy->getGameType() <= kGameTypeNancy9) {
@@ -733,13 +859,14 @@ int32 Scene::getCharacterUIResource(uint characterIndex, uint index) {
 
 void Scene::installInventorySoundOverride(byte command, const SoundDescription &sound,
 		const Common::String &caption, uint16 itemID, byte characterIndex) {
-	InventorySoundOverride newOverride;
+	InventorySoundOverrideData::Override newOverride;
 
 	// An override can be installed on a character who isn't being played, so it
 	// waits in their own set until they are
 	uint targetCharacter = characterIndex < kMaxPlayerCharacters ?
 		characterIndex : MIN<uint>(g_nancy->getPlayerCharacter(), kMaxPlayerCharacters - 1);
-	Common::HashMap<uint16, InventorySoundOverride> &overrides = _inventorySoundOverrides[targetCharacter];
+	auto *overrideData = (InventorySoundOverrideData *)getPuzzleData(InventorySoundOverrideData::getTag());
+	Common::HashMap<uint16, InventorySoundOverrideData::Override> &overrides = overrideData->overrides[targetCharacter];
 
 	switch (command) {
 	case kInvSoundOverrideCommandNoSound :
@@ -795,8 +922,9 @@ static Common::String getSoundSubtitle(const Common::String &soundName, const Co
 	return fallback;
 }
 
-Common::HashMap<uint16, Scene::InventorySoundOverride> &Scene::activeSoundOverrides() {
-	return _inventorySoundOverrides[MIN<uint>(g_nancy->getPlayerCharacter(), kMaxPlayerCharacters - 1)];
+Common::HashMap<uint16, InventorySoundOverrideData::Override> &Scene::activeSoundOverrides() {
+	auto *overrideData = (InventorySoundOverrideData *)getPuzzleData(InventorySoundOverrideData::getTag());
+	return overrideData->overrides[MIN<uint>(g_nancy->getPlayerCharacter(), kMaxPlayerCharacters - 1)];
 }
 
 // Nancy15 moved the "can't" responses out of the inventory data and into the
@@ -844,7 +972,7 @@ void Scene::playPlayerCantSound(int16 itemID) {
 	Common::String caption;
 
 	if (itemID >= 0 && activeSoundOverrides().contains(itemID)) {
-		InventorySoundOverride &override = activeSoundOverrides()[itemID];
+		InventorySoundOverrideData::Override &override = activeSoundOverrides()[itemID];
 
 		if (override.isDefault) {
 			// Back to the character's generic response
@@ -924,7 +1052,7 @@ void Scene::playItemCantSound(int16 itemID, bool notHoldingSound) {
 	} else if ((uint)itemID < _flags.items.size()) {
 		if (activeSoundOverrides().contains(itemID)) {
 			// We have an override installed
-			InventorySoundOverride &override = activeSoundOverrides()[itemID];
+			InventorySoundOverrideData::Override &override = activeSoundOverrides()[itemID];
 			if (!override.isDefault) {
 				// Not set to the default sound, play the override
 				g_nancy->_sound->loadSound(override.sound);
@@ -1021,6 +1149,17 @@ void Scene::playItemCantSound(int16 itemID, bool notHoldingSound) {
 	}
 }
 
+// The generic flags are the ones that get cleared with every scene
+static bool isGenericEventFlag(int16 index) {
+	for (uint16 id : g_nancy->getStaticData().genericEventFlags) {
+		if (id == index) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
 int16 Scene::eventFlagToIndex(int16 label) const {
 	// Nancy3+ number their event flags from 1000. Nancy12 then split the flags
 	// into two ranges: the generic engine flags kept the 1xxx numbering, while
@@ -1038,6 +1177,12 @@ int16 Scene::eventFlagToIndex(int16 label) const {
 void Scene::setEventFlag(int16 label, byte flag) {
 	label = eventFlagToIndex(label);
 
+	SceneStream *runningStream = _streams.getRunning();
+	if (runningStream && isGenericEventFlag(label)) {
+		runningStream->setEventFlag(label, flag);
+		return;
+	}
+
 	if (label > kEvNoEvent && (uint)label < g_nancy->getStaticData().numEventFlags) {
 		_flags.eventFlags[label] = flag;
 	}
@@ -1049,6 +1194,11 @@ void Scene::setEventFlag(FlagDescription eventFlag) {
 
 bool Scene::getEventFlag(int16 label, byte flag) const {
 	label = eventFlagToIndex(label);
+
+	SceneStream *runningStream = _streams.getRunning();
+	if (runningStream && isGenericEventFlag(label)) {
+		return runningStream->getEventFlag(label) == flag;
+	}
 
 	if (label > kEvNoEvent && (uint)label < g_nancy->getStaticData().numEventFlags) {
 		return _flags.eventFlags[label] == flag;
@@ -1211,13 +1361,16 @@ void Scene::registerGraphics() {
 	_frame.registerGraphics();
 	_viewport.registerGraphics();
 
-	_textbox.registerGraphics();
-
 	// Pre-Nancy 10: inventory box is always-on-screen.
 	// Nancy 10+: a separate popup widget driven by UIIV (initially hidden).
-	if (g_nancy->getGameType() <= kGameTypeNancy9) {
+	// Nancy 16+: all of the UI is made of NDUI panels.
+	if (_ndui) {
+		_ndui->registerGraphics();
+	} else if (g_nancy->getGameType() <= kGameTypeNancy9) {
+		_textbox.registerGraphics();
 		_inventoryBox.registerGraphics();
-	} else {
+	} else if (g_nancy->getGameType() <= kGameTypeNancy15) {
+		_textbox.registerGraphics();
 		_inventoryPopup.registerGraphics();
 		_notebookPopup.registerGraphics();
 		_cellPhonePopup.registerGraphics();
@@ -1255,6 +1408,10 @@ void Scene::registerGraphics() {
 		_inventoryBoxOrnaments->setVisible(true);
 	}
 
+	if (_viewportFader) {
+		_viewportFader->registerGraphics();
+	}
+
 	if (_clock) {
 		_clock->registerGraphics();
 	}
@@ -1279,7 +1436,31 @@ bool Scene::changePlayerCharacter(uint characterIndex) {
 	loadCharacterInventory(characterIndex);
 	loadCharacterResources(characterIndex);
 
+	// The inventory panel was filled in before the swap, with the items of the
+	// outgoing character
+	auto *playerChar = (PlayerCharacterData *)getPuzzleData(PlayerCharacterData::getTag());
+	if (_ndui && playerChar) {
+		const Common::Array<byte> &previousItems = playerChar->getInventory(previousCharacter).items;
+		for (uint i = 0; i < previousItems.size(); ++i) {
+			if (previousItems[i] == g_nancy->_true) {
+				_ndui->showInventoryItem(i, false);
+			}
+		}
+
+		showInventoryButtons();
+	}
+
 	return true;
+}
+
+void Scene::showInventoryButtons() {
+	// The most recent items come first
+	const Common::Array<int16> &order = _inventoryBox.getOrder();
+	for (int i = (int)order.size() - 1; i >= 0; --i) {
+		if (order[i] != -1 && _flags.items[order[i]] == g_nancy->_true) {
+			_ndui->showInventoryItem(order[i], true);
+		}
+	}
 }
 
 void Scene::inheritBrotherProgress(uint characterIndex) {
@@ -1399,9 +1580,73 @@ bool Scene::applyPlayerCharacter(uint characterIndex) {
 		return false;
 	}
 
+#ifdef ENABLE_NANCY_V4
+	// Nancy19 keeps the UI its scripts made. The script the outgoing character
+	// took over with ends, the one they leave with runs, and so does the one the
+	// new character takes over with. A UI that isn't there yet starts the last
+	// one itself when it is.
+	if (g_nancy->getGameType() >= kGameTypeNancy19) {
+		const ScriptBootData *boot = (const ScriptBootData *)g_nancy->getEngineData("ScriptBootData");
+		assert(boot);
+
+		ScriptBootData::Player outgoing;
+		if (g_nancy->getPlayerCharacter() < boot->players.size()) {
+			outgoing = boot->players[g_nancy->getPlayerCharacter()];
+		}
+
+		if (!g_nancy->setPlayerCharacter(characterIndex)) {
+			return false;
+		}
+
+		if (_isScriptedUIReady) {
+			if (!outgoing.becomeSceneName.empty()) {
+				_streams.end(outgoing.becomeSceneName.toString() + "_Stream");
+			}
+
+			beginPlayerScript(outgoing.leaveSceneName);
+
+			// TODO: Take the journal entries and the tasks of the outgoing character down
+			Script::showPlayerEntries();
+
+			if (characterIndex < boot->players.size()) {
+				beginPlayerScript(boot->players[characterIndex].becomeSceneName);
+			}
+		}
+
+		return true;
+	}
+#endif
+
 	// The open popups describe the outgoing character, so get them off the
 	// screen while the data they were built from is still around
 	closeActivePopups();
+
+	if (_ndui) {
+		// Nancy17 has a script for a character to take over with, and one to leave
+		// with. The first runs for as long as the character is played.
+		const PUIH *puih = GetEngineData(PUIH);
+		const Common::String becomeScriptName = puih->becomeScriptName.toString();
+		const Common::String leaveScriptName = puih->leaveScriptName.toString();
+
+		if (!g_nancy->setPlayerCharacter(characterIndex)) {
+			return false;
+		}
+
+		initUI();
+
+		if (!becomeScriptName.empty()) {
+			_streams.end(becomeScriptName + "_Stream");
+		}
+
+		if (!leaveScriptName.empty()) {
+			StreamFlags flags;
+			flags.runsFirst = true;
+			_streams.begin(leaveScriptName + "_Stream", leaveScriptName, 0, flags);
+		}
+
+		g_nancy->_graphics->redrawAll();
+		return true;
+	}
 
 	if (!g_nancy->setPlayerCharacter(characterIndex)) {
 		return false;
@@ -1465,6 +1710,16 @@ void Scene::synchronize(Common::Serializer &ser) {
 	if (_flags.eventFlags.empty())
 		init();
 
+#ifdef ENABLE_NANCY_V4
+	if (ser.isSaving() && _scriptScene) {
+		_scriptScene->onSave();
+	}
+#endif
+
+	if (ser.isSaving() && !_streams.isEmpty()) {
+		_streams.store();
+	}
+
 	ser.syncAsUint16LE(_sceneState.currentScene.sceneID);
 	ser.syncAsUint16LE(_sceneState.currentScene.frameID);
 	ser.syncAsUint16LE(_sceneState.currentScene.verticalOffset);
@@ -1477,12 +1732,24 @@ void Scene::synchronize(Common::Serializer &ser) {
 		}
 	}
 
+#ifdef ENABLE_NANCY_V4
+	// Nancy20 has scenes that go by name, which no saved game of the earlier
+	// games can be in
+	if (g_nancy->getGameType() >= kGameTypeNancy20) {
+		ser.syncString(_scriptSceneName);
+
+		// The scene gets loaded again below, from nextScene and this name
+		_nextScriptSceneName = _scriptSceneName;
+	}
+#endif
+
 	if (ser.isLoading()) {
 		_sceneState.currentScene.continueSceneSound = kLoadSceneSound;
 		_sceneState.nextScene = _sceneState.currentScene;
 
 		g_nancy->_sound->stopAllSounds();
 
+		_streams.clear();
 		load(true);
 	}
 
@@ -1630,6 +1897,10 @@ void Scene::synchronize(Common::Serializer &ser) {
 		return;
 	}
 
+	if (_ndui && ser.isSaving()) {
+		_ndui->saveState(((UIStateData *)getPuzzleData(UIStateData::getTag()))->changes);
+	}
+
 	byte numPuzzleData = _puzzleData.size();
 	ser.syncAsByte(numPuzzleData);
 
@@ -1682,6 +1953,15 @@ void Scene::synchronize(Common::Serializer &ser) {
 
 				applyPlayerCharacter(playerChar->characterIndex);
 			}
+		}
+
+		if (_ndui) {
+			initUI();
+			_ndui->restoreState(((UIStateData *)getPuzzleData(UIStateData::getTag()))->changes);
+		}
+
+		if (!_streams.isEmpty()) {
+			_streams.restore();
 		}
 	}
 
@@ -1780,6 +2060,11 @@ void Scene::init() {
 		_lightning = new Misc::Lightning();
 	}
 
+	if (g_nancy->getGameType() >= kGameTypeNancy16 && !_viewportFader) {
+		_viewportFader = new Misc::ViewportFader();
+		_viewportFader->init();
+	}
+
 	Common::Rect vpPos = _viewport.getScreenPosition();
 	_hotspotDebug._drawSurface.create(vpPos.width(), vpPos.height(), g_nancy->_graphics->getScreenPixelFormat());
 	_hotspotDebug.moveTo(vpPos);
@@ -1842,6 +2127,13 @@ void Scene::load(bool fromSaveFile) {
 		_specialEffects.front().onSceneChange();
 	}
 
+#ifdef ENABLE_NANCY_V4
+	if (g_nancy->getGameType() >= kGameTypeNancy19) {
+		loadScriptedScene(fromSaveFile);
+		return;
+	}
+#endif
+
 	// Scene IDs are prefixed with S inside the cif tree; e.g 100 -> S100
 	Common::Path sceneName(Common::String::format("S%u", _sceneState.nextScene.sceneID));
 	IFF *sceneIFF = g_nancy->_resource->loadIFF(sceneName);
@@ -1878,6 +2170,8 @@ void Scene::load(bool fromSaveFile) {
 	const bool nextIsNoArt = _sceneState.summary.videoFile == "NO_ART_SCENE";
 
 	clearSceneData(nextIsNoArt);
+
+	_streams.onMainSceneChange();
 	g_nancy->_graphics->suppressNextDraw();
 
 	debugC(0, kDebugScene, "Loading new scene %i: description \"%s\", frame %i, vertical scroll %i, %s",
@@ -1911,8 +2205,15 @@ void Scene::load(bool fromSaveFile) {
 
 	// "NO_ART_SCENE" and (Nancy 11+) "POPUP_PREP_SCENE" are videoless sentinel
 	// scenes that carry only logic ARs; they have no viewport art to load.
+	// Nancy17 scenes with no background leave the viewport empty
+	const bool hasNoBackground = _sceneState.summary.videoFile.equalsIgnoreCase("NO_BG");
+	if (g_nancy->getGameType() >= kGameTypeNancy17) {
+		_viewport.setVisible(!hasNoBackground);
+	}
+
 	if (_sceneState.summary.videoFile != "NO_ART_SCENE" &&
-			_sceneState.summary.videoFile != "POPUP_PREP_SCENE") {
+			_sceneState.summary.videoFile != "POPUP_PREP_SCENE" &&
+			!hasNoBackground) {
 		const Common::Path palettePath = !_sceneState.summary.palettes.empty() ?
 			_sceneState.summary.palettes[(byte)_sceneState.currentScene.paletteID] :
 			Common::Path();
@@ -1946,13 +2247,6 @@ void Scene::load(bool fromSaveFile) {
 		}
 	}
 
-	for (uint i = 0; i < kMaxPlayerCharacters; ++i) {
-		for (auto &override : _inventorySoundOverrides[i]) {
-			g_nancy->_sound->stopSound(override._value.sound);
-		}
-		_inventorySoundOverrides[i].clear();
-	}
-
 	_timers.sceneTime = 0;
 	g_nancy->_sound->clearListenerPositionOverride();
 	g_nancy->_sound->recalculateSoundEffects();
@@ -1963,13 +2257,113 @@ void Scene::load(bool fromSaveFile) {
 		_flags.sceneCounts.getOrCreateVal(_sceneState.currentScene.sceneID)++;
 	}
 
+	if (_ndui) {
+		_ndui->onSceneChange(_sceneState.currentScene.sceneID);
+	}
+
+	if (g_nancy->getGameType() >= kGameTypeNancy17) {
+		_streams.changeEnvironment(_sceneState.summary.sound.name);
+	}
+
 	// Re-evaluate taskbar notification states against the new scene.
-	if (g_nancy->getGameType() >= kGameTypeNancy10) {
+	if (_taskbar) {
 		_taskbar->updateNotificationStates(_sceneState.currentScene.sceneID);
 	}
 
 	delete sceneIFF;
 	_state = kStartSound;
+}
+
+#ifdef ENABLE_NANCY_V4
+// Nancy19 scenes are Lua scripts. A script makes the records of its scene when
+// it is run, the first of which names the background.
+void Scene::loadScriptedScene(bool fromSaveFile) {
+	// A scene that goes by name has no number; see _nextScriptSceneName
+	const Common::String sceneName = _nextScriptSceneName.empty() ?
+		Common::String::format("s%u", _sceneState.nextScene.sceneID) : _nextScriptSceneName;
+
+	Script::SceneContext *scriptScene = new Script::SceneContext("MainStream", sceneName, _sceneState.nextScene.frameID, 0);
+	if (!scriptScene->load()) {
+		// A scene that can't be loaded leaves the player where they are
+		warning("Failed to load scene %s", sceneName.c_str());
+		delete scriptScene;
+
+		if (!_scriptScene) {
+			error("There is no scene to go back to");
+		}
+
+		_state = kRun;
+		return;
+	}
+
+	clearSceneData();
+
+	// The streams of the outgoing scene end first, then the scene itself
+	_streams.onMainSceneChange();
+	if (_scriptScene) {
+		_scriptScene->end();
+	}
+
+	delete _scriptScene;
+	_scriptScene = scriptScene;
+
+	g_nancy->_graphics->suppressNextDraw();
+
+	debugC(0, kDebugScene, "Loading new scene %s, frame %i", sceneName.c_str(), _sceneState.nextScene.frameID);
+
+	// The name moves along with the description, so the two always describe the
+	// same scene
+	_sceneState.currentScene = _sceneState.nextScene;
+	_scriptSceneName = _nextScriptSceneName;
+	_nextScriptSceneName.clear();
+
+	Script::SummaryRecord *summary = _scriptScene->getSummary();
+	_sceneState.summary.description = sceneName;
+	_sceneState.summary.videoFile = Common::Path(summary->getBackgroundName());
+	_sceneState.summary.sound.name = summary->getEnvironment();
+	_sceneState.summary.panningType = kPanNone;
+
+	const bool hasBackground = !summary->getBackgroundName().empty();
+	_viewport.setVisible(hasBackground);
+
+	// Nancy21's camera can zoom into the main stream
+	_viewport.setViewTransform(_streams.getViewTransform(SceneStreamManager::getMainStreamName()));
+
+	if (hasBackground) {
+		_viewport.loadVideo(_sceneState.summary.videoFile, _sceneState.currentScene.frameID, 0, kPanNone, kLargeVideoFormat);
+	}
+
+	// Turning around in a scene is up to its summary
+	_viewport.disableEdges(kLeft | kRight | kUp | kDown);
+	summary->setBackground(hasBackground ? &_viewport : nullptr);
+
+	_timers.sceneTime = 0;
+	g_nancy->_sound->clearListenerPositionOverride();
+
+	// Only numbered scenes are counted, since the others have no number to count
+	if (!fromSaveFile && _scriptSceneName.empty()) {
+		_flags.sceneCounts.getOrCreateVal(_sceneState.currentScene.sceneID)++;
+	}
+
+	if (_ndui) {
+		_ndui->onSceneChange(_sceneState.currentScene.sceneID);
+	}
+
+	_streams.changeEnvironment(summary->getEnvironment());
+
+	_state = kStartSound;
+}
+#endif
+
+void Scene::processMainStream() {
+#ifdef ENABLE_NANCY_V4
+	if (_scriptScene) {
+		_scriptScene->run(_frameSeconds);
+		return;
+	}
+#endif
+
+	_actionManager.processActionRecords();
 }
 
 void Scene::run() {
@@ -1988,6 +2382,7 @@ void Scene::run() {
 	}
 
 	_timers.sceneTime += deltaTime;
+	_frameSeconds = (uint32)deltaTime / 1000.0;
 
 	// Advance the Nancy 11+ software timers before processing action records,
 	// so any flags they fire this frame are visible to record dependencies
@@ -1998,8 +2393,17 @@ void Scene::run() {
 		auto *bootSummary = GetEngineData(BSUM);
 		assert(bootSummary);
 
+		uint16 day = _timers.playerTime.getDays();
 		_timers.playerTime += 60000; // Add a minute
 		_timers.playerTimeNextMinute = currentPlayTime + bootSummary->playerTimeMinuteLength;
+
+		if (g_nancy->getGameType() >= kGameTypeNancy16 && _timers.playerTime.getDays() != day) {
+			advanceDayValue();
+		}
+
+		if (_ndui) {
+			_ndui->updatePlayerTime();
+		}
 	}
 
 	updateEndOfDay();
@@ -2011,7 +2415,55 @@ void Scene::run() {
 		return;
 	}
 
-	_actionManager.processActionRecords();
+	_streams.process();
+
+	// The records a skipped cinematic set off have started by now; its dialogue
+	// shouldn't go on without it
+	if (_hasSkippedMovie) {
+		_hasSkippedMovie = false;
+		_actionManager.stopSpeechSounds();
+	}
+
+	if (_isLoadingSecondChance) {
+		_isLoadingSecondChance = false;
+		if (g_nancy->loadGameState(g_nancy->getMetaEngine()->getMaximumSaveSlot()).getCode() == Common::kNoError) {
+			return;
+		}
+
+		warning("Scene: no second chance save to go back to");
+	}
+
+	if (_ndui) {
+		_uiPrepActions.processActionRecords();
+		_ndui->update();
+
+		UI::NDUI::Manager::Request request = _ndui->takeRequest();
+		switch (request.type) {
+		case UI::NDUI::Manager::kRequestNewGame:
+			setDestroyOnExit();
+			g_nancy->setState(NancyState::kScene);
+			return;
+		case UI::NDUI::Manager::kRequestLoad:
+			if (request.slot != -1) {
+				g_nancy->loadGameState(request.slot);
+				return;
+			}
+
+			break;
+		case UI::NDUI::Manager::kRequestSave:
+			g_nancy->saveGameState(request.slot, request.name, false);
+			if (request.hasFollowUpAction) {
+				_ndui->runPendingAction();
+			}
+
+			break;
+		case UI::NDUI::Manager::kRequestQuit:
+			g_nancy->quitGame();
+			return;
+		default:
+			break;
+		}
+	}
 
 	if (_lightning) {
 		_lightning->run();
@@ -2031,7 +2483,7 @@ void Scene::run() {
 
 	g_nancy->_sound->soundEffectMaintenance();
 
-	if (_state == kLoad) {
+	if (_state == kLoad && !(_viewportFader && _viewportFader->holdsSceneChange())) {
 		g_nancy->_graphics->suppressNextDraw();
 	}
 }
@@ -2058,6 +2510,19 @@ void Scene::updateEndOfDay() {
 		setPlayerDay(_timers.playerDay + 1);
 		setEventFlag(bootSummary->endOfDayFlag, g_nancy->_false);
 	}
+}
+
+void Scene::advanceDayValue() {
+	auto *bootSummary = GetEngineData(BSUM);
+	assert(bootSummary);
+
+	TableData *playerTable = (TableData *)getPuzzleData(TableData::getTag());
+	if (!playerTable) {
+		return;
+	}
+
+	int16 day = playerTable->getValue(bootSummary->dayValueIndex);
+	playerTable->setValue(bootSummary->dayValueIndex, day == kNoTableValue ? 1 : day + 1);
 }
 
 void Scene::setPlayerDay(int16 day) {
@@ -2151,12 +2616,45 @@ bool Scene::isSoftwareTimerActive(uint16 index) const {
 		timer.state == TimerData::Timer::kRepeating;
 }
 
+int32 Scene::getSoftwareTimerState(uint16 index) const {
+	if (index >= TimerData::kNumTimers || !_puzzleData.contains(TimerData::getTag())) {
+		return TimerData::Timer::kIdle;
+	}
+
+	return ((const TimerData *)_puzzleData.getVal(TimerData::getTag()))->timers[index].state;
+}
+
 uint32 Scene::getSoftwareTimerElapsed(uint16 index) const {
 	if (index >= TimerData::kNumTimers || !_puzzleData.contains(TimerData::getTag())) {
 		return 0;
 	}
 
 	return ((const TimerData *)_puzzleData.getVal(TimerData::getTag()))->timers[index].currentTimeMs;
+}
+
+int32 Scene::getSoftwareTimerPercentLeft(uint16 index) const {
+	if (index >= TimerData::kNumTimers || !_puzzleData.contains(TimerData::getTag())) {
+		return -1;
+	}
+
+	const TimerData::Timer &timer = ((const TimerData *)_puzzleData.getVal(TimerData::getTag()))->timers[index];
+	if (timer.state == TimerData::Timer::kIdle) {
+		return -1;
+	}
+
+	for (const TimerData::Trigger &trigger : timer.triggers) {
+		if (trigger.type == TimerData::Trigger::kOneShot && trigger.hasFired) {
+			continue;
+		}
+
+		if (trigger.durationMs == 0) {
+			return -1;
+		}
+
+		return (int32)(100.0 - (double)timer.currentTimeMs / trigger.durationMs * 100.0);
+	}
+
+	return -1;
 }
 
 void Scene::fireSoftwareTimer(TimerData::Timer &timer) {
@@ -2285,8 +2783,20 @@ void Scene::handleInput() {
 		if (_activeConversation) {
 			_activeConversation->skipLine();
 		} else if (_activeMovie) {
-			_activeMovie->skip();
-		} else {
+			_hasSkippedMovie = _activeMovie->skip();
+#ifdef ENABLE_NANCY_V4
+		} else if (_scriptScene) {
+			// The movies of any stream go first, along with what is said in them.
+			// Without one, Esc ends what the characters are saying.
+			bool hasSkipped = _scriptScene->skipMovies();
+			hasSkipped |= _streams.skipMovies();
+			if (!hasSkipped) {
+				_scriptScene->skipSpeech();
+				_streams.skipSpeech();
+			}
+#endif
+		} else if (g_nancy->getGameType() <= kGameTypeNancy15) {
+			// Nancy16 has no main menu state
 			g_nancy->setState(NancyState::kMainMenu);
 			return;
 		}
@@ -2298,7 +2808,9 @@ void Scene::handleInput() {
 	// strip, so they get first crack at input — otherwise a click inside
 	// the popup that overlapped the textbox area could accidentally pick
 	// a conversation response.
-	if (g_nancy->getGameType() >= kGameTypeNancy10) {
+	if (_ndui) {
+		_ndui->handleInput(input);
+	} else if (g_nancy->getGameType() >= kGameTypeNancy10 && g_nancy->getGameType() <= kGameTypeNancy15) {
 		// Confine the cursor to whichever popup is open so the player
 		// can't drag it into the underlying scene UI.
 		const Common::Rect confine = activePopupConfinement();
@@ -2315,7 +2827,10 @@ void Scene::handleInput() {
 		_cellPhonePopup.handleInput(input);
 	}
 
-	_textbox.handleInput(input);
+	if (g_nancy->getGameType() <= kGameTypeNancy15) {
+		_textbox.handleInput(input);
+	}
+
 	if (g_nancy->getGameType() <= kGameTypeNancy9) {
 		_inventoryBox.handleInput(input);
 	}
@@ -2358,7 +2873,10 @@ void Scene::handleInput() {
 		getClock()->handleInput(input);
 	}
 
-	if (!cameraActive) {
+	// The streams in front of the main one get the input first, and may keep it
+	const bool isInputCaptured = _streams.handleInput(input, true);
+
+	if (!cameraActive && !isInputCaptured) {
 		_viewport.handleInput(input);
 	}
 
@@ -2369,8 +2887,17 @@ void Scene::handleInput() {
 		g_nancy->_sound->recalculateSoundEffects();
 	}
 
-	if (!cameraActive) {
-		_actionManager.handleInput(input);
+	if (!cameraActive && !isInputCaptured) {
+#ifdef ENABLE_NANCY_V4
+		if (_scriptScene) {
+			_scriptScene->handleInput(input);
+		} else
+#endif
+		{
+			_actionManager.handleInput(input);
+		}
+
+		_streams.handleInput(input, false);
 	}
 
 	// The whole Nancy 10+ taskbar (inventory / notebook / cell phone / MENU /
@@ -2482,6 +3009,29 @@ void Scene::handleInput() {
 }
 
 void Scene::initStaticData() {
+	// Nancy16 describes its whole UI with NDUI panels, which replace the frame,
+	// textbox, popups, taskbar and clock of the earlier games
+	if (g_nancy->getGameType() >= kGameTypeNancy16) {
+		_frame.initBlank();
+		_viewport.init();
+
+		if (g_nancy->getGameType() >= kGameTypeNancy17) {
+			_streams.clear();
+		}
+
+		initUI();
+
+		// The popups of the earlier games go unused, and must never count as open
+		_inventoryPopup.setVisible(false);
+		_notebookPopup.setVisible(false);
+		_cellPhonePopup.setVisible(false);
+		_conversationPopup.setVisible(false);
+
+		g_nancy->setMouseEnabled(true);
+		_state = kLoad;
+		return;
+	}
+
 	auto *bootSummary = GetEngineData(BSUM);
 	assert(bootSummary);
 
@@ -2572,6 +3122,149 @@ void Scene::initStaticData() {
 	}
 
 	_state = kLoad;
+}
+
+// The UI starts out empty, and gets filled with the player's items, journal and
+// task list; the records that fill the last two run again as their conditions allow
+void Scene::initUI() {
+	auto *pcui = GetEngineData(PCUI);
+	assert(pcui);
+
+	delete _ndui;
+	_ndui = new UI::NDUI::Manager();
+
+	// The UI of Nancy19 is made by the scripts of a stream of its own, which
+	// gets back to the scene once the panels are there
+	if (g_nancy->getGameType() >= kGameTypeNancy19) {
+#ifdef ENABLE_NANCY_V4
+		_isScriptedUIReady = false;
+#endif
+		// The panels are there before the first frame of the scene, which can
+		// hide some of them right away
+		_streams.begin(SceneStreamManager::getUIStreamName(), pcui->uiName.toString(), 0, StreamFlags());
+		_streams.loadNow(SceneStreamManager::getUIStreamName());
+		return;
+	}
+
+	auto *puih = GetEngineData(PUIH);
+	assert(puih);
+
+	_ndui->load(pcui->uiName.toString());
+
+	if (g_nancy->getGameType() >= kGameTypeNancy17) {
+		_ndui->createItemButtons();
+		_ndui->createPhoneBook();
+	}
+
+	showInventoryButtons();
+
+	// Nancy17 has no prep records; the script that runs when a character takes
+	// over starts the streams that fill the journal and the task list
+	_uiPrepActions.clearActionRecords();
+	if (!puih->journalPrepName.empty()) {
+		loadUIPrepRecords(puih->journalPrepName);
+		loadUIPrepRecords(puih->tasklistPrepName);
+	}
+
+	if (!puih->becomeScriptName.empty()) {
+		StreamFlags flags;
+		flags.runsFirst = true;
+		const Common::String scriptName = puih->becomeScriptName.toString();
+		_streams.begin(scriptName + "_Stream", scriptName, 0, flags);
+	}
+
+	_ndui->applyMatteColor();
+	_ndui->registerGraphics();
+}
+
+#ifdef ENABLE_NANCY_V4
+void Scene::beginPlayerScript(const Common::Path &sceneName) {
+	if (sceneName.empty()) {
+		return;
+	}
+
+	StreamFlags flags;
+	flags.runsFirst = true;
+	_streams.begin(sceneName.toString() + "_Stream", sceneName.toString(), 0, flags);
+}
+
+bool Scene::receiveMessage(const Script::Message &message, bool &wasTaken) {
+	if (_streams.isEmpty()) {
+		return receiveMainSceneMessage(message, wasTaken);
+	}
+
+	return _streams.receiveMessage(message, wasTaken);
+}
+
+bool Scene::receiveMainSceneMessage(const Script::Message &message, bool &wasTaken) {
+	wasTaken = false;
+	return _scriptScene && _scriptScene->receiveMessage(message, wasTaken);
+}
+
+void Scene::onScriptedUILoaded() {
+	_ndui->createItemButtons();
+	Script::showPlayerEntries();
+
+	showInventoryButtons();
+
+	_ndui->restoreState(((UIStateData *)getPuzzleData(UIStateData::getTag()))->changes);
+	_ndui->applyMatteColor();
+
+	// The character being played takes over now that there is a UI to fill
+	_isScriptedUIReady = true;
+
+	const ScriptBootData *boot = (const ScriptBootData *)g_nancy->getEngineData("ScriptBootData");
+	if (boot && g_nancy->getPlayerCharacter() < boot->players.size()) {
+		beginPlayerScript(boot->players[g_nancy->getPlayerCharacter()].becomeSceneName);
+	}
+}
+#endif
+
+void Scene::loadUIPrepRecords(const Common::Path &name) {
+	IFF *iff = g_nancy->_resource->loadIFF(name);
+	if (!iff) {
+		error("Failed to load IFF %s", name.toString().c_str());
+	}
+
+	Common::SeekableReadStream *chunk = nullptr;
+	for (uint i = 0; chunk = iff->getChunkStream("ACT", i), chunk != nullptr; ++i) {
+		_uiPrepActions.addNewActionRecord(*chunk);
+		delete chunk;
+	}
+
+	delete iff;
+}
+
+void Scene::setMoviePlaylist(const Common::String &name, const Common::Array<Common::String> &movies) {
+	_moviePlaylists.setVal(name, movies);
+}
+
+bool Scene::takeMoviePlaylist(const Common::String &name, Common::Array<Common::String> &movies) {
+	if (!_moviePlaylists.contains(name)) {
+		return false;
+	}
+
+	movies = _moviePlaylists[name];
+	_moviePlaylists.erase(name);
+	return true;
+}
+
+void Scene::viewInventoryItem(int16 itemID) {
+	removeItemFromInventory(itemID, false);
+
+	if (_sceneState.pushedInvItemID == -1) {
+		pushScene();
+	} else {
+		addItemToInventory(_sceneState.pushedInvItemID);
+	}
+
+	_sceneState.pushedInvItemID = itemID;
+}
+
+void Scene::returnViewedInventoryItem() {
+	int16 itemID = _sceneState.pushedInvItemID;
+	_sceneState.pushedInvItemID = -1;
+	addItemToInventory(itemID);
 }
 
 void Scene::clearSceneData(bool nextIsNoArt) {

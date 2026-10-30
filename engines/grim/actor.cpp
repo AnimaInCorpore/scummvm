@@ -94,7 +94,7 @@ Actor::Actor() :
 		_puckOrient(false), _talking(false),
 		_inOverworld(false), _drawnToClean(false), _backgroundTalk(false),
 		_sortOrder(0), _useParentSortOrder(false),
-		_sectorSortOrder(-1), _fakeUnbound(false), _lightMode(LightFastDyn),
+		_sectorSortOrder(0), _hasSectorSortOrder(false), _fakeUnbound(false), _lightMode(LightFastDyn),
 		_hasFollowedBoxes(false), _lookAtActor(0) {
 
 	// Some actors don't set walk and turn rates, so we default the
@@ -436,7 +436,8 @@ bool Actor::restoreState(SaveGame *savedState) {
 		_attachedJoint = savedState->readString();
 
 		// will be recalculated in next update()
-		_sectorSortOrder = -1;
+		_sectorSortOrder = 0;
+		_hasSectorSortOrder = false;
 
 		if (savedState->saveMinorVersion() < 24) {
 			// Used to be the wear chore.
@@ -565,7 +566,7 @@ bool Actor::singleTurnTo(const Math::Vector3d &pos) {
 	Math::Angle y, p, r;
 	calculateOrientation(pos, &p, &y, &r);
 
-	float turnAmt = g_grim->getPerSecond(_turnRate);
+	float turnAmt = g_grim->getPerSecond(_turnRate) * _timeScale;
 	bool done = animTurn(turnAmt, y, &_yaw) == 0;
 	done = animTurn(turnAmt, p, &_pitch) == 0 && done;
 	done = animTurn(turnAmt, r, &_roll) == 0 && done;
@@ -797,11 +798,12 @@ void Actor::moveTo(const Math::Vector3d &pos) {
 }
 
 void Actor::walkForward() {
-	float dist = g_grim->getPerSecond(_walkRate);
+	float dist = g_grim->getPerSecond(_walkRate) * _timeScale;
 	// Limit the amount of the movement per frame, otherwise with low fps
 	// scripts that use WalkActorForward and proximity may break.
-	if ((dist > 0 && dist > _walkRate / 5.f) || (dist < 0 && dist < _walkRate / 5.f))
-		dist = _walkRate / 5.f;
+	const float maxDist = _walkRate / 5.f * _timeScale;
+	if ((dist > 0 && dist > maxDist) || (dist < 0 && dist < maxDist))
+		dist = maxDist;
 
 	// Handle special case where actor is trying to walk but _walkRate is
 	// currently set to 0.0f by _walkChore to simulate roboter-like walk style:
@@ -1102,7 +1104,7 @@ void Actor::stopAllChores(bool ignoreLoopingChores) {
 
 void Actor::turn(int dir) {
 	_walking = false;
-	float delta = g_grim->getPerSecond(_turnRate) * dir;
+	float delta = g_grim->getPerSecond(_turnRate) * dir * _timeScale;
 	if (g_grim->getGameType() == GType_MONKEY4) {
 		delta = -delta;
 	}
@@ -1504,7 +1506,7 @@ void Actor::updateWalk() {
 	float dist = dir.getMagnitude();
 
 	_walkedCur = true;
-	float walkAmt = g_grim->getPerSecond(_walkRate);
+	float walkAmt = g_grim->getPerSecond(_walkRate) * _timeScale;
 	if (walkAmt >= dist) {
 		walkAmt = dist;
 		_path.pop_back();
@@ -1538,18 +1540,21 @@ void Actor::update(uint frameTime) {
 		if (_followBoxes) {
 			// Check for sort order information in the current sector
 			int oldSortOrder = getEffectiveSortOrder();
-			_sectorSortOrder = set->findSectorSortOrder(_pos, Sector::WalkType);
+			Common::Pair<bool, int> sortInfo = set->findSectorSortOrder(_pos, Sector::WalkType);
+			_hasSectorSortOrder = sortInfo.first;
+			_sectorSortOrder = sortInfo.second;
 
 			if (oldSortOrder != getEffectiveSortOrder())
 				g_emi->invalidateSortOrder();
-		} else if (_sectorSortOrder >= 0) {
-			_sectorSortOrder = -1;
+		} else if (_hasSectorSortOrder) {
+			_hasSectorSortOrder = false;
+			_sectorSortOrder = 0;
 			g_emi->invalidateSortOrder();
 		}
 	}
 
 	if (_turning) {
-		float turnAmt = g_grim->getPerSecond(_turnRate) * _turnRateMultiplier;
+		float turnAmt = g_grim->getPerSecond(_turnRate) * _turnRateMultiplier * _timeScale;
 		_currTurnDir = animTurn(turnAmt, _moveYaw, &_yaw);
 		if (g_grim->getGameType() == GType_MONKEY4) {
 			_currTurnDir = -_currTurnDir;
@@ -2399,7 +2404,7 @@ int Actor::getEffectiveSortOrder() const {
 		Actor *attachedActor = Actor::getPool().getObject(_attachedActor);
 		return attachedActor->getEffectiveSortOrder();
 	}
-	return _sectorSortOrder >= 0 ? _sectorSortOrder : getSortOrder();
+	return _hasSectorSortOrder ? _sectorSortOrder : getSortOrder();
 }
 
 void Actor::activateShadow(bool active, const char *shadowName) {
